@@ -16,16 +16,26 @@
  * Query parameters (for search):
  *   lat=<number>          : User's latitude (required)
  *   lng=<number>          : User's longitude (required)
- *   limit=<number>        : Maximum number of results (optional, default: 10, max: 50)
+ *   limit=<number>        : Maximum number of results (optional, default: 10, max: 50 without bounds, max: 200 with bounds)
  *   status=<string>       : Filter by store status (optional, default: "Contacted")
  *                           Valid values: "Contacted", "Research", "Partnered", "Rejected", or any status value
  *                           Use empty string "" or omit parameter to show all statuses
+ *   ne_lat=<number>       : Northeast latitude bound (optional, for map viewport filtering)
+ *   ne_lng=<number>       : Northeast longitude bound (optional, for map viewport filtering)
+ *   sw_lat=<number>       : Southwest latitude bound (optional, for map viewport filtering)
+ *   sw_lng=<number>       : Southwest longitude bound (optional, for map viewport filtering)
+ *                           When all four bounds parameters are provided, only stores within the bounds are returned
+ *   shop_type=<string>    : Filter by shop type (optional)
+ *                           Valid values: "Metaphysical/Spiritual", "Wellness Center", "Health Food Store", etc.
+ *                           Use empty string "" or omit parameter to show all shop types
  * 
  * Query parameters (for status update):
  *   action=update_status     : Action to update store status
  *   shop_name=<string>       : Name of the shop to update (required)
  *   new_status=<string>      : New status value (required)
  *                              Valid values: "Contacted", "Research", "Partnered", "Rejected", or any status value
+ *   shop_type=<string>       : New shop type value (optional)
+ *                              Valid values: "Metaphysical/Spiritual", "Wellness Center", "Health Food Store", etc.
  *   digital_signature=<string> : Digital signature (public key) of the person making the change (optional but recommended for audit trail)
  * 
  * Response format:
@@ -155,17 +165,57 @@ function createStoreKey_(name, address, city, state) {
 }
 
 /**
+ * Check if a point is within bounds
+ * @param {number} lat - Latitude to check
+ * @param {number} lng - Longitude to check
+ * @param {number} neLat - Northeast latitude bound
+ * @param {number} neLng - Northeast longitude bound
+ * @param {number} swLat - Southwest latitude bound
+ * @param {number} swLng - Southwest longitude bound
+ * @return {boolean} True if point is within bounds
+ */
+function isWithinBounds(lat, lng, neLat, neLng, swLat, swLng) {
+  // Handle longitude wrapping (crossing the 180/-180 meridian)
+  if (neLng < swLng) {
+    // Bounds cross the date line
+    return lat >= swLat && lat <= neLat && (lng >= swLng || lng <= neLng);
+  } else {
+    // Normal case
+    return lat >= swLat && lat <= neLat && lng >= swLng && lng <= neLng;
+  }
+}
+
+/**
  * Find nearby stores from the spreadsheet
  * @param {number} userLat - User's latitude
  * @param {number} userLng - User's longitude
  * @param {number} limit - Maximum number of results (default: 10)
- * @param {string|null} statusFilter - Filter by store status (default: "Contacted"). Use null to show all statuses
+ * @param {Array<string>|null} statusFilters - Filter by store status(es) (default: ["Contacted"]). Use null or empty array to show all statuses
+ * @param {Object|null} bounds - Optional bounds object with neLat, neLng, swLat, swLng to filter stores by visible area
+ * @param {Array<string>|null} shopTypeFilters - Filter by shop type(s) (optional). Use null or empty array to show all shop types
  * @return {Array} Array of store objects with distance
  */
-function findNearbyStores(userLat, userLng, limit, statusFilter) {
-  // Default statusFilter to "Contacted" if not provided
-  if (statusFilter === undefined) {
-    statusFilter = "Contacted";
+function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTypeFilters) {
+  // Default statusFilters to ["Contacted"] if not provided (but null or empty array means show all)
+  if (statusFilters === undefined || statusFilters === null) {
+    statusFilters = ["Contacted"];
+  }
+  // If statusFilters is empty array, it means show all statuses
+  if (Array.isArray(statusFilters) && statusFilters.length === 0) {
+    statusFilters = null;
+  }
+  // Convert single value to array for consistency
+  if (!Array.isArray(statusFilters) && statusFilters !== null) {
+    statusFilters = [statusFilters];
+  }
+  
+  // Handle shopTypeFilters similarly
+  if (shopTypeFilters !== undefined && shopTypeFilters !== null) {
+    if (Array.isArray(shopTypeFilters) && shopTypeFilters.length === 0) {
+      shopTypeFilters = null;
+    } else if (!Array.isArray(shopTypeFilters)) {
+      shopTypeFilters = [shopTypeFilters];
+    }
   }
   try {
     // Open the spreadsheet
@@ -186,6 +236,8 @@ function findNearbyStores(userLat, userLng, limit, statusFilter) {
     const headers = data[0];
     const shopNameIdx = headers.indexOf("Shop Name");
     const statusIdx = headers.indexOf("Status");
+    const latIdx = headers.indexOf("Latitude");
+    const lngIdx = headers.indexOf("Longitude");
     const salesNotesIdx = headers.indexOf("Sales Process Notes");
     const addressIdx = headers.indexOf("Address");
     const cityIdx = headers.indexOf("City");
@@ -195,6 +247,10 @@ function findNearbyStores(userLat, userLng, limit, statusFilter) {
     const emailIdx = headers.indexOf("Email");
     const instagramIdx = headers.indexOf("Instagram");
     const shopTypeIdx = headers.indexOf("Shop Type");
+    
+    if (shopNameIdx === -1 || statusIdx === -1 || latIdx === -1 || lngIdx === -1) {
+      throw new Error("Required columns not found in sheet");
+    }
     const priorityIdx = headers.indexOf("Priority");
     const notesIdx = headers.indexOf("Notes");
     const contactDateIdx = headers.indexOf("Contact Date");
@@ -207,18 +263,15 @@ function findNearbyStores(userLat, userLng, limit, statusFilter) {
     const followUpEventLinkIdx = headers.indexOf("Follow Up Event Link");
     const visitDateIdx = headers.indexOf("Visit Date");
     const outcomeIdx = headers.indexOf("Outcome");
-    const latIdx = headers.indexOf("Latitude");
-    const lngIdx = headers.indexOf("Longitude");
     
-    if (shopNameIdx === -1 || statusIdx === -1 || latIdx === -1 || lngIdx === -1) {
-      throw new Error("Required columns not found in sheet");
-    }
-    
-    // Process rows and filter by status
+    // Process rows and filter by status and shop type
     const stores = [];
     
     // Log filtering info for debugging
     Logger.log("Filtering stores with statusFilter: " + statusFilter + " (type: " + typeof statusFilter + ")");
+    if (shopTypeFilter) {
+      Logger.log("Filtering stores with shopTypeFilter: " + shopTypeFilter);
+    }
     
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
@@ -227,15 +280,31 @@ function findNearbyStores(userLat, userLng, limit, statusFilter) {
       const status = row[statusIdx];
       const rowStatus = status ? String(status).trim() : "";
       
-      // Apply status filter (if statusFilter is null, show all stores regardless of status)
-      if (statusFilter !== null && statusFilter !== undefined) {
-        // We have a filter, so only include stores that match
-        const filterStatus = String(statusFilter).trim();
-        if (rowStatus !== filterStatus) {
-          continue; // Skip this store - it doesn't match the filter
+      // Apply status filter(s) (if statusFilters is null, show all stores regardless of status)
+      if (statusFilters !== null && statusFilters !== undefined && statusFilters.length > 0) {
+        // Check if row status matches any of the selected status filters
+        const matchesStatus = statusFilters.some(filterStatus => {
+          const trimmedFilter = String(filterStatus).trim();
+          return rowStatus === trimmedFilter;
+        });
+        if (!matchesStatus) {
+          continue; // Skip this store - it doesn't match any of the selected status filters
         }
       }
-      // If statusFilter is null, we show all stores (no filtering)
+      // If statusFilters is null or empty, we show all stores (no filtering)
+      
+      // Apply shop type filter(s) if provided
+      if (shopTypeFilters !== null && shopTypeFilters !== undefined && shopTypeFilters.length > 0) {
+        const rowShopType = shopTypeIdx >= 0 ? (row[shopTypeIdx] ? String(row[shopTypeIdx]).trim() : "") : "";
+        // Check if row shop type matches any of the selected shop type filters
+        const matchesShopType = shopTypeFilters.some(filterShopType => {
+          const trimmedFilter = String(filterShopType).trim();
+          return rowShopType === trimmedFilter;
+        });
+        if (!matchesShopType) {
+          continue; // Skip this store - it doesn't match any of the selected shop type filters
+        }
+      }
       
       // Get coordinates
       const latStr = row[latIdx];
@@ -257,6 +326,14 @@ function findNearbyStores(userLat, userLng, limit, statusFilter) {
         }
       } catch (e) {
         continue;
+      }
+      
+      // Filter by bounds FIRST if provided (for map viewport filtering)
+      // This is more efficient - check bounds before calculating distance
+      if (bounds && bounds.neLat !== null && bounds.neLng !== null && bounds.swLat !== null && bounds.swLng !== null) {
+        if (!isWithinBounds(storeLat, storeLng, bounds.neLat, bounds.neLng, bounds.swLat, bounds.swLng)) {
+          continue; // Store is outside the visible bounds
+        }
       }
       
       // Calculate distance
@@ -364,13 +441,16 @@ function logDappSubmission_(spreadsheet, shopName, status, remarks, submittedBy,
 }
 
 /**
- * Update store status in the spreadsheet
+ * Update store status and/or shop type in the spreadsheet
  * @param {string} shopName - Name of the shop to update
  * @param {string} newStatus - New status value
  * @param {string} digitalSignature - Digital signature (public key) of the person making the change
+ * @param {string} remarks - Optional remarks
+ * @param {string} submittedBy - Optional submitted by identifier
+ * @param {string} newShopType - Optional new shop type value
  * @return {Object} Result object with success/error
  */
-function updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submittedBy) {
+function updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submittedBy, newShopType) {
   try {
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = spreadsheet.getSheetByName(SHEET_NAME);
@@ -389,6 +469,7 @@ function updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submi
     const headers = data[0];
     const shopNameIdx = headers.indexOf("Shop Name");
     const statusIdx = headers.indexOf("Status");
+    const shopTypeIdx = headers.indexOf("Shop Type");
     const salesNotesIdx = headers.indexOf("Sales Process Notes");
     
     // Find or create "Status Updated By" column
@@ -423,6 +504,21 @@ function updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submi
         
         // Update status
         sheet.getRange(rowNum, statusIdx + 1).setValue(newStatus);
+        
+        // Update shop type if provided
+        if (newShopType && newShopType !== null && newShopType !== undefined && newShopType !== "") {
+          if (shopTypeIdx === -1) {
+            // Shop Type column doesn't exist, add it
+            const lastCol = headers.length;
+            sheet.getRange(1, lastCol + 1).setValue("Shop Type");
+            const newShopTypeIdx = lastCol;
+            sheet.getRange(rowNum, newShopTypeIdx + 1).setValue(newShopType);
+            Logger.log("Created 'Shop Type' column and updated value");
+          } else {
+            sheet.getRange(rowNum, shopTypeIdx + 1).setValue(newShopType);
+            Logger.log(`Updated shop type for "${shopName}" to "${newShopType}"`);
+          }
+        }
         
         // Update digital signature (public key)
         const submittedValue = digitalSignature || submittedBy || "";
@@ -571,6 +667,7 @@ function addNewStore(storeData) {
   setValue('State', storeData.state || '');
   setValue('Shop Type', storeData.shopType || '');
   setValue('Phone', storeData.phone || '');
+  setValue('Email', storeData.email || '');
   setValue('Website', storeData.website || '');
   setValue('Instagram', storeData.instagram || '');
   setValue('Notes', baseNote);
@@ -620,6 +717,7 @@ function doGet(e) {
         city: (e.parameter.city || '').trim(),
         state: (e.parameter.state || '').trim(),
         phone: (e.parameter.phone || '').trim(),
+        email: (e.parameter.email || '').trim(),
         website: (e.parameter.website || '').trim(),
         instagram: (e.parameter.instagram || '').trim(),
         shopType: (e.parameter.shop_type || '').trim(),
@@ -660,6 +758,7 @@ function doGet(e) {
     if (e.parameter.action === 'update_status') {
       const shopName = e.parameter.shop_name;
       const newStatus = e.parameter.new_status;
+      const newShopType = e.parameter.shop_type || '';
       const digitalSignature = e.parameter.digital_signature || e.parameter.signature || e.parameter.public_key;                                                
       const remarks = e.parameter.remarks || '';
       const submittedBy = e.parameter.submitted_by || digitalSignature || '';
@@ -674,8 +773,8 @@ function doGet(e) {
           .setMimeType(ContentService.MimeType.JSON);
       }
       
-      // Update the status (digitalSignature is optional but recommended)
-      const result = updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submittedBy);
+      // Update the status and/or shop type (digitalSignature is optional but recommended)
+      const result = updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submittedBy, newShopType);
       
       return ContentService
         .createTextOutput(JSON.stringify({
@@ -691,20 +790,71 @@ function doGet(e) {
     const lat = parseFloat(e.parameter.lat || e.parameter.latitude);
     const lng = parseFloat(e.parameter.lng || e.parameter.longitude);
     const limit = parseInt(e.parameter.limit || "10");
-    // Handle status filter: if not provided, default to "Contacted"; if empty string, show all
-    let statusFilter = null;
+    // Handle status filter: can be single value or array of values
+    let statusFilters = null;
     if (e.parameter.status !== undefined && e.parameter.status !== null) {
-      // If status is empty string, set to null to show all
-      if (e.parameter.status === "" || e.parameter.status === "All") {
-        statusFilter = null;
+      // Check if it's an array (multiple status parameters)
+      if (Array.isArray(e.parameter.status)) {
+        // Filter out empty strings
+        const filtered = e.parameter.status.filter(s => s !== "" && s !== "All");
+        if (filtered.length > 0) {
+          statusFilters = filtered;
+        }
       } else {
-        statusFilter = e.parameter.status;
+        // Single value
+        if (e.parameter.status === "" || e.parameter.status === "All") {
+          statusFilters = null; // Show all
+        } else {
+          statusFilters = [e.parameter.status];
+        }
       }
     } else {
-      statusFilter = "Contacted"; // Default if not provided
+      statusFilters = ["Contacted"]; // Default if not provided
     }
     
-    Logger.log("Status filter: " + statusFilter + " (type: " + typeof statusFilter + ")");
+    // Get bounds parameters (optional, for map viewport filtering)
+    let bounds = null;
+    const neLat = e.parameter.ne_lat ? parseFloat(e.parameter.ne_lat) : null;
+    const neLng = e.parameter.ne_lng ? parseFloat(e.parameter.ne_lng) : null;
+    const swLat = e.parameter.sw_lat ? parseFloat(e.parameter.sw_lat) : null;
+    const swLng = e.parameter.sw_lng ? parseFloat(e.parameter.sw_lng) : null;
+    
+    // Only use bounds if all four values are provided and valid
+    if (neLat !== null && neLng !== null && swLat !== null && swLng !== null &&
+        !isNaN(neLat) && !isNaN(neLng) && !isNaN(swLat) && !isNaN(swLng)) {
+      bounds = {
+        neLat: neLat,
+        neLng: neLng,
+        swLat: swLat,
+        swLng: swLng
+      };
+    }
+    
+    // Get shop type filter: can be single value or array of values
+    let shopTypeFilters = null;
+    if (e.parameter.shop_type !== undefined && e.parameter.shop_type !== null) {
+      // Check if it's an array (multiple shop_type parameters)
+      if (Array.isArray(e.parameter.shop_type)) {
+        // Filter out empty strings
+        const filtered = e.parameter.shop_type.filter(s => s !== "" && s !== "All");
+        if (filtered.length > 0) {
+          shopTypeFilters = filtered;
+        }
+      } else {
+        // Single value
+        if (e.parameter.shop_type !== "") {
+          shopTypeFilters = [e.parameter.shop_type];
+        }
+      }
+    }
+    
+    Logger.log("Status filters: " + JSON.stringify(statusFilters));
+    if (shopTypeFilters) {
+      Logger.log("Shop type filters: " + JSON.stringify(shopTypeFilters));
+    }
+    if (bounds) {
+      Logger.log("Bounds filter: NE(" + bounds.neLat + "," + bounds.neLng + ") SW(" + bounds.swLat + "," + bounds.swLng + ")");
+    }
     
     // Validate parameters
     if (isNaN(lat) || isNaN(lng)) {
@@ -717,25 +867,28 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
     
-    if (isNaN(limit) || limit < 1 || limit > 50) {
+    // Allow higher limit when bounds are provided (for expanded map view)
+    const maxLimit = bounds ? 200 : 50;
+    if (isNaN(limit) || limit < 1 || limit > maxLimit) {
       return ContentService
         .createTextOutput(JSON.stringify({
           success: false,
           error: "Invalid limit",
-          message: "limit must be a number between 1 and 50"
+          message: "limit must be a number between 1 and " + maxLimit
         }))
         .setMimeType(ContentService.MimeType.JSON);
     }
     
     // Find nearby stores
-    const stores = findNearbyStores(lat, lng, limit, statusFilter);
+    const stores = findNearbyStores(lat, lng, limit, statusFilters, bounds, shopTypeFilters);
     
     // Return JSON response
     return ContentService
       .createTextOutput(JSON.stringify({
         success: true,
         location: { latitude: lat, longitude: lng },
-        status_filter: statusFilter || "All",
+        status_filters: statusFilters || [],
+        shop_type_filters: shopTypeFilters || [],
         count: stores.length,
         stores: stores
       }))
