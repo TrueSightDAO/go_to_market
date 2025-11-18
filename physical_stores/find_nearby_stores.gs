@@ -196,26 +196,23 @@ function isWithinBounds(lat, lng, neLat, neLng, swLat, swLng) {
  * @return {Array} Array of store objects with distance
  */
 function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTypeFilters) {
-  // Default statusFilters to ["Contacted"] if not provided (but null or empty array means show all)
+  // If statusFilters is null, undefined, or empty array, it means show all statuses
   if (statusFilters === undefined || statusFilters === null) {
-    statusFilters = ["Contacted"];
-  }
-  // If statusFilters is empty array, it means show all statuses
-  if (Array.isArray(statusFilters) && statusFilters.length === 0) {
-    statusFilters = null;
-  }
-  // Convert single value to array for consistency
-  if (!Array.isArray(statusFilters) && statusFilters !== null) {
+    statusFilters = null; // Show all
+  } else if (Array.isArray(statusFilters) && statusFilters.length === 0) {
+    statusFilters = null; // Show all
+  } else if (!Array.isArray(statusFilters)) {
+    // Convert single value to array for consistency
     statusFilters = [statusFilters];
   }
   
-  // Handle shopTypeFilters similarly
-  if (shopTypeFilters !== undefined && shopTypeFilters !== null) {
-    if (Array.isArray(shopTypeFilters) && shopTypeFilters.length === 0) {
-      shopTypeFilters = null;
-    } else if (!Array.isArray(shopTypeFilters)) {
-      shopTypeFilters = [shopTypeFilters];
-    }
+  // Handle shopTypeFilters similarly - null or empty means show all
+  if (shopTypeFilters === undefined || shopTypeFilters === null) {
+    shopTypeFilters = null; // Show all
+  } else if (Array.isArray(shopTypeFilters) && shopTypeFilters.length === 0) {
+    shopTypeFilters = null; // Show all
+  } else if (!Array.isArray(shopTypeFilters)) {
+    shopTypeFilters = [shopTypeFilters];
   }
   try {
     // Open the spreadsheet
@@ -268,9 +265,9 @@ function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTy
     const stores = [];
     
     // Log filtering info for debugging
-    Logger.log("Filtering stores with statusFilter: " + statusFilter + " (type: " + typeof statusFilter + ")");
-    if (shopTypeFilter) {
-      Logger.log("Filtering stores with shopTypeFilter: " + shopTypeFilter);
+    Logger.log("Filtering stores with statusFilters: " + JSON.stringify(statusFilters) + " (type: " + typeof statusFilters + ")");
+    if (shopTypeFilters) {
+      Logger.log("Filtering stores with shopTypeFilters: " + JSON.stringify(shopTypeFilters));
     }
     
     for (let i = 1; i < data.length; i++) {
@@ -331,8 +328,11 @@ function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTy
       // Filter by bounds FIRST if provided (for map viewport filtering)
       // This is more efficient - check bounds before calculating distance
       if (bounds && bounds.neLat !== null && bounds.neLng !== null && bounds.swLat !== null && bounds.swLng !== null) {
-        if (!isWithinBounds(storeLat, storeLng, bounds.neLat, bounds.neLng, bounds.swLat, bounds.swLng)) {
-          continue; // Store is outside the visible bounds
+        const withinBounds = isWithinBounds(storeLat, storeLng, bounds.neLat, bounds.neLng, bounds.swLat, bounds.swLng);
+        if (!withinBounds) {
+          // Store is outside the visible bounds - skip it
+          // Logger.log('Skipping store outside bounds: ' + storeName + ' at (' + storeLat + ', ' + storeLng + ')');
+          continue;
         }
       }
       
@@ -791,25 +791,32 @@ function doGet(e) {
     const lng = parseFloat(e.parameter.lng || e.parameter.longitude);
     const limit = parseInt(e.parameter.limit || "10");
     // Handle status filter: can be single value or array of values
+    // Parse query string manually to get all values when parameter appears multiple times
     let statusFilters = null;
-    if (e.parameter.status !== undefined && e.parameter.status !== null) {
-      // Check if it's an array (multiple status parameters)
-      if (Array.isArray(e.parameter.status)) {
-        // Filter out empty strings
-        const filtered = e.parameter.status.filter(s => s !== "" && s !== "All");
-        if (filtered.length > 0) {
-          statusFilters = filtered;
-        }
+    const queryString = e.queryString || "";
+    const statusMatches = [];
+    
+    // Extract all status parameter values from query string
+    const statusRegex = /[&?]status=([^&]*)/g;
+    let match;
+    while ((match = statusRegex.exec(queryString)) !== null) {
+      const value = decodeURIComponent(match[1].replace(/\+/g, ' '));
+      if (value && value !== "" && value !== "All") {
+        statusMatches.push(value);
+      }
+    }
+    
+    if (statusMatches.length > 0) {
+      statusFilters = statusMatches;
+    } else if (e.parameter.status !== undefined && e.parameter.status !== null) {
+      // Fallback to e.parameter for single value (backward compatibility)
+      if (e.parameter.status === "" || e.parameter.status === "All") {
+        statusFilters = null; // Show all
       } else {
-        // Single value
-        if (e.parameter.status === "" || e.parameter.status === "All") {
-          statusFilters = null; // Show all
-        } else {
-          statusFilters = [e.parameter.status];
-        }
+        statusFilters = [e.parameter.status];
       }
     } else {
-      statusFilters = ["Contacted"]; // Default if not provided
+      statusFilters = null; // Default to showing all if not provided
     }
     
     // Get bounds parameters (optional, for map viewport filtering)
@@ -831,21 +838,31 @@ function doGet(e) {
     }
     
     // Get shop type filter: can be single value or array of values
+    // Parse query string manually to get all values when parameter appears multiple times
     let shopTypeFilters = null;
-    if (e.parameter.shop_type !== undefined && e.parameter.shop_type !== null) {
-      // Check if it's an array (multiple shop_type parameters)
-      if (Array.isArray(e.parameter.shop_type)) {
-        // Filter out empty strings
-        const filtered = e.parameter.shop_type.filter(s => s !== "" && s !== "All");
-        if (filtered.length > 0) {
-          shopTypeFilters = filtered;
-        }
-      } else {
-        // Single value
-        if (e.parameter.shop_type !== "") {
-          shopTypeFilters = [e.parameter.shop_type];
-        }
+    const shopTypeMatches = [];
+    
+    // Extract all shop_type parameter values from query string
+    const shopTypeRegex = /[&?]shop_type=([^&]*)/g;
+    match = null;
+    while ((match = shopTypeRegex.exec(queryString)) !== null) {
+      const value = decodeURIComponent(match[1].replace(/\+/g, ' '));
+      if (value && value !== "" && value !== "All") {
+        shopTypeMatches.push(value);
       }
+    }
+    
+    if (shopTypeMatches.length > 0) {
+      shopTypeFilters = shopTypeMatches;
+    } else if (e.parameter.shop_type !== undefined && e.parameter.shop_type !== null) {
+      // Fallback to e.parameter for single value (backward compatibility)
+      if (e.parameter.shop_type !== "" && e.parameter.shop_type !== "All") {
+        shopTypeFilters = [e.parameter.shop_type];
+      } else {
+        shopTypeFilters = null; // Show all
+      }
+    } else {
+      shopTypeFilters = null; // Default to showing all if not provided
     }
     
     Logger.log("Status filters: " + JSON.stringify(statusFilters));
