@@ -33,11 +33,12 @@ SCOPES = [
 
 
 def get_google_sheets_client() -> gspread.Client:
-    creds_path = Path(__file__).parent / "google_credentials.json"
+    # Look for credentials in parent directory (repository root)
+    creds_path = Path(__file__).parent.parent / "google_credentials.json"
     if not creds_path.exists():
         raise FileNotFoundError(
             f"Google credentials not found at {creds_path}. "
-            "Please add google_credentials.json with service account credentials."
+            "Please add google_credentials.json with service account credentials in the repository root."
         )
 
     creds = Credentials.from_service_account_file(

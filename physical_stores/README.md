@@ -44,10 +44,29 @@ This directory contains all tools, scripts, and documentation for managing physi
 
 ## 🔧 Key Scripts
 
-### `pull_hit_list.py`
-Pull the latest Hit List from Google Sheets to local CSV:
+### `backup_hit_list_and_remarks.py`
+**Recommended:** Backup both Hit List and DApp Remarks from Google Sheets to local CSV files:
 ```bash
 cd physical_stores
+source ../venv/bin/activate  # Activate virtual environment
+python3 backup_hit_list_and_remarks.py
+```
+
+This script downloads:
+- **Hit List** - Main store database with status, contact info, notes
+- **DApp Remarks** - Status updates and remarks from stores_nearby.html DApp
+
+Files are saved to:
+- `data/hit_list.csv`
+- `data/dapp_remarks.csv`
+
+Existing files are automatically backed up with timestamps before overwriting.
+
+### `pull_hit_list.py`
+Pull the latest Hit List from Google Sheets to local CSV (Hit List only):
+```bash
+cd physical_stores
+source ../venv/bin/activate  # Activate virtual environment
 python3 pull_hit_list.py
 ```
 
