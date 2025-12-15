@@ -65,3 +65,8 @@ github_secret_credentials.txt
 
 # Feedback processing files
 community_feedback.csv
+
+# Raw data folders
+**/raw/
+raw/
+online_content/agroverse_shop/**/raw/
