@@ -255,6 +255,7 @@ function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTy
     const followUpDateIdx = headers.indexOf("Follow Up Date");
     const contactPersonIdx = headers.indexOf("Contact Person");
     const ownerNameIdx = headers.indexOf("Owner Name");
+    const cellPhoneIdx = headers.indexOf("Cell Phone");
     const referralIdx = headers.indexOf("Referral");
     const productInterestIdx = headers.indexOf("Product Interest");
     const followUpEventLinkIdx = headers.indexOf("Follow Up Event Link");
@@ -346,6 +347,7 @@ function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTy
         city: cityIdx >= 0 ? (row[cityIdx] || "") : "",
         state: stateIdx >= 0 ? (row[stateIdx] || "") : "",
         phone: phoneIdx >= 0 ? (row[phoneIdx] || "") : "",
+        cell_phone: cellPhoneIdx >= 0 ? (row[cellPhoneIdx] || "") : "",
         website: websiteIdx >= 0 ? (row[websiteIdx] || "") : "",
         email: emailIdx >= 0 ? (row[emailIdx] || "") : "",
         instagram: instagramIdx >= 0 ? (row[instagramIdx] || "") : "",
@@ -448,9 +450,20 @@ function logDappSubmission_(spreadsheet, shopName, status, remarks, submittedBy,
  * @param {string} remarks - Optional remarks
  * @param {string} submittedBy - Optional submitted by identifier
  * @param {string} newShopType - Optional new shop type value
+ * @param {string} newInstagram - Optional new Instagram URL value
+ * @param {string} ownerName - Optional owner name value
+ * @param {string} contactPerson - Optional contact person value
+ * @param {string} email - Optional email value
+ * @param {string} cellPhone - Optional cell phone value
+ * @param {string} phone - Optional phone value
+ * @param {string} website - Optional website value
+ * @param {string} followUpDate - Optional follow up date value
+ * @param {string} visitDate - Optional visit date value
+ * @param {string} contactDate - Optional contact date value
+ * @param {string} contactMethod - Optional contact method value
  * @return {Object} Result object with success/error
  */
-function updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submittedBy, newShopType) {
+function updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submittedBy, newShopType, newInstagram, ownerName, contactPerson, email, cellPhone, phone, website, followUpDate, visitDate, contactDate, contactMethod) {
   try {
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = spreadsheet.getSheetByName(SHEET_NAME);
@@ -470,6 +483,17 @@ function updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submi
     const shopNameIdx = headers.indexOf("Shop Name");
     const statusIdx = headers.indexOf("Status");
     const shopTypeIdx = headers.indexOf("Shop Type");
+    const instagramIdx = headers.indexOf("Instagram");
+    const ownerNameIdx = headers.indexOf("Owner Name");
+    const contactPersonIdx = headers.indexOf("Contact Person");
+    const emailIdx = headers.indexOf("Email");
+    const cellPhoneIdx = headers.indexOf("Cell Phone");
+    const phoneIdx = headers.indexOf("Phone");
+    const websiteIdx = headers.indexOf("Website");
+    const followUpDateIdx = headers.indexOf("Follow Up Date");
+    const visitDateIdx = headers.indexOf("Visit Date");
+    const contactDateIdx = headers.indexOf("Contact Date");
+    const contactMethodIdx = headers.indexOf("Contact Method");
     const salesNotesIdx = headers.indexOf("Sales Process Notes");
     
     // Find or create "Status Updated By" column
@@ -519,6 +543,49 @@ function updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submi
             Logger.log(`Updated shop type for "${shopName}" to "${newShopType}"`);
           }
         }
+        
+        // Update Instagram URL if provided
+        if (newInstagram && newInstagram !== null && newInstagram !== undefined && newInstagram !== "") {
+          if (instagramIdx === -1) {
+            // Instagram column doesn't exist, add it
+            const lastCol = headers.length;
+            sheet.getRange(1, lastCol + 1).setValue("Instagram");
+            const newInstagramIdx = lastCol;
+            sheet.getRange(rowNum, newInstagramIdx + 1).setValue(newInstagram);
+            Logger.log("Created 'Instagram' column and updated value");
+          } else {
+            sheet.getRange(rowNum, instagramIdx + 1).setValue(newInstagram);
+            Logger.log(`Updated Instagram URL for "${shopName}" to "${newInstagram}"`);
+          }
+        }
+        
+        // Helper function to update a field if provided
+        function updateFieldIfProvided(fieldValue, columnIdx, columnName, rowNum) {
+          if (fieldValue && fieldValue !== null && fieldValue !== undefined && fieldValue !== "") {
+            if (columnIdx === -1) {
+              // Column doesn't exist, add it
+              const lastCol = sheet.getLastColumn();
+              sheet.getRange(1, lastCol + 1).setValue(columnName);
+              sheet.getRange(rowNum, lastCol + 1).setValue(fieldValue);
+              Logger.log(`Created '${columnName}' column and updated value`);
+            } else {
+              sheet.getRange(rowNum, columnIdx + 1).setValue(fieldValue);
+              Logger.log(`Updated ${columnName} for "${shopName}" to "${fieldValue}"`);
+            }
+          }
+        }
+        
+        // Update all new fields if provided
+        updateFieldIfProvided(ownerName, ownerNameIdx, "Owner Name", rowNum);
+        updateFieldIfProvided(contactPerson, contactPersonIdx, "Contact Person", rowNum);
+        updateFieldIfProvided(email, emailIdx, "Email", rowNum);
+        updateFieldIfProvided(cellPhone, cellPhoneIdx, "Cell Phone", rowNum);
+        updateFieldIfProvided(phone, phoneIdx, "Phone", rowNum);
+        updateFieldIfProvided(website, websiteIdx, "Website", rowNum);
+        updateFieldIfProvided(followUpDate, followUpDateIdx, "Follow Up Date", rowNum);
+        updateFieldIfProvided(visitDate, visitDateIdx, "Visit Date", rowNum);
+        updateFieldIfProvided(contactDate, contactDateIdx, "Contact Date", rowNum);
+        updateFieldIfProvided(contactMethod, contactMethodIdx, "Contact Method", rowNum);
         
         // Update digital signature (public key)
         const submittedValue = digitalSignature || submittedBy || "";
@@ -759,6 +826,17 @@ function doGet(e) {
       const shopName = e.parameter.shop_name;
       const newStatus = e.parameter.new_status;
       const newShopType = e.parameter.shop_type || '';
+      const newInstagram = e.parameter.instagram || '';
+      const ownerName = e.parameter.owner_name || '';
+      const contactPerson = e.parameter.contact_person || '';
+      const email = e.parameter.email || '';
+      const cellPhone = e.parameter.cell_phone || '';
+      const phone = e.parameter.phone || '';
+      const website = e.parameter.website || '';
+      const followUpDate = e.parameter.follow_up_date || '';
+      const visitDate = e.parameter.visit_date || '';
+      const contactDate = e.parameter.contact_date || '';
+      const contactMethod = e.parameter.contact_method || '';
       const digitalSignature = e.parameter.digital_signature || e.parameter.signature || e.parameter.public_key;                                                
       const remarks = e.parameter.remarks || '';
       const submittedBy = e.parameter.submitted_by || digitalSignature || '';
@@ -773,8 +851,8 @@ function doGet(e) {
           .setMimeType(ContentService.MimeType.JSON);
       }
       
-      // Update the status and/or shop type (digitalSignature is optional but recommended)
-      const result = updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submittedBy, newShopType);
+      // Update the status, shop type, Instagram, and other fields (digitalSignature is optional but recommended)
+      const result = updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submittedBy, newShopType, newInstagram, ownerName, contactPerson, email, cellPhone, phone, website, followUpDate, visitDate, contactDate, contactMethod);
       
       return ContentService
         .createTextOutput(JSON.stringify({
