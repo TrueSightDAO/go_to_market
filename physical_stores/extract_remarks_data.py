@@ -29,11 +29,12 @@ SCOPES = [
 
 
 def get_google_sheets_client() -> gspread.Client:
-    creds_path = Path(__file__).parent / "google_credentials.json"
+    # Look for credentials in parent directory (repository root)
+    creds_path = Path(__file__).parent.parent / "google_credentials.json"
     if not creds_path.exists():
         raise FileNotFoundError(
             f"Google credentials not found at {creds_path}. "
-            "Please add google_credentials.json with service account credentials."
+            "Please add google_credentials.json with service account credentials in the repository root."
         )
 
     creds = Credentials.from_service_account_file(
@@ -57,6 +58,25 @@ def extract_phone(text: str) -> Optional[str]:
             phone = re.sub(r'[^\d]', '', match.group())
             if len(phone) == 10:
                 return f"({phone[:3]}) {phone[3:6]}-{phone[6:]}"
+    return None
+
+
+def extract_cell_phone(text: str) -> Optional[str]:
+    """Extract cell phone number from text (specifically looking for 'cell phone' or 'mobile' patterns)."""
+    # Look for "cell phone", "cell", "mobile", "mobile phone" followed by a phone number
+    cell_patterns = [
+        r'(?:cell\s+phone|cell|mobile\s+phone|mobile)\s*:?\s*\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',
+        r'(?:cell\s+phone|cell|mobile\s+phone|mobile)\s*:?\s*\d{10}',
+    ]
+    for pattern in cell_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            # Extract just the phone number part
+            phone_match = re.search(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\d{10}', match.group())
+            if phone_match:
+                phone = re.sub(r'[^\d]', '', phone_match.group())
+                if len(phone) == 10:
+                    return f"({phone[:3]}) {phone[3:6]}-{phone[6:]}"
     return None
 
 
@@ -162,18 +182,72 @@ def extract_contact_person(text: str) -> Optional[str]:
 
 
 def extract_follow_up_date(text: str) -> Optional[str]:
-    """Extract follow-up date information from text."""
-    # Look for date patterns
-    patterns = [
+    """Extract follow-up date information from text and convert to YYYY-MM-DD format."""
+    from datetime import datetime, date
+    
+    # Look for specific date patterns like "3rd Dec", "Dec 3", "December 3rd", etc.
+    date_patterns = [
+        r'(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|September|Oct|October|Nov|November|Dec|December)',
+        r'(Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|September|Oct|October|Nov|November|Dec|December)\s+(\d{1,2})(?:st|nd|rd|th)?',
+        r'(\d{4})-(\d{2})-(\d{2})',  # ISO format
+        r'(\d{1,2})/(\d{1,2})/(\d{4})',  # MM/DD/YYYY
+        r'(\d{1,2})/(\d{1,2})/(\d{2})',  # MM/DD/YY
+    ]
+    
+    month_map = {
+        'jan': 1, 'january': 1, 'feb': 2, 'february': 2, 'mar': 3, 'march': 3,
+        'apr': 4, 'april': 4, 'may': 5, 'jun': 6, 'june': 6, 'jul': 7, 'july': 7,
+        'aug': 8, 'august': 8, 'sep': 9, 'september': 9, 'oct': 10, 'october': 10,
+        'nov': 11, 'november': 11, 'dec': 12, 'december': 12
+    }
+    
+    # Try to find date patterns
+    for pattern in date_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            try:
+                if len(match.groups()) == 2:  # Day Month or Month Day format
+                    groups = match.groups()
+                    # Check if first group is month name
+                    if groups[0].lower() in month_map:
+                        month = month_map[groups[0].lower()]
+                        day = int(re.sub(r'[^\d]', '', groups[1]))
+                    else:
+                        day = int(re.sub(r'[^\d]', '', groups[0]))
+                        month = month_map[groups[1].lower()]
+                    
+                    # Determine year (assume current year or next year if date has passed)
+                    current_year = datetime.now().year
+                    follow_date = date(current_year, month, day)
+                    if follow_date < date.today():
+                        follow_date = date(current_year + 1, month, day)
+                    
+                    return follow_date.strftime('%Y-%m-%d')
+                elif len(match.groups()) == 3:  # ISO or MM/DD/YYYY format
+                    groups = match.groups()
+                    if len(groups[0]) == 4:  # ISO format YYYY-MM-DD
+                        return f"{groups[0]}-{groups[1]}-{groups[2]}"
+                    else:  # MM/DD/YYYY or MM/DD/YY
+                        month = int(groups[0])
+                        day = int(groups[1])
+                        year = int(groups[2])
+                        if year < 100:
+                            year += 2000
+                        return f"{year}-{month:02d}-{day:02d}"
+            except (ValueError, KeyError):
+                continue
+    
+    # Fallback: Look for relative date patterns
+    relative_patterns = [
         r'(?:next|this|on)\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)',
         r'(?:next|this)\s+week',
         r'(?:next|this)\s+Friday',
-        r'until\s+(?:this|next)\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)',
     ]
-    for pattern in patterns:
+    for pattern in relative_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             return match.group(0).strip()
+    
     return None
 
 
@@ -184,6 +258,7 @@ def extract_structured_data(remarks: str) -> Dict[str, Optional[str]]:
         'city': None,
         'state': None,
         'phone': None,
+        'cell_phone': None,
         'email': None,
         'website': None,
         'instagram': None,
@@ -194,8 +269,11 @@ def extract_structured_data(remarks: str) -> Dict[str, Optional[str]]:
     if not remarks:
         return extracted
     
-    # Extract phone
+    # Extract phone (regular phone)
     extracted['phone'] = extract_phone(remarks)
+    
+    # Extract cell phone (specifically marked as cell/mobile)
+    extracted['cell_phone'] = extract_cell_phone(remarks)
     
     # Extract email
     extracted['email'] = extract_email(remarks)
@@ -308,6 +386,7 @@ def update_hit_list_row(
         'city': 'City',
         'state': 'State',
         'phone': 'Phone',
+        'cell_phone': 'Cell Phone',
         'email': 'Email',
         'website': 'Website',
         'instagram': 'Instagram',
@@ -407,11 +486,24 @@ def main():
     extracted = extract_structured_data(remarks)
     
     print(f"\n📊 Extracted Data:")
+    field_labels = {
+        'address': 'Address',
+        'city': 'City',
+        'state': 'State',
+        'phone': 'Phone',
+        'cell_phone': 'Cell Phone',
+        'email': 'Email',
+        'website': 'Website',
+        'instagram': 'Instagram',
+        'contact_person': 'Contact Person',
+        'follow_up_date': 'Follow Up Date',
+    }
     for field, value in extracted.items():
+        label = field_labels.get(field, field.capitalize())
         if value:
-            print(f"  - {field.capitalize()}: {value}")
+            print(f"  - {label}: {value}")
         else:
-            print(f"  - {field.capitalize()}: (not found)")
+            print(f"  - {label}: (not found)")
     
     # Update Hit List
     print(f"\n🔄 Updating Hit List...")

@@ -18,6 +18,15 @@ market_research/
 │   ├── process_dapp_remarks.py        # Process DApp remarks
 │   └── [See physical_stores/README.md for full structure]
 │
+├── ceremonial_cacao_seo/               # USA ceremonial cacao competitor SEO research
+│   ├── README.md                       # Task context, workflow, Playwright scripts
+│   ├── competitors_list.json            # Top 10 USA competitors (from search or manual)
+│   ├── competitor_analysis.json        # Crawl output (titles, meta, h1, snippets)
+│   ├── positioning_summary.md          # Positioning summary from crawl
+│   ├── seo_keyword_strategy.md         # Match + differentiate keyword strategy
+│   ├── implementation_checklist.md     # Apply to agroverse.shop + run tests
+│   └── playwright/                     # Search, crawl, analyze scripts (Node/Playwright)
+│
 └── online_content/                     # Online content management
     ├── agroverse_shop/
     │   ├── social_media/              # Instagram content management
@@ -126,6 +135,14 @@ cd online_content/truesight_dao/blog_post
 
 **See:** `online_content/agroverse_shop/blog_post/README.md` for complete guide
 
+### Ceremonial Cacao SEO (USA competitors)
+1. **Search** – Find top 10 USA ceremonial cacao competitors (Playwright or manual).
+2. **Crawl** – Extract titles, meta, H1s, snippets from competitor sites.
+3. **Strategy** – Define match + differentiate keyword strategy; implement on agroverse.shop.
+4. **Tests** – Run agroverse_shop Playwright tests (including SEO content alignment).
+
+**See:** `ceremonial_cacao_seo/README.md` for full workflow and scripts.
+
 ### Truesight DAO Blog
 1. **Blog Scheduling** - Plan DAO blog content
 2. **Content Management** - Track and publish posts
@@ -196,6 +213,7 @@ Each subdirectory contains a comprehensive README.md that consolidates all relev
 - **`physical_stores/README.md`** - Complete physical stores guide
 - **`online_content/agroverse_shop/social_media/README.md`** - Complete social media guide
 - **`online_content/agroverse_shop/blog_post/README.md`** - Complete blog guide
+- **`ceremonial_cacao_seo/README.md`** - Ceremonial cacao USA competitor SEO research (Playwright workflow)
 - **`online_content/truesight_dao/blog_post/README.md`** - Truesight DAO blog guide
 
 ## 🔐 Security Notes
