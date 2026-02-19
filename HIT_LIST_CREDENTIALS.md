@@ -45,7 +45,8 @@
 | L | Instagram | String | Required for qualified leads |
 | M | Notes | String | |
 | N-AB | Contact Date, Contact Method, Follow Up Date, etc. | | See sheet |
-| AC | Store Key | String | shop-name__address__city__state (lowercase, hyphens) |
+| AC | Instagram Follow Count | String | Follower count from Instagram profile |
+| AD | Store Key | String | shop-name__address__city__state (lowercase, hyphens) |
 
 ## Store Key Format
 

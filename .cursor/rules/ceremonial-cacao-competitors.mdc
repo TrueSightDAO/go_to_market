@@ -1,0 +1,36 @@
+---
+description: Top 5 USA ceremonial cacao competitors and brand research context (Ceremonial+Ora = one company)
+globs: market_research/**/*, **/ceremonial_cacao_seo/**
+alwaysApply: false
+---
+
+# Ceremonial Cacao Competitor Research — Context for Agents
+
+## Top 5 distinct brands (no duplicates)
+
+When working with "top 5" USA ceremonial cacao competitors or brand-level research:
+
+- **Use exactly 5 distinct brands.** Duplicates count as one.
+- **Ceremonial Cacao and Ora Cacao are the same company.** Treat as one brand; primary site is `ceremonial-cacao.com`. Do not list Ora Cacao as a separate competitor.
+- **Canonical source:** `market_research/ceremonial_cacao_seo/competitors_brands_top5.json` (array `brands`). Use this for brand-focused work.
+- **Legacy list:** `competitors_list.json` may list Ora and Ceremonial separately; for "top 5" or "what drives sales" work, prefer `competitors_brands_top5.json` and merge Ceremonial + Ora.
+
+## Brand sales drivers research
+
+- **Purpose:** Understand what is obviously driving sales per brand (own site, wholesale, subscription, retailers/stockists page, free shipping, multi-channel presence).
+- **Script:** `ceremonial_cacao_seo/playwright/research_brand_sales_drivers.ts`. Run: `npm run brand-drivers` from `ceremonial_cacao_seo/playwright`.
+- **Outputs:** `brand_sales_drivers.json`, `brand_sales_drivers_report.md` (includes full report and prioritized suggestions for agroverse.shop).
+
+## Key artifacts
+
+- `brand_sales_drivers_report.md` — Full report and Agroverse.shop suggestions; use for context.
+- `competitors_brands_top5.json` — Authoritative list of 5 brands (Ceremonial/Ora = 1).
+- `sales_channel_analysis.md` / `sales_channel_analysis.json` — Own-site sales channel research (cart, checkout); script `npm run sales-channels`.
+
+## Quick reference: five brands
+
+1. **Ceremonial Cacao / Ora Cacao** — ceremonial-cacao.com (same company)
+2. **Four Visions** — fourvisions.com
+3. **Ma Cacao** — ma-cacao.com
+4. **Bar and Cocoa** — barandcocoa.com (multi-brand retailer)
+5. **Maya Moon Cacao** — mayamooncacao.com
