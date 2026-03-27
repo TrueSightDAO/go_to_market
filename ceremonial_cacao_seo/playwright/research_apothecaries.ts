@@ -17,12 +17,16 @@ const OUT_CSV = path.join(__dirname, '..', 'apothecary_discovery.csv');
 const NAV_TIMEOUT = 25000;
 const HEADLESS = process.env.HEADLESS !== '0';
 const YELP_MAX_PAGES = parseInt(process.env.YELP_MAX_PAGES || '2', 10);
+// REGIONS=TX,NY to run only Austin + Rochester areas; omit to run all states
+const REGIONS_FILTER = process.env.REGIONS ? process.env.REGIONS.split(',').map((s) => s.trim().toUpperCase()) : null;
 
 const STATES = [
   { state: 'CA', cities: ['San Francisco', 'Los Angeles', 'Oakland', 'Santa Cruz'] },
   { state: 'AZ', cities: ['Phoenix', 'Tucson', 'Sedona'] },
   { state: 'OR', cities: ['Portland', 'Eugene', 'Ashland'] },
   { state: 'WA', cities: ['Seattle', 'Tacoma', 'Olympia'] },
+  { state: 'TX', cities: ['Austin', 'Round Rock', 'Cedar Park', 'Georgetown'] },
+  { state: 'NY', cities: ['Rochester', 'Henrietta', 'Brighton', 'Pittsford'] },
 ];
 
 const JUNK_NAMES = ['results', 'suggest an edit', 'add a missing place', 'see all', 'view all', 'directions', 'save', 'share', 'nearby', 'search', 'sponsored'];
@@ -50,9 +54,36 @@ interface DiscoveredStore {
   email?: string;
   instagram?: string;
   instagramFollowers?: string;
+  latitude?: string;
+  longitude?: string;
   shopType: string;
   source: string;
   storeKey: string;
+}
+
+function parseCoordsFromGoogleMapsUrl(url: string): { lat: string; lng: string } | null {
+  const m = url.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/);
+  if (m) return { lat: m[1], lng: m[2] };
+  const n = url.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+  if (n) return { lat: n[1], lng: n[2] };
+  return null;
+}
+
+async function geocodeAddress(address: string, city: string, state: string): Promise<{ lat: string; lng: string } | null> {
+  const q = encodeURIComponent(`${address}, ${city}, ${state}`);
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`,
+      { headers: { 'User-Agent': 'Agroverse-HitList/1.0' } }
+    );
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      return { lat: String(data[0].lat), lng: String(data[0].lon) };
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 function toStoreKey(name: string, address: string, city: string, state: string): string {
@@ -174,6 +205,10 @@ async function searchGoogleMaps(page: any, term: string, city: string, state: st
         const parsedCity = cityMatch ? cityMatch[1].trim() : city;
         const parsedState = cityMatch ? cityMatch[2] : state;
 
+        let coords: { lat: string; lng: string } | null = parseCoordsFromGoogleMapsUrl(page.url());
+        if (!coords) coords = await geocodeAddress(address || '', parsedCity, parsedState);
+        if (coords) await sleep(1100);
+
         results.push({
           shopName: name,
           address: address || '',
@@ -182,6 +217,8 @@ async function searchGoogleMaps(page: any, term: string, city: string, state: st
           phone,
           website,
           instagram: instagram ? `@${instagram}` : undefined,
+          latitude: coords?.lat,
+          longitude: coords?.lng,
           shopType: 'Metaphysical/Spiritual',
           source: 'google_maps',
           storeKey: toStoreKey(name, address || '', parsedCity, parsedState),
@@ -236,6 +273,9 @@ async function searchYelp(page: any, term: string, location: string): Promise<Di
           const parsedCity = cityMatch ? cityMatch[1].trim() : '';
           const parsedState = cityMatch ? cityMatch[2] : '';
 
+          const coords = await geocodeAddress(address || '', parsedCity, parsedState);
+          if (coords) await sleep(1100);
+
           results.push({
             shopName: name,
             address: address || '',
@@ -244,6 +284,8 @@ async function searchYelp(page: any, term: string, location: string): Promise<Di
             phone,
             website,
             instagram: instagram ? `@${instagram}` : undefined,
+            latitude: coords?.lat,
+            longitude: coords?.lng,
             shopType: 'Metaphysical/Spiritual',
             source: 'yelp',
             storeKey: toStoreKey(name, address || '', parsedCity, parsedState),
@@ -274,7 +316,12 @@ function toCsvRow(s: DiscoveredStore): string[] {
     s.email || '',
     s.instagram || '',
     '',
-    '', '', '', '', '', '', '', '', '', '', '', '', '', '', s.instagramFollowers || '', s.storeKey,
+    '', '', '', '', '', '', '', '', '', '', '', // Notes through Sales Process Notes
+    s.latitude || '',
+    s.longitude || '',
+    '', '', // Status Updated By, Date
+    s.instagramFollowers || '',
+    s.storeKey,
   ];
 }
 
@@ -293,8 +340,15 @@ async function main() {
   page.setDefaultTimeout(NAV_TIMEOUT);
   await page.setViewportSize({ width: 1280, height: 800 });
 
-  console.log('Searching Google Maps...');
-  for (const { state, cities } of STATES) {
+  const statesToRun = REGIONS_FILTER
+    ? STATES.filter((s) => REGIONS_FILTER.includes(s.state))
+    : STATES;
+  if (statesToRun.length === 0) {
+    console.error('No states match REGIONS filter:', process.env.REGIONS);
+    process.exit(1);
+  }
+  console.log('Searching Google Maps...', REGIONS_FILTER ? `(regions: ${REGIONS_FILTER.join(', ')})` : '(all regions)');
+  for (const { state, cities } of statesToRun) {
     for (const city of cities.slice(0, 2)) {
       const term = 'apothecary metaphysical';
       console.log(`  ${term} in ${city}, ${state}`);
@@ -312,7 +366,7 @@ async function main() {
   console.log('Searching Yelp (throttled)...');
   const yelpPage = await browser.newPage();
   yelpPage.setDefaultTimeout(NAV_TIMEOUT);
-  for (const { state, cities } of STATES) {
+  for (const { state, cities } of statesToRun) {
     for (const city of cities.slice(0, 2)) {
       const location = `${city}, ${state}`;
       console.log(`  apothecary in ${location}`);

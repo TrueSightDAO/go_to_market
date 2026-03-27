@@ -1,0 +1,36 @@
+{
+  "targetMarket": "USA",
+  "updatedAt": "2026-02-17T01:39:52.501Z",
+  "competitors": [
+    {
+      "name": "Ceremonial Cacao",
+      "url": "https://ceremonial-cacao.com",
+      "region": "USA",
+      "notes": "Pure ceremonial cacao collections"
+    },
+    {
+      "name": "Ora Cacao",
+      "url": "https://oracacao.com",
+      "region": "USA",
+      "notes": "Single-origin, USDA organic, direct trade"
+    },
+    {
+      "name": "Four Visions",
+      "url": "https://fourvisions.com",
+      "region": "USA",
+      "notes": "Ecuadorian Arriba, regenerative agroforestry"
+    },
+    {
+      "name": "Ma Cacao",
+      "url": "https://ma-cacao.com",
+      "region": "USA",
+      "notes": "Regenerative single-origin, Peruvian, Portland"
+    },
+    {
+      "name": "Bar and Cocoa",
+      "url": "https://barandcocoa.com",
+      "region": "USA",
+      "notes": "Multi-brand retailer, Ora Cacao and others"
+    }
+  ]
+}

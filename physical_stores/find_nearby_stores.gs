@@ -878,7 +878,7 @@ function doGet(e) {
     const statusRegex = /[&?]status=([^&]*)/g;
     let match;
     while ((match = statusRegex.exec(queryString)) !== null) {
-      const value = decodeURIComponent(match[1].replace(/\+/g, ' '));
+      const value = decodeURIComponent(match[1].replace(/\+/g, ' ')).trim();
       if (value && value !== "" && value !== "All") {
         statusMatches.push(value);
       }

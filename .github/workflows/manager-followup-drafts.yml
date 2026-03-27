@@ -1,0 +1,120 @@
+# Daily: optional training refresh (Mondays on schedule) + cadence-gated follow-up drafts.
+# Hourly "Email Agent Follow Up" refresh runs in email-agent-sync-followup.yml (same sync also
+# runs here before drafts so this job stays self-contained if the hourly workflow is off).
+#
+# Cadence: suggest_manager_followup_drafts uses the latest sent_at in "Email Agent Follow Up"
+# per recipient (filled by sync_email_agent_followup from Gmail sent mail). A draft is created
+# only if that send is at least min_days_since_sent ago (default 7) and there is no pending_review
+# row in Email Agent Suggestions. Most runs may create zero drafts if no one is "due."
+#
+# Secrets: GOOGLE_CREDENTIALS_JSON, GMAIL_TOKEN_JSON, GROK_API_KEY (for --use-grok).
+# Gmail: CI does not write refreshed tokens back to secrets — agentic_ai_context/GMAIL_OAUTH_WORKFLOW.md
+name: Email agent sync and follow-up drafts
+
+on:
+  workflow_dispatch:
+    inputs:
+      use_grok:
+        description: 'Use Grok for draft bodies (requires GROK_API_KEY)'
+        type: boolean
+        default: true
+      max_drafts:
+        description: 'Maximum drafts to create this run (eligible recipients only)'
+        type: string
+        default: '5'
+      min_days_since_sent:
+        description: 'Min days since last logged sent mail (Email Agent Follow Up) before drafting again'
+        type: string
+        default: '7'
+      dry_run:
+        description: 'Dry run — no Gmail or Sheet writes'
+        type: boolean
+        default: false
+  schedule:
+    # Daily 14:00 UTC — refreshes Follow Up log; drafts only for recipients past cadence
+    - cron: '0 14 * * *'
+
+jobs:
+  sync-and-suggest-drafts:
+    name: Sync sheets from Gmail, then suggest follow-up drafts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create Google credentials file
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: |
+          echo "$GOOGLE_CREDENTIALS_JSON" > google_credentials.json
+
+      - name: Sync Email Agent Follow Up (Gmail sent → sheet)
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
+            python scripts/sync_email_agent_followup.py --dry-run
+          else
+            python scripts/sync_email_agent_followup.py
+          fi
+
+      - name: Sync Email Agent Training Data (Partnered + threads)
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          # Full training re-pull is heavier; on schedule, run Mondays (UTC) only. workflow_dispatch always runs.
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            DOW=$(date -u +%u)
+            if [ "$DOW" != "1" ]; then
+              echo "Scheduled run: skipping training data sync (Mondays UTC only)."
+              exit 0
+            fi
+          fi
+          if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
+            python scripts/sync_email_agent_training_data.py --dry-run
+          else
+            python scripts/sync_email_agent_training_data.py
+          fi
+
+      - name: Suggest manager follow-up drafts (cadence from last logged send)
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          INPUT_MAX_DRAFTS: ${{ github.event.inputs.max_drafts }}
+          INPUT_MIN_DAYS: ${{ github.event.inputs.min_days_since_sent }}
+          INPUT_USE_GROK: ${{ github.event.inputs.use_grok }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          MAX="${INPUT_MAX_DRAFTS:-5}"
+          MIN="${INPUT_MIN_DAYS:-7}"
+          EXTRA=""
+          if [ "${INPUT_USE_GROK:-true}" != "false" ]; then
+            EXTRA="$EXTRA --use-grok"
+          fi
+          if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
+            EXTRA="$EXTRA --dry-run"
+          fi
+          python scripts/suggest_manager_followup_drafts.py \
+            --max-drafts "$MAX" \
+            --min-days-since-sent "$MIN" \
+            $EXTRA

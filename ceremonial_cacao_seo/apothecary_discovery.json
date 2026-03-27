@@ -1,0 +1,207 @@
+{
+  "discoveredAt": "2026-03-16T20:50:13.318Z",
+  "total": 18,
+  "withInstagram": 12,
+  "stores": [
+    {
+      "shopName": "Cityalchemist",
+      "address": "1105 E 6th St, Austin, TX 78705",
+      "city": "Austin",
+      "state": "TX",
+      "website": "http://www.cityalchemist.co/",
+      "instagram": "@cityalchemist",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "cityalchemist__1105-e-6th-st-austin-tx-78705__austin__tx",
+      "instagramFollowers": "9,285"
+    },
+    {
+      "shopName": "Yarrowandsageatx",
+      "address": "701 E 53rd St, Austin, TX 78751",
+      "city": "Austin",
+      "state": "TX",
+      "website": "http://www.yarrowandsageatx.com/",
+      "instagram": "@yarrowandsage",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "yarrowandsageatx__701-e-53rd-st-austin-tx-78751__austin__tx",
+      "instagramFollowers": "18.9K"
+    },
+    {
+      "shopName": "Thestoneapothecary",
+      "address": "9501 N Capital of Texas Hwy UNIT 301B, Austin, TX 78759",
+      "city": "Austin",
+      "state": "TX",
+      "website": "https://www.thestoneapothecary.com/",
+      "instagram": "@thestoneapothecary",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "thestoneapothecary__9501-n-capital-of-texas-hwy-unit-301b-austin-tx-78759__austin__tx"
+    },
+    {
+      "shopName": "Earthworksbotanicals",
+      "address": "1701 Toomey Rd, Austin, TX 78704",
+      "city": "Austin",
+      "state": "TX",
+      "website": "https://earthworksbotanicals.com/",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "earthworksbotanicals__1701-toomey-rd-austin-tx-78704__austin__tx"
+    },
+    {
+      "shopName": "Solidagoapothecary",
+      "address": "504 Burleson St, San Marcos, TX 78666",
+      "city": "San Marcos",
+      "state": "TX",
+      "website": "https://solidagoapothecary.com/",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "solidagoapothecary__504-burleson-st-san-marcos-tx-78666__san-marcos__tx"
+    },
+    {
+      "shopName": "The Stone Apothecary",
+      "address": "9501 N Capital of Texas Hwy UNIT 301B, Austin, TX 78759",
+      "city": "Austin",
+      "state": "TX",
+      "website": "https://www.thestoneapothecary.com/",
+      "instagram": "@thestoneapothecary",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "the-stone-apothecary__9501-n-capital-of-texas-hwy-unit-301b-austin-tx-78759__austin__tx",
+      "instagramFollowers": "38"
+    },
+    {
+      "shopName": "City Alchemist Witch Shop",
+      "address": "1105 E 6th St, Austin, TX 78705",
+      "city": "Austin",
+      "state": "TX",
+      "website": "http://www.cityalchemist.co/",
+      "instagram": "@cityalchemist",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "city-alchemist-witch-shop__1105-e-6th-st-austin-tx-78705__austin__tx",
+      "instagramFollowers": "9,284"
+    },
+    {
+      "shopName": "Silver Moon Curios",
+      "address": "215 W University Ave, Georgetown, TX 78626",
+      "city": "Georgetown",
+      "state": "TX",
+      "website": "https://www.silvermooncurios.com/",
+      "instagram": "@silvermooncurios",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "silver-moon-curios__215-w-university-ave-georgetown-tx-78626__georgetown__tx",
+      "instagramFollowers": "18.8K"
+    },
+    {
+      "shopName": "UnEarthed",
+      "address": "100 E Main St Ste 102, Round Rock, TX 78664",
+      "city": "Round Rock",
+      "state": "TX",
+      "website": "http://www.unearthedatx.com/",
+      "instagram": "@unearthedatx",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "unearthed__100-e-main-st-ste-102-round-rock-tx-78664__round-rock__tx",
+      "instagramFollowers": "3,994"
+    },
+    {
+      "shopName": "Yarrow & Sage - North",
+      "address": "701 E 53rd St, Austin, TX 78751",
+      "city": "Austin",
+      "state": "TX",
+      "website": "http://www.yarrowandsageatx.com/",
+      "instagram": "@yarrowandsage",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "yarrow-sage-north__701-e-53rd-st-austin-tx-78751__austin__tx"
+    },
+    {
+      "shopName": "Purple Luna Pro",
+      "address": "2021 N Mays St #300, Round Rock, TX 78664",
+      "city": "Round Rock",
+      "state": "TX",
+      "website": "https://www.purple-luna.com/",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "purple-luna-pro__2021-n-mays-st-300-round-rock-tx-78664__round-rock__tx"
+    },
+    {
+      "shopName": "The Amethyst Garden",
+      "address": "4401 I 35 N Frontage Rd, Round Rock, TX 78665",
+      "city": "Round Rock",
+      "state": "TX",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "the-amethyst-garden__4401-i-35-n-frontage-rd-round-rock-tx-78665__round-rock__tx"
+    },
+    {
+      "shopName": "Spiritualvibesbotanica",
+      "address": "637 Monroe Ave, Rochester, NY 14607",
+      "city": "Rochester",
+      "state": "NY",
+      "website": "http://www.spiritualvibesbotanica.com/",
+      "instagram": "@spiritualvibes_botanica",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "spiritualvibesbotanica__637-monroe-ave-rochester-ny-14607__rochester__ny",
+      "instagramFollowers": "314"
+    },
+    {
+      "shopName": "Mythictreasures",
+      "address": "1225 Jefferson Rd, Rochester, NY 14623",
+      "city": "Rochester",
+      "state": "NY",
+      "website": "http://www.mythictreasures.com/",
+      "instagram": "@mythic_treasures",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "mythictreasures__1225-jefferson-rd-rochester-ny-14623__rochester__ny",
+      "instagramFollowers": "2,161"
+    },
+    {
+      "shopName": "Thealtarhealing",
+      "address": "34 Elton St, Rochester, NY 14607",
+      "city": "Rochester",
+      "state": "NY",
+      "website": "http://thealtarhealing.com/",
+      "instagram": "@altar.healing.ceremony",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "thealtarhealing__34-elton-st-rochester-ny-14607__rochester__ny"
+    },
+    {
+      "shopName": "12cornersapothecary",
+      "address": "1832 Monroe Ave, Rochester, NY 14618",
+      "city": "Rochester",
+      "state": "NY",
+      "website": "https://12cornersapothecary.com/",
+      "instagram": "@12cornersapothecary",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "12cornersapothecary__1832-monroe-ave-rochester-ny-14618__rochester__ny",
+      "instagramFollowers": "77"
+    },
+    {
+      "shopName": "Mysticmoononpark",
+      "address": "1726 Long Pond Rd #4, Rochester, NY 14626",
+      "city": "Rochester",
+      "state": "NY",
+      "website": "http://www.mysticmoononpark.com/",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "mysticmoononpark__1726-long-pond-rd-4-rochester-ny-14626__rochester__ny"
+    },
+    {
+      "shopName": "Obatala",
+      "address": "412 State St, Rochester, NY 14608",
+      "city": "Rochester",
+      "state": "NY",
+      "website": "http://obatala.com/",
+      "shopType": "Metaphysical/Spiritual",
+      "source": "google_maps",
+      "storeKey": "obatala__412-state-st-rochester-ny-14608__rochester__ny"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "ceremonial-cacao-seo-research",
+  "version": "1.0.0",
+  "description": "Playwright scripts for ceremonial cacao USA competitor search, crawl, and SEO analysis",
+  "private": true,
+  "scripts": {
+    "search": "npx ts-node search_competitors.ts",
+    "crawl": "npx ts-node crawl_competitors.ts",
+    "analyze": "npx ts-node analyze_positioning.ts",
+    "index": "npx ts-node index_competitor_sites.ts",
+    "analyze-site": "npx ts-node analyze_site_index.ts",
+    "sales-channels": "npx ts-node research_sales_channels.ts",
+    "brand-drivers": "npx ts-node research_brand_sales_drivers.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.0.0"
+  }
+}

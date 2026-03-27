@@ -1,0 +1,42 @@
+{
+  "targetMarket": "USA",
+  "description": "Top 5 distinct USA ceremonial cacao competitors. Ceremonial Cacao and Ora Cacao are the same company (one brand).",
+  "updatedAt": "2026-02-19T00:00:00.000Z",
+  "brands": [
+    {
+      "name": "Ceremonial Cacao / Ora Cacao",
+      "primaryUrl": "https://ceremonial-cacao.com",
+      "aliases": ["Ora Cacao", "Ceremonial Cacao"],
+      "region": "USA",
+      "notes": "Same company. Primary site: ceremonial-cacao.com; oracacao.com redirects or mirrors."
+    },
+    {
+      "name": "Four Visions",
+      "primaryUrl": "https://fourvisions.com",
+      "aliases": ["Four Visions"],
+      "region": "USA",
+      "notes": "Amazonian hape, plant medicines, ceremonial cacao (e.g. Nana Marina's)."
+    },
+    {
+      "name": "Ma Cacao",
+      "primaryUrl": "https://ma-cacao.com",
+      "aliases": ["Ma Cacao"],
+      "region": "USA",
+      "notes": "Regenerative cacao, Portland OR, ceremony bar and drinking chocolate."
+    },
+    {
+      "name": "Bar and Cocoa",
+      "primaryUrl": "https://barandcocoa.com",
+      "aliases": ["Bar & Cocoa", "Bar and Cocoa"],
+      "region": "USA",
+      "notes": "Multi-brand retailer; sells Ora and other ceremonial cacao brands."
+    },
+    {
+      "name": "Maya Moon Cacao",
+      "primaryUrl": "https://mayamooncacao.com",
+      "aliases": ["Maya Moon", "Maya Moon Cacao"],
+      "region": "USA",
+      "notes": "Guatemalan Criollo, Certified Ceremonial Cacao®, Indigenous women artisans."
+    }
+  ]
+}

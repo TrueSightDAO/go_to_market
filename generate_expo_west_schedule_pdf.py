@@ -16,6 +16,23 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
 OUTPUT = Path(__file__).parent / "expo_west_2026_agroverse_schedule.pdf"
 
+
+def _cell_style():
+    return ParagraphStyle(
+        "TableCell",
+        fontSize=8,
+        leading=10,
+        leftIndent=2,
+        rightIndent=2,
+        spaceAfter=2,
+    )
+
+
+def _wrap_table(data, cell_style):
+    """Convert table data to Paragraphs for proper text wrapping."""
+    return [[Paragraph(cell, cell_style) for cell in row] for row in data]
+
+
 def main():
     doc = SimpleDocTemplate(
         str(OUTPUT),
@@ -50,6 +67,7 @@ def main():
     body_style = styles["Normal"]
     body_style.fontSize = 9
     body_style.spaceAfter = 6
+    cell_style = _cell_style()
 
     story = []
 
@@ -92,7 +110,7 @@ def main():
         ["3:45–4:45 PM", "Future of Retail — Innovating for Success", "Marriott, Orange County Ballroom 1", "Retail relationships. UNFI, Target panel. Identify distribution partners."],
         ["4:00–5:30 PM", "Pitch Slam — Stories Rooted in Innovation", "Marriott, Marquis Ballroom Center", "Storytelling + investors. Refine Agroverse pitch and brand story."],
     ]
-    t1 = Table(tue_data, colWidths=[1.1 * inch, 1.8 * inch, 1.5 * inch, 2.1 * inch])
+    t1 = Table(_wrap_table(tue_data, cell_style), colWidths=[1.1 * inch, 1.8 * inch, 1.5 * inch, 2.1 * inch])
     t1.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4A7C59")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -118,7 +136,7 @@ def main():
         ["5:00–7:00 PM", "Gender Equity in Nutraceuticals (optional)", "Hilton, California A", "Networking. WIN event. Potential retail partners."],
         ["6:00–9:00 PM", "An Organic Night Out (Ticketed)", "Marriott, Marquis Ballroom", "Brand story + organic network. Organic leaders, retailers. Capture messaging."],
     ]
-    t2 = Table(wed_data, colWidths=[1.1 * inch, 1.8 * inch, 1.5 * inch, 2.1 * inch])
+    t2 = Table(_wrap_table(wed_data, cell_style), colWidths=[1.1 * inch, 1.8 * inch, 1.5 * inch, 2.1 * inch])
     t2.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4A7C59")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -144,7 +162,7 @@ def main():
         ["4:00–6:00 PM", "J.E.D.I. Community Happy Hour", "Arena Plaza", "Inclusive networking. Diverse industry connections."],
         ["6:00–7:45 PM", "NEXTY Awards Ceremony", "Marriott, Marquis Ballroom Center", "Brand inspiration. See what wins. Apply to Agroverse positioning."],
     ]
-    t3 = Table(thu_data, colWidths=[1.1 * inch, 1.8 * inch, 1.5 * inch, 2.1 * inch])
+    t3 = Table(_wrap_table(thu_data, cell_style), colWidths=[1.1 * inch, 1.8 * inch, 1.5 * inch, 2.1 * inch])
     t3.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4A7C59")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -167,7 +185,7 @@ def main():
         ["9:00–10:00 AM", "From Discovery to Decision — Health & Wellness CPG", "Marriott, Grand Ballroom E", "Consumer insights. SPINS + New Hope. Final talking points."],
         ["10:00 AM–2:00 PM", "Exhibit hall — Last chance", "ACC Halls A–E", "Final push. Secure commitments. Collect contacts. Prioritize high-potential retailers."],
     ]
-    t4 = Table(fri_data, colWidths=[1.1 * inch, 1.8 * inch, 1.5 * inch, 2.1 * inch])
+    t4 = Table(_wrap_table(fri_data, cell_style), colWidths=[1.1 * inch, 1.8 * inch, 1.5 * inch, 2.1 * inch])
     t4.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4A7C59")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),

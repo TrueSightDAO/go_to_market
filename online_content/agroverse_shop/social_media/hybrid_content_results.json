@@ -1,0 +1,18 @@
+{
+  "systematic_analysis": {
+    "content_gaps": 309,
+    "weeks_planned": 2,
+    "total_posts": 8
+  },
+  "creative_enhancements": [],
+  "trending_ideas": null,
+  "weekly_themes": {},
+  "recommendations": [
+    {
+      "type": "workflow_optimization",
+      "priority": "low",
+      "action": "Run hybrid workflow weekly for continuous improvement",
+      "impact": "Consistent content quality and innovation"
+    }
+  ]
+}
