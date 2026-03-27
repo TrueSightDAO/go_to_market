@@ -17,14 +17,32 @@ const OUT_CSV = path.join(__dirname, '..', 'apothecary_discovery.csv');
 const NAV_TIMEOUT = 25000;
 const HEADLESS = process.env.HEADLESS !== '0';
 const YELP_MAX_PAGES = parseInt(process.env.YELP_MAX_PAGES || '2', 10);
+// REGIONS=TX,NY to run only Austin + Rochester areas; omit to run all states
+const REGIONS_FILTER = process.env.REGIONS ? process.env.REGIONS.split(',').map((s) => s.trim().toUpperCase()) : null;
 
-// States to search (CA, AZ, OR, WA)
 const STATES = [
-  { state: 'CA', cities: ['San Francisco', 'Los Angeles', 'San Diego', 'Oakland', 'Berkeley', 'Santa Cruz', 'Sacramento', 'Palo Alto', 'San Jose'] },
-  { state: 'AZ', cities: ['Phoenix', 'Tucson', 'Sedona', 'Scottsdale'] },
-  { state: 'OR', cities: ['Portland', 'Eugene', 'Bend', 'Ashland'] },
-  { state: 'WA', cities: ['Seattle', 'Tacoma', 'Spokane', 'Olympia'] },
+  { state: 'CA', cities: ['San Francisco', 'Los Angeles', 'Oakland', 'Santa Cruz'] },
+  { state: 'AZ', cities: ['Phoenix', 'Tucson', 'Sedona'] },
+  { state: 'OR', cities: ['Portland', 'Eugene', 'Ashland'] },
+  { state: 'WA', cities: ['Seattle', 'Tacoma', 'Olympia'] },
+  { state: 'TX', cities: ['Austin', 'Round Rock', 'Cedar Park', 'Georgetown'] },
+  { state: 'NY', cities: ['Rochester', 'Henrietta', 'Brighton', 'Pittsford'] },
 ];
+
+const JUNK_NAMES = ['results', 'suggest an edit', 'add a missing place', 'see all', 'view all', 'directions', 'save', 'share', 'nearby', 'search', 'sponsored'];
+function isJunkName(name: string): boolean {
+  const n = (name || '').trim().toLowerCase();
+  return !n || n.length < 2 || JUNK_NAMES.some((j) => n === j || n.startsWith(j));
+}
+
+function hasValidAddress(addr: string): boolean {
+  const a = (addr || '').trim();
+  return a.length >= 10 && /\d/.test(a);
+}
+
+function cleanAddress(addr: string): string {
+  return (addr || '').replace(/^[\uE000-\uF8FF\s]+/, '').trim();
+}
 
 interface DiscoveredStore {
   shopName: string;
@@ -35,420 +53,391 @@ interface DiscoveredStore {
   website?: string;
   email?: string;
   instagram?: string;
+  instagramFollowers?: string;
+  latitude?: string;
+  longitude?: string;
   shopType: string;
-  source: 'google_maps' | 'yelp';
-  notes?: string;
+  source: string;
   storeKey: string;
 }
 
-interface SalesChannelResult {
-  name: string;
-  baseUrl: string;
-  crawledAt: string;
-  error?: string;
-  platform?: string;
-  homepageLoadMs?: number;
-  shopUrl?: string;
-  shopDiscoverable?: boolean;
-  productListing?: {
-    url: string;
-    productLinksCount: number;
-    loadMs: number;
-  };
-  productPage?: {
-    url: string;
-    title: string | null;
-    priceVisible: boolean;
-    priceText: string | null;
-    addToCartVisible: boolean;
-    addToCartText: string | null;
-    hasDescription: boolean;
-    imageCount: number;
-    loadMs: number;
-  };
-  cart?: {
-    url: string;
-    reachable: boolean;
-    itemCount?: number;
-    checkoutButtonVisible: boolean;
-    loadMs: number;
-  };
-  checkout?: {
-    reachable: boolean;
-    stepsOrSections: string[];
-    paymentMethodsMentioned: string[];
-    trustSignals: string[];
-    requiredFieldsSample: string[];
-    loadMs: number;
-  };
-  working: string[];
-  notWorking: string[];
+function parseCoordsFromGoogleMapsUrl(url: string): { lat: string; lng: string } | null {
+  const m = url.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/);
+  if (m) return { lat: m[1], lng: m[2] };
+  const n = url.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+  if (n) return { lat: n[1], lng: n[2] };
+  return null;
 }
 
-function normalizeUrl(url: string): string {
-  const u = url.replace(/\/+$/, '');
-  return u.startsWith('http') ? u : `https://${u}`;
+async function geocodeAddress(address: string, city: string, state: string): Promise<{ lat: string; lng: string } | null> {
+  const q = encodeURIComponent(`${address}, ${city}, ${state}`);
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`,
+      { headers: { 'User-Agent': 'Agroverse-HitList/1.0' } }
+    );
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      return { lat: String(data[0].lat), lng: String(data[0].lon) };
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
-async function researchOne(
-  browser: any,
-  competitor: Competitor,
-  index: number,
-  total: number
-): Promise<SalesChannelResult> {
-  const baseUrl = normalizeUrl(competitor.url);
-  const result: SalesChannelResult = {
-    name: competitor.name,
-    baseUrl,
-    crawledAt: new Date().toISOString(),
-    working: [],
-    notWorking: [],
-  };
+function toStoreKey(name: string, address: string, city: string, state: string): string {
+  const slug = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return `${slug(name)}__${slug(address)}__${slug(city)}__${state.toLowerCase()}`;
+}
 
-  const page = await browser.newPage();
-  page.setDefaultTimeout(NAV_TIMEOUT);
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function randomDelay(minMs: number, maxMs: number): Promise<void> {
+  return sleep(minMs + Math.random() * (maxMs - minMs));
+}
+
+function extractInstagram(text: string, links: string[]): string | undefined {
+  // Prefer explicit Instagram links (handle only, no trailing path)
+  for (const link of links) {
+    const m = link.match(/instagram\.com\/([a-zA-Z0-9_.]+)(?:\/|$|\?)/i);
+    if (m) return m[1];
+  }
+  const t = text.match(/instagram\.com\/([a-zA-Z0-9_.]+)/i);
+  if (t) return t[1];
+  return undefined;
+}
+
+async function extractInstagramFromPage(page: any): Promise<string | undefined> {
+  const links = await page.$$eval('a[href*="instagram"]', (as: HTMLAnchorElement[]) =>
+    as.map((a) => a.href)
+  );
+  const handle = extractInstagram('', links);
+  if (handle) return handle;
+  const bodyText = await page.evaluate(() => document.body.innerText);
+  const allLinks = await page.$$eval('a[href]', (as: HTMLAnchorElement[]) => as.map((a) => a.href));
+  return extractInstagram(bodyText, allLinks);
+}
+
+async function extractInstagramFromWebsite(page: any, url: string): Promise<string | undefined> {
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
+    await sleep(2000);
+    const links = await page.$$eval('a[href*="instagram"]', (as: HTMLAnchorElement[]) =>
+      as.map((a) => a.href)
+    );
+    return extractInstagram('', links);
+  } catch {
+    return undefined;
+  }
+}
+
+async function fetchInstagramFollowers(page: any, handle: string): Promise<string | undefined> {
+  const clean = (handle || '').replace(/^@/, '').trim();
+  if (!clean) return undefined;
+  try {
+    await page.goto(`https://www.instagram.com/${clean}/`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000,
+    });
+    await sleep(3000);
+    const html = await page.content();
+    const m = html.match(/"edge_followed_by":\s*\{\s*"count":\s*(\d+)/);
+    if (m) return m[1];
+    const text = await page.evaluate(() => document.body.innerText);
+    const fm = text.match(/([\d,.]+[KkMm]?)\s*followers?/);
+    if (fm) return fm[1].trim();
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
+async function searchGoogleMaps(page: any, term: string, city: string, state: string): Promise<DiscoveredStore[]> {
+  const results: DiscoveredStore[] = [];
+  const query = encodeURIComponent(`${term} ${city} ${state}`);
+  const url = `https://www.google.com/maps/search/${query}`;
 
   try {
-    // --- Homepage ---
-    const t0 = Date.now();
-    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
-    result.homepageLoadMs = Date.now() - t0;
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
+    await sleep(2500);
 
-    // Platform detection
-    const platform = await page.evaluate(() => {
-      const html = document.documentElement.outerHTML;
-      if (html.includes('Shopify') || html.includes('shopify.com') || document.querySelector('[data-shopify]')) return 'Shopify';
-      if (html.includes('woocommerce') || document.querySelector('.woocommerce')) return 'WooCommerce';
-      if (html.includes('bigcommerce')) return 'BigCommerce';
-      if (html.includes('squarespace')) return 'Squarespace';
-      if (html.includes('wix.com')) return 'Wix';
-      return null;
-    });
-    result.platform = platform || 'Unknown';
+    const items = await page.$$('a[href*="/maps/place/"]');
+    const seen = new Set<string>();
 
-    // Find shop / products link
-    const shopLink = await page.evaluate((origin: string) => {
-      const links = Array.from(document.querySelectorAll('a[href]'));
-      const hrefs = links.map((a) => (a.getAttribute('href') || '').trim());
-      const text = links.map((a) => (a.textContent || '').toLowerCase());
-      const shopKeywords = ['shop', 'store', 'products', 'buy', 'cacao', 'chocolate', 'collections'];
-      for (let i = 0; i < hrefs.length; i++) {
-        const h = hrefs[i];
-        if (!h || h.startsWith('#') || h.startsWith('mailto:') || h.startsWith('tel:')) continue;
-        const full = h.startsWith('http') ? h : new URL(h, origin).href;
-        if (!full.startsWith(origin) && !full.includes(new URL(origin).hostname)) continue;
-        const t = text[i];
-        if (shopKeywords.some((k) => t.includes(k) || full.toLowerCase().includes(k))) {
-          return full;
+    for (let i = 0; i < Math.min(items.length, 8); i++) {
+      try {
+        const href = await items[i].getAttribute('href');
+        if (!href || seen.has(href)) continue;
+        seen.add(href);
+        await items[i].click();
+        await sleep(1800);
+
+        const nameEl = await page.$('h1');
+        let name = nameEl ? (await nameEl.textContent())?.trim() || '' : '';
+        if (isJunkName(name)) {
+          const websiteEl = await page.$('a[data-item-id="authority"]');
+          const website = websiteEl ? await websiteEl.getAttribute('href') : undefined;
+          if (website) {
+            try {
+              const host = new URL(website).hostname.replace(/^www\./, '');
+              name = host.split('.')[0].replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+            } catch {
+              /* ignore */
+            }
+          }
         }
-      }
-      // Fallback: common paths
-      for (const p of ['/pages/shop-all', '/shop', '/collections/all', '/collections/cacao', '/products', '/shop-all']) {
-        const u = origin + p;
-        if (hrefs.some((h) => h === p || h === u || h.endsWith(p))) return origin + p;
-      }
-      return null;
-    }, baseUrl);
+        if (!name || isJunkName(name)) continue;
 
-    if (shopLink) {
-      result.shopUrl = shopLink;
-      result.shopDiscoverable = true;
-      result.working.push('Shop link discoverable from homepage');
-    } else {
-      result.notWorking.push('Shop link not easily discoverable from homepage');
-    }
+        const addressEl = await page.$('[data-item-id="address"]');
+        const address = cleanAddress(addressEl ? (await addressEl.textContent())?.trim() : '');
+        if (!hasValidAddress(address)) continue;
+        const phoneEl = await page.$('a[data-item-id^="phone"]');
+        const phone = phoneEl ? (await phoneEl.textContent())?.trim() : undefined;
+        const websiteEl = await page.$('a[data-item-id="authority"]');
+        const website = websiteEl ? await websiteEl.getAttribute('href') : undefined;
 
-    // --- Product listing ---
-    const listingUrl = shopLink || `${baseUrl}/collections/all`;
-    const t1 = Date.now();
-    const listResp = await page.goto(listingUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT }).catch(() => null);
-    const listLoadMs = Date.now() - t1;
+        const instagram = await extractInstagramFromPage(page);
 
-    if (listResp && listResp.ok()) {
-      const listInfo = await page.evaluate(() => {
-        const productLinks = Array.from(document.querySelectorAll('a[href*="/products/"], a[href*="/product/"], a[href*="/collections/"]'));
-        const hrefs = productLinks.map((a) => a.getAttribute('href')).filter(Boolean) as string[];
-        const unique = [...new Set(hrefs)];
-        return { productLinksCount: unique.length, sample: unique.slice(0, 5) };
-      });
-      result.productListing = {
-        url: listingUrl,
-        productLinksCount: listInfo.productLinksCount,
-        loadMs: listLoadMs,
-      };
-      if (listInfo.productLinksCount > 0) {
-        result.working.push(`Product listing has ${listInfo.productLinksCount} product links`);
-      } else {
-        result.notWorking.push('No product links found on listing page');
-      }
+        const cityMatch = address?.match(/,?\s*([^,]+),\s*([A-Z]{2})\s*\d/);
+        const parsedCity = cityMatch ? cityMatch[1].trim() : city;
+        const parsedState = cityMatch ? cityMatch[2] : state;
 
-      // --- First product page ---
-      let productUrl: string | null = await page.evaluate(() => {
-        const a = document.querySelector('a[href*="/products/"], a[href*="/product/"]') as HTMLAnchorElement;
-        return a ? a.href : null;
-      });
-      if (!productUrl && listInfo.sample && listInfo.sample[0]) {
-        productUrl = listInfo.sample[0].startsWith('http') ? listInfo.sample[0] : new URL(listInfo.sample[0], baseUrl).href;
-      }
-      if (productUrl) {
-        const t2 = Date.now();
-        await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
-        const productLoadMs = Date.now() - t2;
+        let coords: { lat: string; lng: string } | null = parseCoordsFromGoogleMapsUrl(page.url());
+        if (!coords) coords = await geocodeAddress(address || '', parsedCity, parsedState);
+        if (coords) await sleep(1100);
 
-        const productInfo = await page.evaluate(() => {
-          const title = document.querySelector('h1')?.textContent?.trim() || document.querySelector('[data-product-title]')?.textContent?.trim() || null;
-          const priceEl = document.querySelector('[data-product-price], .price, .product-price, [class*="price"]');
-          const priceText = priceEl?.textContent?.trim() || null;
-          const priceVisible = !!priceText && priceText.length > 0 && priceText.length < 50;
-          const addToCart = document.querySelector('button[name="add"], [type="submit"][value="Add"], [data-add-to-cart], .add-to-cart, [class*="add-to-cart"]');
-          const addToCartVisible = !!addToCart;
-          const addToCartText = addToCart?.textContent?.trim() || null;
-          const desc = document.querySelector('[data-product-description], .product-description, .product__description, [class*="description"]');
-          const hasDescription = !!(desc?.textContent?.trim() && desc.textContent!.trim().length > 50);
-          const images = document.querySelectorAll('img[src*="product"], .product__media img, [data-product-image] img, .product-gallery img');
-          return {
-            title,
-            priceText,
-            priceVisible,
-            addToCartVisible,
-            addToCartText: addToCartText ? addToCartText.slice(0, 80) : null,
-            hasDescription,
-            imageCount: images.length,
-          };
+        results.push({
+          shopName: name,
+          address: address || '',
+          city: parsedCity,
+          state: parsedState,
+          phone,
+          website,
+          instagram: instagram ? `@${instagram}` : undefined,
+          latitude: coords?.lat,
+          longitude: coords?.lng,
+          shopType: 'Metaphysical/Spiritual',
+          source: 'google_maps',
+          storeKey: toStoreKey(name, address || '', parsedCity, parsedState),
         });
-
-        result.productPage = {
-          url: productUrl,
-          title: productInfo.title,
-          priceVisible: productInfo.priceVisible,
-          priceText: productInfo.priceText,
-          addToCartVisible: productInfo.addToCartVisible,
-          addToCartText: productInfo.addToCartText,
-          hasDescription: productInfo.hasDescription,
-          imageCount: productInfo.imageCount,
-          loadMs: productLoadMs,
-        };
-
-        if (productInfo.addToCartVisible) result.working.push('Add to cart CTA visible on product page');
-        else result.notWorking.push('Add to cart not found on product page');
-        if (productInfo.priceVisible) result.working.push('Price visible');
-        else result.notWorking.push('Price not clearly visible');
-        if (productInfo.hasDescription) result.working.push('Product description present');
-      }
-    } else {
-      result.notWorking.push('Product listing page failed to load or not found');
-    }
-
-    // --- Cart ---
-    const cartUrls = [
-      baseUrl + '/cart',
-      baseUrl + '/cart.php',
-      baseUrl + '/bag',
-      new URL('/cart', baseUrl).href,
-    ];
-    let cartReachable = false;
-    let cartLoadMs = 0;
-    let cartCheckoutVisible = false;
-    let cartItemCount: number | undefined;
-
-    for (const cartUrl of cartUrls) {
-      const t3 = Date.now();
-      const cartResp = await page.goto(cartUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null);
-      cartLoadMs = Date.now() - t3;
-      if (cartResp && cartResp.ok()) {
-        const cartInfo = await page.evaluate(() => {
-          const checkoutBtn = document.querySelector('button[name="checkout"], a[href*="checkout"], [data-checkout], input[value*="Checkout"]');
-          const items = document.querySelectorAll('[data-cart-item], .cart-item, .line-item, tr.cart__row');
-          return {
-            checkoutButtonVisible: !!checkoutBtn,
-            itemCount: items.length,
-          };
-        });
-        cartReachable = true;
-        result.cart = {
-          url: cartUrl,
-          reachable: true,
-          itemCount: cartInfo.itemCount,
-          checkoutButtonVisible: cartInfo.checkoutButtonVisible,
-          loadMs: cartLoadMs,
-        };
-        cartCheckoutVisible = cartInfo.checkoutButtonVisible;
-        cartItemCount = cartInfo.itemCount;
-        result.working.push('Cart page reachable');
-        if (cartInfo.checkoutButtonVisible) result.working.push('Checkout button visible on cart');
-        else result.notWorking.push('Checkout CTA not obvious on cart');
-        break;
-      }
-    }
-    if (!cartReachable) {
-      result.cart = { url: cartUrls[0], reachable: false, checkoutButtonVisible: false, loadMs: 0 };
-      result.notWorking.push('Cart URL not reachable or 404');
-    }
-
-    // --- Checkout (do not submit) ---
-    if (cartReachable && cartCheckoutVisible) {
-      const checkoutLink = await page.evaluate(() => {
-        const a = document.querySelector('a[href*="checkout"]');
-        return a ? (a as HTMLAnchorElement).href : null;
-      });
-      if (checkoutLink) {
-        const t4 = Date.now();
-        const checkResp = await page.goto(checkoutLink, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
-        const checkoutLoadMs = Date.now() - t4;
-        if (checkResp && checkResp.ok()) {
-          const checkoutInfo = await page.evaluate(() => {
-            const steps = Array.from(document.querySelectorAll('[data-step], .step, .checkout-step, h2, .section__title')).map((e) => e.textContent?.trim()).filter(Boolean) as string[];
-            const body = document.body.innerText || '';
-            const paymentKeywords = ['card', 'credit', 'debit', 'paypal', 'apple pay', 'google pay', 'amazon pay', 'klarna', 'afterpay', 'venmo'];
-            const paymentMethodsMentioned = paymentKeywords.filter((k) => body.toLowerCase().includes(k));
-            const trustKeywords = ['secure', 'ssl', 'encrypted', 'safe', 'guarantee', 'refund', 'trust'];
-            const trustSignals = trustKeywords.filter((k) => body.toLowerCase().includes(k));
-            const labels = Array.from(document.querySelectorAll('label, [for]')).map((e) => e.textContent?.trim()).filter(Boolean).slice(0, 15);
-            return {
-              stepsOrSections: steps.slice(0, 10),
-              paymentMethodsMentioned: [...new Set(paymentMethodsMentioned)],
-              trustSignals: [...new Set(trustSignals)],
-              requiredFieldsSample: labels.slice(0, 12),
-            };
-          });
-          result.checkout = {
-            reachable: true,
-            stepsOrSections: checkoutInfo.stepsOrSections,
-            paymentMethodsMentioned: checkoutInfo.paymentMethodsMentioned,
-            trustSignals: checkoutInfo.trustSignals,
-            requiredFieldsSample: checkoutInfo.requiredFieldsSample,
-            loadMs: checkoutLoadMs,
-          };
-          result.working.push('Checkout page reachable');
-          if (checkoutInfo.paymentMethodsMentioned.length > 0) result.working.push(`Payment options indicated: ${checkoutInfo.paymentMethodsMentioned.join(', ')}`);
-          if (checkoutInfo.trustSignals.length > 0) result.working.push(`Trust signals: ${checkoutInfo.trustSignals.join(', ')}`);
-        } else {
-          result.checkout = { reachable: false, stepsOrSections: [], paymentMethodsMentioned: [], trustSignals: [], requiredFieldsSample: [], loadMs: 0 };
-          result.notWorking.push('Checkout page did not load');
-        }
+      } catch {
+        // skip
       }
     }
   } catch (e) {
-    result.error = e instanceof Error ? e.message : String(e);
-    result.notWorking.push(`Error: ${result.error}`);
-  } finally {
-    await page.close();
+    console.warn(`Google Maps failed for ${term} ${city} ${state}:`, (e as Error).message);
   }
-
-  return result;
+  return results;
 }
 
-function writeMarkdown(results: SalesChannelResult[]): string {
-  const lines: string[] = [
-    '# Online Sales Channel Analysis — USA Ceremonial Cacao Competitors',
+async function searchYelp(page: any, term: string, location: string): Promise<DiscoveredStore[]> {
+  const results: DiscoveredStore[] = [];
+  const baseUrl = `https://www.yelp.com/search?find_desc=${encodeURIComponent(term)}&find_loc=${encodeURIComponent(location)}`;
+
+  for (let p = 0; p < YELP_MAX_PAGES; p++) {
+    const url = p === 0 ? baseUrl : `${baseUrl}&start=${p * 10}`;
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
+      await randomDelay(4000, 8000);
+
+      const cards = await page.$$('a[href*="/biz/"]');
+      const seen = new Set<string>();
+
+      for (const card of cards) {
+        const href = await card.getAttribute('href');
+        if (!href || !href.includes('/biz/') || seen.has(href)) continue;
+        seen.add(href);
+
+        try {
+          await card.click();
+          await randomDelay(2000, 4000);
+
+          const nameEl = await page.$('h1');
+          const name = nameEl ? (await nameEl.textContent())?.trim() : '';
+          if (!name || isJunkName(name)) continue;
+
+          const addressEl = await page.$('address');
+          const address = cleanAddress(addressEl ? (await addressEl.textContent())?.trim().replace(/\s+/g, ' ') : '');
+          if (!hasValidAddress(address)) continue;
+          const phoneEl = await page.$('a[href^="tel:"]');
+          const phone = phoneEl ? (await phoneEl.textContent())?.trim() : undefined;
+          const websiteEl = await page.$('a[href*="biz_redir"]');
+          const website = websiteEl ? await websiteEl.getAttribute('href') : undefined;
+
+          const instagram = await extractInstagramFromPage(page);
+
+          const cityMatch = address?.match(/,?\s*([^,]+),\s*([A-Z]{2})\s*\d/);
+          const parsedCity = cityMatch ? cityMatch[1].trim() : '';
+          const parsedState = cityMatch ? cityMatch[2] : '';
+
+          const coords = await geocodeAddress(address || '', parsedCity, parsedState);
+          if (coords) await sleep(1100);
+
+          results.push({
+            shopName: name,
+            address: address || '',
+            city: parsedCity,
+            state: parsedState,
+            phone,
+            website,
+            instagram: instagram ? `@${instagram}` : undefined,
+            latitude: coords?.lat,
+            longitude: coords?.lng,
+            shopType: 'Metaphysical/Spiritual',
+            source: 'yelp',
+            storeKey: toStoreKey(name, address || '', parsedCity, parsedState),
+          });
+        } catch {
+          // skip
+        }
+      }
+    } catch (e) {
+      console.warn(`Yelp failed for ${term} ${location} page ${p}:`, (e as Error).message);
+    }
+    if (p < YELP_MAX_PAGES - 1) await randomDelay(5000, 10000);
+  }
+  return results;
+}
+
+function toCsvRow(s: DiscoveredStore): string[] {
+  return [
+    s.shopName,
+    'Research',
+    'Medium',
+    s.address,
+    s.city,
+    s.state,
+    s.shopType,
+    s.phone || '',
+    s.website || '',
+    s.email || '',
+    s.instagram || '',
     '',
-    'Detailed research on online sales channels for the 5 competitor brands. Generated by Playwright.',
-    '',
-    '---',
-    '',
+    '', '', '', '', '', '', '', '', '', '', '', // Notes through Sales Process Notes
+    s.latitude || '',
+    s.longitude || '',
+    '', '', // Status Updated By, Date
+    s.instagramFollowers || '',
+    s.storeKey,
   ];
+}
 
-  for (const r of results) {
-    lines.push(`## ${r.name}`);
-    lines.push('');
-    lines.push(`- **URL:** ${r.baseUrl}`);
-    lines.push(`- **Platform (detected):** ${r.platform || 'Unknown'}`);
-    if (r.homepageLoadMs != null) lines.push(`- **Homepage load:** ${r.homepageLoadMs}ms`);
-    if (r.error) {
-      lines.push(`- **Error:** ${r.error}`);
-      lines.push('');
-      lines.push('### What\'s not working');
-      lines.push('');
-      lines.push('- Site or critical page failed to load.');
-      lines.push('');
-      continue;
-    }
-    lines.push('');
-    lines.push('### What\'s working');
-    lines.push('');
-    for (const w of r.working) lines.push(`- ${w}`);
-    if (r.working.length === 0) lines.push('- (None captured)');
-    lines.push('');
-    lines.push('### What\'s not working');
-    lines.push('');
-    for (const n of r.notWorking) lines.push(`- ${n}`);
-    if (r.notWorking.length === 0) lines.push('- (None captured)');
-    lines.push('');
-    if (r.productPage) {
-      lines.push('### Product page snapshot');
-      lines.push('');
-      lines.push(`- Product URL: ${r.productPage.url}`);
-      lines.push(`- Title: ${r.productPage.title || '—'}`);
-      lines.push(`- Price visible: ${r.productPage.priceVisible}; Price: ${r.productPage.priceText || '—'}`);
-      lines.push(`- Add to cart visible: ${r.productPage.addToCartVisible} (${r.productPage.addToCartText || '—'})`);
-      lines.push(`- Description: ${r.productPage.hasDescription}; Images: ${r.productPage.imageCount}`);
-      lines.push('');
-    }
-    if (r.cart?.reachable) {
-      lines.push('### Cart');
-      lines.push('');
-      lines.push(`- Checkout button visible: ${r.cart.checkoutButtonVisible}`);
-      lines.push('');
-    }
-    if (r.checkout?.reachable) {
-      lines.push('### Checkout (pre-payment)');
-      lines.push('');
-      lines.push(`- Payment methods mentioned: ${r.checkout.paymentMethodsMentioned.join(', ') || '—'}`);
-      lines.push(`- Trust signals: ${r.checkout.trustSignals.join(', ') || '—'}`);
-      lines.push('');
-    }
-    lines.push('---');
-    lines.push('');
-  }
-
-  lines.push('## Summary comparison');
-  lines.push('');
-  lines.push('| Brand | Platform | Shop discoverable | Add to cart | Cart | Checkout |');
-  lines.push('|-------|----------|-------------------|-------------|------|----------|');
-  for (const r of results) {
-    const shop = r.shopDiscoverable ? 'Yes' : 'No';
-    const atc = r.productPage?.addToCartVisible ? 'Yes' : 'No';
-    const cart = r.cart?.reachable ? 'Yes' : 'No';
-    const co = r.checkout?.reachable ? 'Yes' : 'No';
-    lines.push(`| ${r.name} | ${r.platform || '—'} | ${shop} | ${atc} | ${cart} | ${co} |`);
-  }
-  lines.push('');
-  return lines.join('\n');
+function escapeCsv(val: string): string {
+  if (val.includes(',') || val.includes('"')) return `"${val.replace(/"/g, '""')}"`;
+  return val;
 }
 
 async function main() {
-  const list = JSON.parse(fs.readFileSync(LIST_PATH, 'utf-8'));
-  const competitors: Competitor[] = list.competitors || [];
-  if (competitors.length === 0) {
-    console.log('No competitors in competitors_list.json.');
-    process.exit(0);
-  }
+  const allStores: DiscoveredStore[] = [];
+  const seenKeys = new Set<string>();
 
-  console.log(`Researching ${competitors.length} competitors (sales channels)...\n`);
   const browser = await chromium.launch({ headless: HEADLESS });
 
-  const results: SalesChannelResult[] = [];
-  for (let i = 0; i < competitors.length; i++) {
-    const c = competitors[i];
-    console.log(`[${i + 1}/${competitors.length}] ${c.name} — ${c.url}`);
-    const r = await researchOne(browser, c, i, competitors.length);
-    results.push(r);
-    console.log(`  Working: ${r.working.length}, Not working: ${r.notWorking.length}`);
+  const page = await browser.newPage();
+  page.setDefaultTimeout(NAV_TIMEOUT);
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  const statesToRun = REGIONS_FILTER
+    ? STATES.filter((s) => REGIONS_FILTER.includes(s.state))
+    : STATES;
+  if (statesToRun.length === 0) {
+    console.error('No states match REGIONS filter:', process.env.REGIONS);
+    process.exit(1);
+  }
+  console.log('Searching Google Maps...', REGIONS_FILTER ? `(regions: ${REGIONS_FILTER.join(', ')})` : '(all regions)');
+  for (const { state, cities } of statesToRun) {
+    for (const city of cities.slice(0, 2)) {
+      const term = 'apothecary metaphysical';
+      console.log(`  ${term} in ${city}, ${state}`);
+      const stores = await searchGoogleMaps(page, term, city, state);
+      for (const s of stores) {
+        if (!seenKeys.has(s.storeKey)) {
+          seenKeys.add(s.storeKey);
+          allStores.push(s);
+        }
+      }
+      await randomDelay(2000, 4000);
+    }
+  }
+
+  console.log('Searching Yelp (throttled)...');
+  const yelpPage = await browser.newPage();
+  yelpPage.setDefaultTimeout(NAV_TIMEOUT);
+  for (const { state, cities } of statesToRun) {
+    for (const city of cities.slice(0, 2)) {
+      const location = `${city}, ${state}`;
+      console.log(`  apothecary in ${location}`);
+      const stores = await searchYelp(yelpPage, 'apothecary', location);
+      for (const s of stores) {
+        if (!seenKeys.has(s.storeKey)) {
+          seenKeys.add(s.storeKey);
+          allStores.push(s);
+        }
+      }
+    }
+  }
+
+  await page.close();
+  await yelpPage.close();
+
+  const needInstagram = allStores.filter((s) => !s.instagram && s.website);
+  if (needInstagram.length > 0) {
+    console.log(`Checking ${needInstagram.length} store websites for Instagram...`);
+    const webPage = await browser.newPage();
+    webPage.setDefaultTimeout(12000);
+    for (const s of needInstagram) {
+      if (s.website) {
+        const ig = await extractInstagramFromWebsite(webPage, s.website);
+        if (ig) s.instagram = `@${ig}`;
+        await randomDelay(1500, 3000);
+      }
+    }
+    await webPage.close();
+  }
+
+  const withInstagram = allStores.filter((s) => s.instagram);
+  if (withInstagram.length > 0) {
+    console.log(`Fetching Instagram follower counts for ${withInstagram.length} stores...`);
+    const igPage = await browser.newPage();
+    igPage.setDefaultTimeout(15000);
+    for (const s of withInstagram) {
+      const handle = (s.instagram || '').replace(/^@/, '');
+      if (handle) {
+        const count = await fetchInstagramFollowers(igPage, handle);
+        if (count) s.instagramFollowers = count;
+        await randomDelay(3000, 6000);
+      }
+    }
+    await igPage.close();
   }
 
   await browser.close();
 
+  console.log(`\nTotal: ${allStores.length}, With Instagram: ${withInstagram.length}`);
+
   const out = {
-    targetMarket: list.targetMarket,
-    researchedAt: new Date().toISOString(),
-    results,
+    discoveredAt: new Date().toISOString(),
+    total: allStores.length,
+    withInstagram: withInstagram.length,
+    stores: allStores,
   };
   fs.writeFileSync(OUT_JSON, JSON.stringify(out, null, 2), 'utf-8');
-  console.log(`\nWrote ${OUT_JSON}`);
+  console.log(`Wrote ${OUT_JSON}`);
 
-  const md = writeMarkdown(results);
-  fs.writeFileSync(OUT_MD, md, 'utf-8');
-  console.log(`Wrote ${OUT_MD}`);
+  const header = [
+    'Shop Name', 'Status', 'Priority', 'Address', 'City', 'State', 'Shop Type',
+    'Phone', 'Website', 'Email', 'Instagram', 'Notes',
+    'Contact Date', 'Contact Method', 'Follow Up Date', 'Contact Person', 'Owner Name',
+    'Referral', 'Product Interest', 'Follow Up Event Link', 'Visit Date', 'Outcome',
+    'Sales Process Notes', 'Latitude', 'Longitude', 'Status Updated By', 'Status Updated Date',
+    'Instagram Follow Count', 'Store Key',
+  ];
+  const csvRows = [header.join(','), ...allStores.map((s) => toCsvRow(s).map(escapeCsv).join(','))];
+  fs.writeFileSync(OUT_CSV, csvRows.join('\n'), 'utf-8');
+  console.log(`Wrote ${OUT_CSV}`);
 }
 
 main().catch((e) => {

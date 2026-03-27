@@ -3,13 +3,45 @@ venv/
 env/
 ENV/
 
-# Credentials and API Keys
+# --- Credentials & secrets (never commit) ---
+# Do not use blanket *.json here — this repo has legitimate JSON (data, Node configs).
+# Add new filenames if you introduce another local secret file.
+
+# Google Cloud: Sheets/Drive service account used by scripts
 google_credentials.json
+google_credentials*.json
+**/google_credentials.json
+
+# OAuth (Gmail, etc.): desktop client + refreshed user token
+**/client_secret*.json
+credentials/**/token.json
+credentials/**/oauth*.json
+
+# Other service account / key JSON naming
 service_account.json
-*.json
+*service_account*.json
+**/*service-account*.json
+*credentials*.json
+
+# Environment and API keys
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
+
+# Key material
+*.pem
+*.p12
+*.pfx
+
+# Google auth legacy / ADC paths sometimes copied by mistake
+token.pickle
+**/token.pickle
+**/application_default_credentials.json
+.gcloud/
+
+# GitHub Actions secret prep / exports
+github_secret_credentials.txt
+**/token_export*.txt
 
 # Python
 __pycache__/
@@ -59,9 +91,6 @@ logs/
 
 # Office application lock files
 .~lock.*
-
-# GitHub secret preparation output
-github_secret_credentials.txt
 
 # Feedback processing files
 community_feedback.csv

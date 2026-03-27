@@ -1,0 +1,187 @@
+{
+  "targetMarket": "USA",
+  "researchedAt": "2026-02-19T02:47:06.929Z",
+  "results": [
+    {
+      "name": "Ceremonial Cacao",
+      "baseUrl": "https://ceremonial-cacao.com",
+      "crawledAt": "2026-02-19T02:45:59.034Z",
+      "working": [
+        "Shop link discoverable from homepage",
+        "Product listing has 39 product links",
+        "Add to cart CTA visible on product page",
+        "Product description present",
+        "Cart page reachable",
+        "Checkout button visible on cart"
+      ],
+      "notWorking": [
+        "Price not clearly visible"
+      ],
+      "homepageLoadMs": 1729,
+      "platform": "Shopify",
+      "shopUrl": "https://ceremonial-cacao.com/collections/all",
+      "shopDiscoverable": true,
+      "productListing": {
+        "url": "https://ceremonial-cacao.com/collections/all",
+        "productLinksCount": 39,
+        "loadMs": 2084
+      },
+      "productPage": {
+        "url": "https://ceremonial-cacao.com/products/cacao-ceremony-kit-variety",
+        "title": "Cacao Ceremony Variety Kit",
+        "priceVisible": false,
+        "priceText": null,
+        "addToCartVisible": true,
+        "addToCartText": "Add Subscription to Cart",
+        "hasDescription": true,
+        "imageCount": 5,
+        "loadMs": 1776
+      },
+      "cart": {
+        "url": "https://ceremonial-cacao.com/cart",
+        "reachable": true,
+        "itemCount": 0,
+        "checkoutButtonVisible": true,
+        "loadMs": 1035
+      }
+    },
+    {
+      "name": "Ora Cacao",
+      "baseUrl": "https://oracacao.com",
+      "crawledAt": "2026-02-19T02:46:06.939Z",
+      "working": [],
+      "notWorking": [
+        "Error: page.goto: Timeout 35000ms exceeded.\nCall log:\n  - navigating to \"https://oracacao.com/\", waiting until \"domcontentloaded\"\n"
+      ],
+      "error": "page.goto: Timeout 35000ms exceeded.\nCall log:\n  - navigating to \"https://oracacao.com/\", waiting until \"domcontentloaded\"\n"
+    },
+    {
+      "name": "Four Visions",
+      "baseUrl": "https://fourvisions.com",
+      "crawledAt": "2026-02-19T02:46:42.250Z",
+      "working": [
+        "Shop link discoverable from homepage",
+        "Product listing has 5 product links",
+        "Add to cart CTA visible on product page",
+        "Cart page reachable"
+      ],
+      "notWorking": [
+        "Price not clearly visible",
+        "Checkout CTA not obvious on cart"
+      ],
+      "homepageLoadMs": 2231,
+      "platform": "BigCommerce",
+      "shopUrl": "https://fourvisions.com/category/ceremonial-cacao-heart-opening-medicine/",
+      "shopDiscoverable": true,
+      "productListing": {
+        "url": "https://fourvisions.com/category/ceremonial-cacao-heart-opening-medicine/",
+        "productLinksCount": 5,
+        "loadMs": 1771
+      },
+      "productPage": {
+        "url": "https://fourvisions.com/product/nana-marina-guatemala-ceremonial-cacao",
+        "title": "Nana Marina's Cacao",
+        "priceVisible": false,
+        "priceText": "In stock\n            Nana Marina's Cacao\n            \n            \n                    \n    \n        \n                MSRP:\n        \n        \n            \n        \n    \n    \n        \n                 \n        \n        \n            \n        \n    \n    \n        \n            \n        \n        \n                 \n        \n        \n            (Inc. US Tax)\n    \n    \n        \n                MSRP:\n        \n        \n            \n        \n    \n    \n        \n                 \n        \n        \n            \n        \n    \n    \n        \n            \n        \n        \n                 \n        \n        $65.00\n    \n         \n                (You save\n                \n                    \n                \n                )\n         \n            \n            \n                \n                    Secure payment\n                \n                \n                    30-day returns\n                \n                    \n                        In stock\n                    \n            \n                   \n  #banner-region-f20f6290-c74a-4fda-ab50-c0f8b4920ad1 {\n    display: block;\n    width: 100%;\n    max-width: 545px;\n  }\n\n\n\n  \n  \n  \n    (function () {\n      // Price container with data-product-price-with-tax has bigger priority for product amount calculations\n      const priceContainer = document.querySelector('[data-product-price-with-tax]')?.innerText\n        ? document.querySelector('[data-product-price-with-tax]')\n        : document.querySelector('[data-product-price-without-tax]');\n\n      if (priceContainer) {\n        renderMessageIfPossible();\n\n        const config = {\n          childList: true,    // Observe direct child elements\n          subtree: true,      // Observe all descendants\n          attributes: false,  // Do not observe attribute changes\n        };\n\n        const observer = new MutationObserver((mutationsList) => {\n          if (mutationsList.length > 0) {\n            renderMessageIfPossible();\n          }\n        });\n\n        observer.observe(priceContainer, config);\n      }\n\n      function renderMessageIfPossible() {\n        const amount = getPriceAmount(priceContainer.innerText)[0];\n\n        if (amount) {\n          renderMessage({ amount });\n        }\n      }\n\n      function getPriceAmount(text) {\n        /*\n         INFO:\n         - extracts a string from a pattern: [number][separator][number][separator]...\n           [separator] - any symbol but a digit, including whitespaces\n         */\n        const pattern = /\\d+(?:[^\\d]\\d+)+(?!\\d)/g;\n        const matches = text.match(pattern);\n        const results = [];\n\n        // if there are no matches\n        if (!matches?.length) {\n          const amount = text.replace(/[^\\d]/g, '');\n\n          if (!amount) return results;\n\n          results.push(amount);\n\n          return results;\n        }\n\n        matches.forEach(str => {\n          const sepIndexes = [];\n\n          for (let i = 0; i < str.length; i++) {\n            // find separator index and push to array\n            if (!/\\d/.test(str[i])) {\n              sepIndexes.push(i);\n            }\n          }\n          if (sepIndexes.length === 0) return;\n          // assume the last separator is the decimal\n          const decIndex = sepIndexes[sepIndexes.length - 1];\n\n          // cut the substr to the separator with replacing non-digit chars\n          const intSubstr = str.slice(0, decIndex).replace(/[^\\d]/g, '');\n          // cut the substr after the separator with replacing non-digit chars\n          const decSubstr = str.slice(decIndex + 1).replace(/[^\\d]/g, '');\n\n          if (!intSubstr) return;\n\n          const amount = decSubstr ? `${intSubstr}.${decSubstr}` : intSubstr;\n          // to get floating point number\n          const number = parseFloat(amount);\n\n          if (!isNaN(number)) {\n            results.push(String(number));\n          }\n        });\n\n        return results;\n      }\n\n      function loadScript(src, attributes) {\n        return new Promise((resolve, reject) => {\n          const scriptTag = document.createElement('script');\n\n          if (attributes) {\n            Object.keys(attributes)\n                    .forEach(key => {\n                      scriptTag.setAttribute(key, attributes[key]);\n                    });\n          }\n\n          scriptTag.type = 'text/javascript';\n          scriptTag.src = src;\n\n          scriptTag.onload = () => resolve();\n          scriptTag.onerror = event => {\n            reject(event);\n          };\n\n          document.head.appendChild(scriptTag);\n        });\n      }\n\n      function renderMessage(objectParams) {\n        const paypalSdkScriptConfig = getPayPalSdkScriptConfig();\n\n        const options = transformConfig(paypalSdkScriptConfig.options);\n        const attributes = transformConfig(paypalSdkScriptConfig.attributes);\n\n        const messageProps = { placement: 'product', ...objectParams };\n\n        const renderPayPalMessagesComponent = (paypal) => {\n          paypal.Messages(messageProps).render('#paypal-commerce-proddetails-messaging-banner');\n        };\n\n        if (options['client-id'] && options['merchant-id']) {\n          if (!window.paypalMessages) {\n            const paypalSdkUrl = 'https://www.paypal.com/sdk/js';\n            const scriptQuery = new URLSearchParams(options).toString();\n            const scriptSrc = `${paypalSdkUrl}?${scriptQuery}`;\n\n            loadScript(scriptSrc, attributes).then(() => {\n              renderPayPalMessagesComponent(window.paypalMessages);\n            });\n          } else {\n            renderPayPalMessagesComponent(window.paypalMessages)\n          }\n        }\n      }\n\n      function transformConfig(config) {\n        let transformedConfig = {};\n\n        const keys = Object.keys(config);\n\n        keys.forEach((key) => {\n          const value = config[key];\n\n          if (\n                  value === undefined ||\n                  value === null ||\n                  value === '' ||\n                  (Array.isArray(value) && value.length === 0)\n          ) {\n            return;\n          }\n\n          transformedConfig = {\n            ...transformedConfig,\n            [key]: Array.isArray(value) ? value.join(',') : value,\n          };\n        });\n\n        return transformedConfig;\n      }\n\n      function getPayPalSdkScriptConfig() {\n        const attributionId = 'BigCommerceInc_SP_BC_P4P';\n        const currencyCode = 'USD';\n        const clientId = 'AQ3RkiNHQ53oodRlTz7z-9ETC9xQNUgOLHjVDII9sgnF19qLXJzOwShAxcFW7OT7pVEF5B9bwjIArOvE';\n        const merchantId = '';\n        const isDeveloperModeApplicable = 'false'.indexOf('true') !== -1;\n        const buyerCountry = 'US';\n\n        return {\n          options: {\n            'client-id': clientId,\n            'merchant-id': merchantId,\n            components: ['messages'],\n            currency: currencyCode,\n            ...(isDeveloperModeApplicable && { 'buyer-country': buyerCountry }),\n          },\n          attributes: {\n            'data-namespace': 'paypalMessages',\n            'data-partner-attribution-id': attributionId,\n          },\n        };\n      }\n    })();\n  \n\n\n\n            \n            \n                SKU:\n                CACAO0001-1\n                UPC:\n                \n\n                    \n                                            \n\n                                \n        \n    \n\n    \n        \n            \n                \n                \n                \n                    \n                            \n        \n            \n            One time purchase\n            \n            Subscribe to save\n            \n                One-click cancel, change, pause or skip anytime\n                Subscribe more, save more: 1 product 20% off, 2 products, 25% off, 3 or more products, 30% off\n                Free gift with every subscription order\n                Customers who subscribe are more likely to experience a profound connection with their plant ally\n            \n            \n                \n                    Select your delivery frequency \n                \n\n                \n                    Choose Options\n                        30 Days\n                        60 Days\n                        90 Days\n                \n            \n        \n    \n\n                \n                \n                    \n                        Current Stock:\n                        \n                    \n                \n                \n        \n        \n                \n                    \n                        Decrease Quantity of Nana Marina's Cacao\n                        \n                            \n                                \n                            \n                        \n                    \n                    \n                    \n                        Increase Quantity of Nana Marina's Cacao\n                        \n                            \n                                \n                            \n                        \n                    \n                \n        \n\n    \n        \n            \n        \n        \n    \n        \n            \n                \n                Adding to cart… The item has been added\n            \n                \n                        \n\n    (function() {\n        let productData = null;\n\n        init();\n\n        function init() {\n            const buttonsContainerId = 'bc-smart-payment-buttons_69967997a42a6';\n            const smartButtonsContainer = document.getElementById(buttonsContainerId);\n\n            if (!smartButtonsContainer) {\n                return;\n            }\n\n            const appLoadingProps = {\n                checkoutKitLoaderScriptPath: 'https://checkout-sdk.bigcommerce.com/v1/loader.js',\n                microAppJsFilesPaths: JSON.parse('[\"https:\\/\\/microapps.bigcommerce.com\\/smart-payment-buttons\\/js\\/runtime-ead45ca4.js\",\"https:\\/\\/microapps.bigcommerce.com\\/smart-payment-buttons\\/js\\/vendors-13b050f2.js\",\"https:\\/\\/microapps.bigcommerce.com\\/smart-payment-buttons\\/js\\/smart-payment-buttons-ee781486.js\"]'),\n            }\n\n            const smartPaymentButtonsProps = {\n                buyNowInitializeOptions: {\n                    getBuyNowCartRequestBody: getBuyNowCartRequestBody,\n                    storefrontApiToken: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJjaWQiOlsxXSwiY29ycyI6WyJodHRwczovL2ZvdXJ2aXNpb25zLmNvbSJdLCJlYXQiOjE3NzE1Njg1MzksImlhdCI6MTc3MTM5NTczOSwiaXNzIjoiQkMiLCJzaWQiOjEwMDMzODY2MzAsInN1YiI6IkJDIiwic3ViX3R5cGUiOjAsInRva2VuX3R5cGUiOjF9.C-0xmued1dRj9VgvWvOGN7_4alDumZIEMluMW7i3ygZLXeRHkGmkgSIuP5yYWyyhZGYyvmRYc-rjlHaXAALP1g',\n                },\n                containerId: buttonsContainerId,\n                currencyCode: 'USD',\n                showMoreButtonLabel: 'More payment options',\n                smartPaymentButtons: JSON.parse('[{\"gatewayId\":\"paypalcommerce\",\"methodId\":\"paypal\",\"initializationOptions\":{\"style\":{\"size\":\"medium\",\"color\":\"gold\",\"shape\":\"rect\",\"label\":\"checkout\",\"height\":40}},\"sortOrder\":0}]'),\n                storeSettings: {\n                    host: 'https://fourvisions.com',\n                    locale: '',\n                },\n                visibleBaseButtonsCount: Number('1'),\n                confirmationPageRedirectUrl: '/checkout/order-confirmation',\n                requiresShipping: Boolean('1'),\n            };\n\n            document.addEventListener('onProductUpdate', (e) => {\n                productData = e.detail.productDetails;\n                productData.quantity = productData.quantity || 1;\n            }, false);\n\n            appInit(appLoadingProps, smartPaymentButtonsProps);\n        }\n\n        /**\n         *\n         * Get 'buy now' cart data functions\n         *\n         * */\n        function getBuyNowCartRequestBody() {\n            return {\n                lineItems: [productData],\n                source: 'BUY_NOW',\n            };\n        }\n\n        /**\n         *\n         * App initialization\n         *\n         * */\n        function appInit(appLoadingProps, smartPaymentButtonsProps) {\n            const { checkoutKitLoaderScriptPath, microAppJsFilesPaths } = appLoadingProps;\n\n            if (window.checkoutKitLoader) {\n                initializeSmartPaymentButtonsApp(microAppJsFilesPaths, smartPaymentButtonsProps);\n            } else {\n                createScriptTag(\n                    checkoutKitLoaderScriptPath,\n                    () => initializeSmartPaymentButtonsApp(microAppJsFilesPaths, smartPaymentButtonsProps)\n                );\n            }\n        }\n\n        function initializeSmartPaymentButtonsApp(microAppJsFilesPaths, smartPaymentButtonsProps) {\n            if (\n                window.BigCommerce\n                && window.BigCommerce.initializeSmartPaymentButtons\n                && typeof window.BigCommerce.initializeSmartPaymentButtons === 'function'\n            ) {\n                window.BigCommerce.initializeSmartPaymentButtons(smartPaymentButtonsProps);\n            } else {\n                loadScripts(\n                    microAppJsFilesPaths,\n                    () => window.BigCommerce.initializeSmartPaymentButtons(smartPaymentButtonsProps)\n                );\n            }\n        }\n\n        function createScriptTag(src, onLoad) {\n            const scriptTag = document.createElement('script');\n            scriptTag.type = 'text/javascript';\n            scriptTag.defer = true;\n            scriptTag.async = false;\n            scriptTag.crossorigin = true;\n            scriptTag.src = src;\n            if (onLoad) {\n                scriptTag.onload = onLoad;\n            }\n            document.head.appendChild(scriptTag);\n        }\n\n        function loadScripts(scripts, onLoadEnd) {\n            const script = scripts[0];\n            const scriptsToLoad = scripts.slice(1);\n\n            createScriptTag(script, () => {\n                if (scriptsToLoad.length > 0) {\n                    loadScripts(scriptsToLoad, onLoadEnd);\n                } else {\n                    onLoadEnd();\n                }\n            });\n        }\n    })();\n\n\n\n                \n        \n\n            \n                \n    \n        Add to Wish List\n        \n            \n                \n            \n        \n    \n    \n        \n            \n        \n        \n            Create New Wish List\n        \n    \n\n        \n        \n            View Product Details\n        \n    \n        \n            About Product\n            We are proud to be in partnership Nana Marina, Guatamayan Elder & Guardian of Traditional Ceremonial Cacao Medicine. This is 100% pure ceremonial-grade cacao has been grown, harvested, toasted, fermented & packaged by Nana Marina & her team of Guatemayan natives. Nana Marina is a beacon of hope in this world, and a remarkable female wisdom keeper. For those seeking to connect deeper with the Sacred Feminine through the spirit of Cacao, there is no better cacao to work with than this one, which carriers her fierce prayer and vision or the restoration of peace upon the Earth. Drink this cacao with intention and open your heart to feel the power of Nana Marina’s prayers.",
+        "addToCartVisible": true,
+        "addToCartText": "Decrease Quantity of Nana Marina's Cacao\n                        \n              ",
+        "hasDescription": false,
+        "imageCount": 11,
+        "loadMs": 1315
+      },
+      "cart": {
+        "url": "https://fourvisions.com/cart.php",
+        "reachable": true,
+        "itemCount": 0,
+        "checkoutButtonVisible": false,
+        "loadMs": 1018
+      }
+    },
+    {
+      "name": "Ma Cacao",
+      "baseUrl": "https://ma-cacao.com",
+      "crawledAt": "2026-02-19T02:46:50.618Z",
+      "working": [
+        "Shop link discoverable from homepage",
+        "Product listing has 55 product links",
+        "Add to cart CTA visible on product page",
+        "Product description present",
+        "Cart page reachable"
+      ],
+      "notWorking": [
+        "Price not clearly visible",
+        "Checkout CTA not obvious on cart"
+      ],
+      "homepageLoadMs": 2637,
+      "platform": "Shopify",
+      "shopUrl": "https://ma-cacao.com/collections/cacao-collection",
+      "shopDiscoverable": true,
+      "productListing": {
+        "url": "https://ma-cacao.com/collections/cacao-collection",
+        "productLinksCount": 55,
+        "loadMs": 1737
+      },
+      "productPage": {
+        "url": "https://ma-cacao.com/products/ceremony-bar",
+        "title": "Ceremony Bar. 100% Cacao",
+        "priceVisible": false,
+        "priceText": "Regular price\n  $12.00\n\n  \n\n  \n    \n      Unit price\n      \n       / \n      per",
+        "addToCartVisible": true,
+        "addToCartText": "Add to Cart",
+        "hasDescription": true,
+        "imageCount": 5,
+        "loadMs": 2166
+      },
+      "cart": {
+        "url": "https://ma-cacao.com/cart",
+        "reachable": true,
+        "itemCount": 0,
+        "checkoutButtonVisible": false,
+        "loadMs": 1402
+      }
+    },
+    {
+      "name": "Bar and Cocoa",
+      "baseUrl": "https://barandcocoa.com",
+      "crawledAt": "2026-02-19T02:46:59.181Z",
+      "working": [
+        "Shop link discoverable from homepage",
+        "Product listing has 64 product links",
+        "Add to cart CTA visible on product page",
+        "Product description present",
+        "Cart page reachable",
+        "Checkout button visible on cart"
+      ],
+      "notWorking": [
+        "Price not clearly visible"
+      ],
+      "homepageLoadMs": 2489,
+      "platform": "Shopify",
+      "shopUrl": "https://barandcocoa.com/products/chinese-new-year-envelope",
+      "shopDiscoverable": true,
+      "productListing": {
+        "url": "https://barandcocoa.com/products/chinese-new-year-envelope",
+        "productLinksCount": 64,
+        "loadMs": 1895
+      },
+      "productPage": {
+        "url": "https://barandcocoa.com/products/chinese-new-year-envelope",
+        "title": "Chinese New Year Lucky Envelope (Hong Bao)",
+        "priceVisible": false,
+        "priceText": "Regular price\n        \n          $8.88\n        \n    \n        Regular price\n        \n          \n            \n              \n            \n          \n        Sale price\n      \n        $8.88\n      \n    \n    \n      Unit price\n      \n        \n        /\n         per \n        \n        \n      \n    \n  Sale\n      \n      Sold out",
+        "addToCartVisible": true,
+        "addToCartText": "Add to cart",
+        "hasDescription": true,
+        "imageCount": 1,
+        "loadMs": 920
+      },
+      "cart": {
+        "url": "https://barandcocoa.com/cart",
+        "reachable": true,
+        "itemCount": 0,
+        "checkoutButtonVisible": true,
+        "loadMs": 1101
+      }
+    }
+  ]
+}

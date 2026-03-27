@@ -6,6 +6,17 @@ Inspired by [The AI Corner — Claude SEO Cowork prompts](https://www.the-ai-cor
 
 ---
 
+## Context for agents (top 5 brands, no duplicates)
+
+- **We use exactly 5 distinct USA ceremonial cacao competitors.** Duplicates count as one.
+- **Ceremonial Cacao and Ora Cacao are the same company.** Treat them as one brand; primary site is `ceremonial-cacao.com`. Do not list Ora Cacao as a separate competitor.
+- **Canonical list:** `competitors_brands_top5.json` (brands array). Use this for brand-level research (sales drivers, multi-channel).
+- **Legacy list:** `competitors_list.json` may still list Ora and Ceremonial separately; when doing "top 5" or "brand" work, prefer `competitors_brands_top5.json` and merge Ceremonial + Ora.
+- **Brand sales drivers research:** Focus on what is driving sales per brand (own site, wholesale, subscription, retailers page, free shipping, multi-channel). Script: `playwright/research_brand_sales_drivers.ts` → outputs `brand_sales_drivers.json` and `brand_sales_drivers_report.md`. Run: `npm run brand-drivers`.
+- **Full report and Agroverse suggestions:** See `brand_sales_drivers_report.md` for the compiled report and prioritized suggestions for agroverse.shop.
+
+---
+
 ## Workflow (6 steps)
 
 | Step | Description | Output |
@@ -25,8 +36,13 @@ Inspired by [The AI Corner — Claude SEO Cowork prompts](https://www.the-ai-cor
 ```
 market_research/ceremonial_cacao_seo/
 ├── README.md                    # This file — task context and workflow
-├── competitors_list.json        # Top 10 (or more) USA competitors — URLs and notes
-├── competitor_analysis.json      # (Optional) Landing-page crawl: title, meta, h1 per competitor
+├── competitors_list.json        # Legacy: many USA competitors (may list Ora + Ceremonial separately)
+├── competitors_brands_top5.json # Canonical: exactly 5 distinct brands (Ceremonial+Ora = 1)
+├── brand_sales_drivers.json     # Brand sales-drivers research output (what drives sales)
+├── brand_sales_drivers_report.md # Full report + Agroverse suggestions (use for context)
+├── sales_channel_analysis.json  # Own-site sales channel crawl output
+├── sales_channel_analysis.md    # Sales channel report (cart, checkout, etc.)
+├── competitor_analysis.json     # (Optional) Landing-page crawl: title, meta, h1 per competitor
 ├── competitor_site_index.json   # Full-site index: every discovered page per competitor
 ├── competitor_site_mapping.md    # Analysis over full index: keyword mapping, page types
 ├── positioning_summary.md        # Human-readable positioning summary (from landing crawl)
@@ -38,7 +54,9 @@ market_research/ceremonial_cacao_seo/
     ├── crawl_competitors.ts     # Step 3c: landing-only crawl
     ├── index_competitor_sites.ts # Step 3a: full-site index (sitemap + links, then crawl)
     ├── analyze_positioning.ts   # Step 3c: positioning_summary from landing crawl
-    └── analyze_site_index.ts    # Step 3b: mapping from full site index
+    ├── analyze_site_index.ts    # Step 3b: mapping from full site index
+    ├── research_sales_channels.ts   # Own-site sales channel research (cart, checkout)
+    └── research_brand_sales_drivers.ts # Brand-level sales drivers (wholesale, subscription, etc.)
 ```
 
 **Agroverse.shop (implementation & tests):**
@@ -121,6 +139,12 @@ npm run analyze-site
 # Optional: landing-only crawl + positioning summary
 npx ts-node crawl_competitors.ts
 npx ts-node analyze_positioning.ts
+
+# Brand sales drivers (top 5 distinct brands, what drives sales + Agroverse suggestions)
+npm run brand-drivers   # → brand_sales_drivers_report.md
+
+# Own-site sales channel research (cart, checkout, UX)
+npm run sales-channels  # → sales_channel_analysis.md
 
 # 4. Implement in agroverse_shop using implementation_checklist.md
 

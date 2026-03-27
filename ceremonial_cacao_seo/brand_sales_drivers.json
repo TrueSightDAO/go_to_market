@@ -1,0 +1,228 @@
+{
+  "targetMarket": "USA",
+  "researchedAt": "2026-02-19T03:02:43.311Z",
+  "brands": [
+    {
+      "name": "Ceremonial Cacao / Ora Cacao",
+      "primaryUrl": "https://ceremonial-cacao.com",
+      "aliases": [
+        "Ora Cacao",
+        "Ceremonial Cacao"
+      ],
+      "region": "USA",
+      "notes": "Same company. Primary site: ceremonial-cacao.com; oracacao.com redirects or mirrors."
+    },
+    {
+      "name": "Four Visions",
+      "primaryUrl": "https://fourvisions.com",
+      "aliases": [
+        "Four Visions"
+      ],
+      "region": "USA",
+      "notes": "Amazonian hape, plant medicines, ceremonial cacao (e.g. Nana Marina's)."
+    },
+    {
+      "name": "Ma Cacao",
+      "primaryUrl": "https://ma-cacao.com",
+      "aliases": [
+        "Ma Cacao"
+      ],
+      "region": "USA",
+      "notes": "Regenerative cacao, Portland OR, ceremony bar and drinking chocolate."
+    },
+    {
+      "name": "Bar and Cocoa",
+      "primaryUrl": "https://barandcocoa.com",
+      "aliases": [
+        "Bar & Cocoa",
+        "Bar and Cocoa"
+      ],
+      "region": "USA",
+      "notes": "Multi-brand retailer; sells Ora and other ceremonial cacao brands."
+    },
+    {
+      "name": "Maya Moon Cacao",
+      "primaryUrl": "https://mayamooncacao.com",
+      "aliases": [
+        "Maya Moon",
+        "Maya Moon Cacao"
+      ],
+      "region": "USA",
+      "notes": "Guatemalan Criollo, Certified Ceremonial Cacao®, Indigenous women artisans."
+    }
+  ],
+  "results": [
+    {
+      "brandName": "Ceremonial Cacao / Ora Cacao",
+      "primaryUrl": "https://ceremonial-cacao.com",
+      "researchedAt": "2026-02-19T03:01:35.148Z",
+      "salesDrivers": [
+        "Own site has clear shop / store link",
+        "Wholesale / B2B channel on own site",
+        "Subscription / subscribe & save on own site",
+        "Free shipping threshold (e.g. over $95)"
+      ],
+      "gapsOrRisks": [
+        "No clear Amazon presence in search"
+      ],
+      "ownSite": {
+        "loadOk": true,
+        "keyMessaging": [
+          "Organic",
+          "Ceremonial",
+          "Regenerative",
+          "Direct trade"
+        ],
+        "subscriptionOffered": true,
+        "platform": "Shopify",
+        "shopUrl": "https://ceremonial-cacao.com/collections/all",
+        "wholesaleUrl": "https://ceremonial-cacao.com/pages/why-direct-trade-is-better-than-fair-trade",
+        "freeShippingThreshold": "$95"
+      },
+      "searchWhereToBuy": {
+        "searchQuery": "Ora Cacao ceremonial cacao buy",
+        "snippetMentions": [],
+        "retailerNames": []
+      },
+      "searchAmazon": {
+        "searchQuery": "Ora Cacao Amazon",
+        "foundOnAmazon": false,
+        "snippetOrNote": "No clear Amazon presence in first result"
+      }
+    },
+    {
+      "brandName": "Four Visions",
+      "primaryUrl": "https://fourvisions.com",
+      "researchedAt": "2026-02-19T03:01:48.039Z",
+      "salesDrivers": [
+        "Own site has clear shop / store link",
+        "Subscription / subscribe & save on own site"
+      ],
+      "gapsOrRisks": [
+        "No clear Amazon presence in search"
+      ],
+      "ownSite": {
+        "loadOk": true,
+        "keyMessaging": [
+          "Ceremonial"
+        ],
+        "subscriptionOffered": true,
+        "platform": "BigCommerce",
+        "shopUrl": "https://fourvisions.com/category/shop-by-healing-benefit-intention/"
+      },
+      "searchWhereToBuy": {
+        "searchQuery": "Four Visions ceremonial cacao buy",
+        "snippetMentions": [],
+        "retailerNames": []
+      },
+      "searchAmazon": {
+        "searchQuery": "Four Visions Amazon",
+        "foundOnAmazon": false,
+        "snippetOrNote": "No clear Amazon presence in first result"
+      }
+    },
+    {
+      "brandName": "Ma Cacao",
+      "primaryUrl": "https://ma-cacao.com",
+      "researchedAt": "2026-02-19T03:01:57.648Z",
+      "salesDrivers": [
+        "Own site has clear shop / store link",
+        "Wholesale / B2B channel on own site",
+        "Retailers / stockists page (drives in-store and multi-channel visibility)",
+        "Free shipping threshold (e.g. over $100)"
+      ],
+      "gapsOrRisks": [
+        "No clear Amazon presence in search"
+      ],
+      "ownSite": {
+        "loadOk": true,
+        "keyMessaging": [
+          "Organic",
+          "Ceremonial",
+          "Single origin",
+          "Regenerative"
+        ],
+        "subscriptionOffered": false,
+        "platform": "Shopify",
+        "shopUrl": "https://ma-cacao.com/collections/cacao-collection",
+        "wholesaleUrl": "https://ma-cacao.com/pages/wholesale",
+        "retailersStockistsUrl": "https://ma-cacao.com/pages/retailers",
+        "freeShippingThreshold": "$100"
+      },
+      "searchWhereToBuy": {
+        "searchQuery": "Ma Cacao ceremonial cacao buy",
+        "snippetMentions": [],
+        "retailerNames": []
+      },
+      "searchAmazon": {
+        "searchQuery": "Ma Cacao Amazon",
+        "foundOnAmazon": false,
+        "snippetOrNote": "No clear Amazon presence in first result"
+      }
+    },
+    {
+      "brandName": "Bar and Cocoa",
+      "primaryUrl": "https://barandcocoa.com",
+      "researchedAt": "2026-02-19T03:02:03.674Z",
+      "salesDrivers": [
+        "Own site has clear shop / store link",
+        "Wholesale / B2B channel on own site",
+        "Subscription / subscribe & save on own site"
+      ],
+      "gapsOrRisks": [
+        "No clear Amazon presence in search"
+      ],
+      "ownSite": {
+        "loadOk": true,
+        "keyMessaging": [],
+        "subscriptionOffered": true,
+        "platform": "Shopify",
+        "shopUrl": "https://barandcocoa.com/collections/all",
+        "wholesaleUrl": "https://barandcocoa.com/pages/wholesale"
+      },
+      "searchWhereToBuy": {
+        "searchQuery": "Bar & Cocoa ceremonial cacao buy",
+        "snippetMentions": [],
+        "retailerNames": []
+      },
+      "searchAmazon": {
+        "searchQuery": "Bar & Cocoa Amazon",
+        "foundOnAmazon": false,
+        "snippetOrNote": "No clear Amazon presence in first result"
+      }
+    },
+    {
+      "brandName": "Maya Moon Cacao",
+      "primaryUrl": "https://mayamooncacao.com",
+      "researchedAt": "2026-02-19T03:02:14.168Z",
+      "salesDrivers": [
+        "Own site has clear shop / store link",
+        "Wholesale / B2B channel on own site"
+      ],
+      "gapsOrRisks": [
+        "No clear Amazon presence in search"
+      ],
+      "ownSite": {
+        "loadOk": true,
+        "keyMessaging": [
+          "Organic",
+          "Ceremonial"
+        ],
+        "subscriptionOffered": false,
+        "platform": "Shopify",
+        "shopUrl": "https://mayamooncacao.com/collections/all",
+        "wholesaleUrl": "https://mayamooncacao.com/pages/wholesale-program"
+      },
+      "searchWhereToBuy": {
+        "searchQuery": "Maya Moon ceremonial cacao buy",
+        "snippetMentions": [],
+        "retailerNames": []
+      },
+      "searchAmazon": {
+        "searchQuery": "Maya Moon Amazon",
+        "foundOnAmazon": false,
+        "snippetOrNote": "No clear Amazon presence in first result"
+      }
+    }
+  ]
+}
