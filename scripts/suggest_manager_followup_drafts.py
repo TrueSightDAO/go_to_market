@@ -4,8 +4,10 @@ Create Gmail **drafts** for Hit List rows with Status = Manager Follow-up and Em
 append a row to **Email Agent Suggestions**, and apply label **Email Agent suggestions**.
 
 **Cadence (anti-spam):**
-- At most **one pending draft per recipient** (`to_email`): skips if **Email Agent Suggestions**
-  has `status=pending_review` for that address.
+- At most **one pending draft per recipient** (`to_email`): we block while **Email Agent Suggestions**
+  has `status=pending_review` **and** a matching **open Gmail draft** (by `gmail_draft_id`, or by scanning
+  draft **To:** headers if the id cell is empty). If you **delete the draft in Gmail**, the next run
+  discards that row (unless `--dry-run`) so a new draft can be created when cadence allows.
 - Next draft only after **Email Agent Follow Up** shows a prior **sent** to that address older than
   `--min-days-since-sent` (default **7** calendar days). Recipients with **no** log row are eligible
   immediately (treat as “no recorded send yet” for cadence).
@@ -22,8 +24,10 @@ Requires OAuth scope **gmail.modify**.
 
 Usage:
   cd market_research
+  python3 scripts/sync_email_agent_followup.py   # optional: refresh sent log before drafting
   python3 scripts/suggest_manager_followup_drafts.py --dry-run
-  python3 scripts/suggest_manager_followup_drafts.py --max-drafts 1
+  python3 scripts/suggest_manager_followup_drafts.py --use-grok
+  python3 scripts/suggest_manager_followup_drafts.py --max-drafts 3   # optional cap
   python3 scripts/suggest_manager_followup_drafts.py --min-days-since-sent 10
   python3 scripts/suggest_manager_followup_drafts.py --skip-label
 
@@ -40,7 +44,9 @@ Grok (optional):
   python3 scripts/suggest_manager_followup_drafts.py --use-grok --max-drafts 1
 
 `--use-grok` loads **full** Gmail messages (plain/HTML) between you and the recipient, caps size,
-then asks Grok for JSON with keys `subject` and `body`. On API/format errors, falls back to the template.
+then asks Grok for JSON with keys `subject` and `body`. The same spreadsheet tab **`DApp Remarks`**
+(rows matching **Shop Name** or **Store Key**) is included so drafts reflect field-visit / dapp notes.
+**Hit List** **Notes** and city/state are passed when present. On API/format errors, falls back to the template.
 `--dry-run` with `--use-grok` does **not** call Grok (prints template preview only).
 """
 
@@ -63,6 +69,7 @@ import requests
 from google.oauth2.credentials import Credentials as UserCredentials
 from google.oauth2.service_account import Credentials as SACredentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from gmail_user_credentials import load_gmail_user_credentials
 
@@ -74,6 +81,7 @@ SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
 HIT_LIST_WS = "Hit List"
 SUGGESTIONS_WS = "Email Agent Suggestions"
 LOG_WS = "Email Agent Follow Up"
+DAPP_REMARKS_WS = "DApp Remarks"
 
 DEFAULT_MIN_DAYS_SINCE_SENT = 7
 
@@ -140,6 +148,9 @@ def load_hit_list_targets(ws) -> list[dict]:
     email_i = hdr.get("Email")
     store_i = hdr.get("Store Key")
     shop_i = hdr.get("Shop Name")
+    notes_i = hdr.get("Notes")
+    city_i = hdr.get("City")
+    state_i = hdr.get("State")
     if status_i is None or email_i is None:
         raise SystemExit("Hit List row 1 must include 'Status' and 'Email'.")
 
@@ -150,24 +161,129 @@ def load_hit_list_targets(ws) -> list[dict]:
         em = normalize_email(cell(row, email_i))
         if not em:
             continue
+        city = cell(row, city_i) if city_i is not None else ""
+        state = cell(row, state_i) if state_i is not None else ""
+        locale = ", ".join(x for x in [city, state] if x)
         out.append(
             {
                 "hit_list_row": r,
                 "store_key": cell(row, store_i) if store_i is not None else "",
                 "shop_name": cell(row, shop_i) if shop_i is not None else "",
                 "to_email": em,
+                "notes": cell(row, notes_i) if notes_i is not None else "",
+                "city_state": locale,
             }
         )
     return out
 
 
-def pick_primary_store(targets: list[dict], partner_email: str) -> tuple[str, str, str]:
+def normalize_shop_match_name(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+def shop_names_align(shop_a: str, shop_b: str) -> bool:
+    """True if normalized names are equal or one is a plausible substring of the other (DApp vs Hit List spelling)."""
+    a = normalize_shop_match_name(shop_a)
+    b = normalize_shop_match_name(shop_b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    if len(short) < 8:
+        return False
+    return short in long
+
+
+def pick_primary_store(targets: list[dict], partner_email: str) -> tuple[str, str, str, str, str]:
+    """Returns (store_key, shop_name, hit_list_rows_csv, hit_list_notes, city_state)."""
     matches = [t for t in targets if t["to_email"] == partner_email]
     if not matches:
-        return "", "", ""
+        return "", "", "", "", ""
     first = min(matches, key=lambda x: x["hit_list_row"])
     rows_str = ",".join(str(m["hit_list_row"]) for m in sorted(matches, key=lambda x: x["hit_list_row"]))
-    return first.get("store_key", ""), first.get("shop_name", ""), rows_str
+    return (
+        first.get("store_key", ""),
+        first.get("shop_name", ""),
+        rows_str,
+        (first.get("notes") or "").strip(),
+        (first.get("city_state") or "").strip(),
+    )
+
+
+def open_dapp_remarks_worksheet(sh: gspread.Spreadsheet) -> gspread.Worksheet | None:
+    try:
+        return sh.worksheet(DAPP_REMARKS_WS)
+    except gspread.WorksheetNotFound:
+        return None
+
+
+def format_dapp_remarks_for_grok(
+    remarks_ws: gspread.Worksheet | None,
+    shop_name: str,
+    store_key: str,
+    *,
+    max_chars: int = 12_000,
+) -> str:
+    """Collect DApp visit / status remarks for this shop (same spreadsheet tab as physical_stores scripts)."""
+    if remarks_ws is None:
+        return ""
+    values = remarks_ws.get_all_values()
+    if len(values) < 2:
+        return ""
+    hdr = header_map(values[0])
+    shop_i = hdr.get("Shop Name")
+    remarks_i = hdr.get("Remarks")
+    if remarks_i is None:
+        return ""
+    store_i = hdr.get("Store Key")
+    status_i = hdr.get("Status")
+    sub_i = hdr.get("Submitted By")
+    ts_i = hdr.get("Timestamp") or hdr.get("Submitted At") or hdr.get("Date") or hdr.get("Time")
+
+    want_shop = normalize_shop_match_name(shop_name)
+    want_key = (store_key or "").strip().lower()
+
+    blocks: list[str] = []
+    for row in values[1:]:
+        raw_shop = cell(row, shop_i) if shop_i is not None else ""
+        r_shop = normalize_shop_match_name(raw_shop)
+        r_key = cell(row, store_i).strip().lower() if store_i is not None else ""
+        rem = cell(row, remarks_i).strip()
+        if not rem:
+            continue
+        matched = False
+        if want_shop and r_shop == want_shop:
+            matched = True
+        if not matched and want_shop and r_shop and shop_names_align(shop_name, raw_shop):
+            matched = True
+        if want_key and r_key == want_key:
+            matched = True
+        if not matched:
+            continue
+        meta: list[str] = []
+        if status_i is not None:
+            st = cell(row, status_i).strip()
+            if st:
+                meta.append(f"status={st}")
+        if ts_i is not None:
+            ts = cell(row, ts_i).strip()
+            if ts:
+                meta.append(f"recorded={ts}")
+        if sub_i is not None:
+            sb = cell(row, sub_i).strip()
+            if sb:
+                meta.append(f"submitted_by={sb}")
+        head = f"[{' | '.join(meta)}]\n" if meta else ""
+        blocks.append(f"{head}{rem}".strip())
+
+    if not blocks:
+        return ""
+
+    out = "\n\n---\n\n".join(blocks)
+    if len(out) > max_chars:
+        out = out[: max_chars - 1] + "…"
+    return out
 
 
 def get_gmail_creds() -> UserCredentials:
@@ -185,6 +301,102 @@ def get_sheets_client():
 def gmail_profile_email(service) -> str:
     prof = service.users().getProfile(userId="me").execute()
     return str(prof.get("emailAddress", "") or "").strip().lower()
+
+
+def is_missing_draft_http_error(e: HttpError) -> bool:
+    """True when Gmail API indicates the draft no longer exists (deleted from UI, etc.)."""
+    code = getattr(getattr(e, "resp", None), "status", None)
+    if code in (404, 410):
+        return True
+    if code == 400 and getattr(e, "content", None):
+        try:
+            payload = json.loads(e.content.decode("utf-8"))
+        except (ValueError, UnicodeError, AttributeError):
+            return False
+        err = payload.get("error") or {}
+        for sub in err.get("errors") or []:
+            reason = (sub.get("reason") or "").lower()
+            if reason in ("notfound", "not_found", "invalid", "failedprecondition"):
+                return True
+        msg = str(err.get("message") or "").lower()
+        if any(x in msg for x in ("not found", "invalid id", "invalid draft", "unknown draft")):
+            return True
+    return False
+
+
+def _message_header_map(msg: dict) -> dict[str, str]:
+    pl = msg.get("payload") or {}
+    out: dict[str, str] = {}
+    for h in pl.get("headers") or []:
+        n = (h.get("name") or "").strip().lower()
+        if n:
+            out[n] = (h.get("value") or "").strip()
+    return out
+
+
+def _to_header_contains_email(to_header: str, want_lower: str) -> bool:
+    if not want_lower or not to_header:
+        return False
+    t = to_header.lower()
+    if want_lower in t:
+        return True
+    for raw in re.split(r"[,;]", to_header):
+        part = raw.strip().lower()
+        if "<" in part and ">" in part:
+            part = part.split("<", 1)[1].split(">", 1)[0].strip()
+        if part == want_lower:
+            return True
+    return False
+
+
+def _draft_metadata_matches_recipient(hdrs: dict[str, str], want_lower: str) -> bool:
+    if not want_lower:
+        return False
+    for key in ("to", "cc", "bcc"):
+        if _to_header_contains_email(hdrs.get(key, ""), want_lower):
+            return True
+    return False
+
+
+def gmail_has_open_draft_to_recipient(service, to_email: str, *, max_scan: int = 100) -> bool:
+    """True if any Gmail draft To/Cc/Bcc includes this address (metadata scan, capped)."""
+    want = normalize_email(to_email)
+    if not want:
+        return False
+    scanned = 0
+    page_token: str | None = None
+    while scanned < max_scan:
+        req = service.users().drafts().list(
+            userId="me",
+            maxResults=min(25, max_scan - scanned),
+            pageToken=page_token,
+        )
+        resp = req.execute()
+        for d in resp.get("drafts") or []:
+            did = d.get("id")
+            if not did:
+                continue
+            if scanned >= max_scan:
+                return False
+            try:
+                dr = service.users().drafts().get(userId="me", id=did, format="metadata").execute()
+            except HttpError as e:
+                if is_missing_draft_http_error(e):
+                    scanned += 1
+                    continue
+                raise
+            msg = dr.get("message") or {}
+            if _draft_resource_is_trashed(dr):
+                scanned += 1
+                continue
+            hdrs = _message_header_map(msg)
+            if _draft_metadata_matches_recipient(hdrs, want):
+                return True
+            scanned += 1
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return False
 
 
 def ensure_suggestions_worksheet(sh: gspread.Spreadsheet):
@@ -252,24 +464,144 @@ def last_sent_utctime_per_to_email(log_ws: gspread.Worksheet | None) -> dict[str
     return best
 
 
-def pending_to_emails_from_suggestions(ws: gspread.Worksheet) -> set[str]:
-    """Recipients that already have an in-flight draft (do not spam)."""
-    values = ws.get_all_values()
+def _draft_resource_is_trashed(draft_resource: dict) -> bool:
+    """True if the draft's message is in Gmail Trash (API still returns 200; we treat like deleted)."""
+    msg = draft_resource.get("message") or {}
+    for lid in msg.get("labelIds") or []:
+        if str(lid).upper() == "TRASH":
+            return True
+    return False
+
+
+def _scan_pending_review_rows(
+    service,
+    values: list[list[str]],
+    *,
+    verbose: bool,
+    dry_run: bool,
+) -> tuple[set[str], list[tuple[int, str, str]]]:
+    """Return (blocking_emails, stale_rows) where each stale row is (sheet_row, email, draft_id_or_empty)."""
     if len(values) < 2:
-        return set()
+        return set(), []
     hdr = header_map(values[0])
     em_i = hdr.get("to_email")
     st_i = hdr.get("status")
+    draft_i = hdr.get("gmail_draft_id")
     if em_i is None or st_i is None:
-        return set()
-    pending: set[str] = set()
-    for row in values[1:]:
+        return set(), []
+
+    pending_emails: set[str] = set()
+    stale: list[tuple[int, str, str]] = []
+
+    for sheet_row, row in enumerate(values[1:], start=2):
         if cell(row, st_i).lower() != "pending_review":
             continue
         em = normalize_email(cell(row, em_i))
-        if em:
-            pending.add(em)
-    return pending
+        if not em:
+            continue
+        draft_id = (cell(row, draft_i) if draft_i is not None else "").strip()
+        if not draft_id:
+            if gmail_has_open_draft_to_recipient(service, em):
+                pending_emails.add(em)
+                if verbose:
+                    print(
+                        f"  reconcile: {em} row {sheet_row}: pending_review, no gmail_draft_id — "
+                        f"open Gmail draft to this address exists; still blocking"
+                    )
+            else:
+                stale.append((sheet_row, em, ""))
+                if verbose:
+                    print(
+                        f"  reconcile: row {sheet_row} {em}: pending_review, no gmail_draft_id, "
+                        f"no draft To/Cc/Bcc this address — {'would set discarded' if dry_run else 'setting discarded'}"
+                    )
+            continue
+        try:
+            dr = service.users().drafts().get(userId="me", id=draft_id, format="metadata").execute()
+            if _draft_resource_is_trashed(dr):
+                stale.append((sheet_row, em, draft_id))
+                if verbose:
+                    print(
+                        f"  reconcile: row {sheet_row} {em}: Gmail draft {draft_id!r} is in Trash — "
+                        f"{'would set discarded' if dry_run else 'setting discarded'}"
+                    )
+                continue
+            pending_emails.add(em)
+        except HttpError as e:
+            if is_missing_draft_http_error(e):
+                code = getattr(getattr(e, "resp", None), "status", None)
+                stale.append((sheet_row, em, draft_id))
+                if verbose:
+                    print(
+                        f"  reconcile: row {sheet_row} {em}: Gmail draft {draft_id!r} missing (HTTP {code}) — "
+                        f"{'would set discarded' if dry_run else 'setting discarded'}"
+                    )
+            else:
+                raise
+
+    return pending_emails, stale
+
+
+def pending_review_emails_after_gmail_reconcile(
+    service,
+    ws: gspread.Worksheet,
+    *,
+    dry_run: bool,
+    verbose: bool,
+) -> tuple[set[str], int]:
+    """Recipients still blocked by a real pending draft.
+
+    Discards ``pending_review`` rows whose Gmail draft is gone, then **re-fetches** the sheet and
+    re-scans so the same run does not keep blocking addresses that were only waiting on a stale row
+    (e.g. iChakras after deleting the draft).
+    """
+    values = ws.get_all_values()
+    if len(values) < 2:
+        return set(), 0
+    hdr = header_map(values[0])
+    st_i = hdr.get("status")
+    notes_i = hdr.get("notes")
+    if st_i is None or hdr.get("to_email") is None:
+        return set(), 0
+
+    status_col = st_i + 1
+    notes_col = (notes_i + 1) if notes_i is not None else None
+
+    total_updated = 0
+    pending_emails: set[str] = set()
+    stale: list[tuple[int, str, str]] = []
+
+    for _ in range(4):
+        pending_emails, stale = _scan_pending_review_rows(
+            service, values, verbose=verbose, dry_run=dry_run
+        )
+        if not stale:
+            return pending_emails, total_updated
+        if dry_run:
+            return pending_emails, 0
+
+        now_tag = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for sheet_row, _em, draft_id in stale:
+            ws.update_cell(sheet_row, status_col, "discarded")
+            if notes_col is not None and notes_i is not None:
+                prev = cell(values[sheet_row - 1], notes_i)
+                if draft_id:
+                    short_id = draft_id[:20] + "…" if len(draft_id) > 20 else draft_id
+                    suffix = f"[{now_tag}] discarded: Gmail draft missing (was id {short_id})"
+                else:
+                    suffix = (
+                        f"[{now_tag}] discarded: no open Gmail draft to this address "
+                        f"(pending_review cleared — e.g. draft deleted; id was blank)"
+                    )
+                new_note = f"{prev}; {suffix}" if prev else suffix
+                if len(new_note) > 2000:
+                    new_note = new_note[:1997] + "…"
+                ws.update_cell(sheet_row, notes_col, new_note)
+            total_updated += 1
+
+        values = ws.get_all_values()
+
+    return pending_emails, total_updated
 
 
 def days_since_utc(last: datetime, now: datetime) -> float:
@@ -444,15 +776,20 @@ def fetch_conversation_history(
 
 def grok_system_prompt() -> str:
     return (
-        "You draft short, professional follow-up emails for Gary at Agroverse (ceremonial cacao, "
-        "retail consignment conversations).\n"
+        "You draft polished, send-ready follow-up emails for Gary at Agroverse — ceremonial cacao, "
+        "retail / consignment (friendly terms). The merchant should need only light editing.\n"
         "Rules:\n"
-        "- Output **only** valid JSON: an object with keys \"subject\" and \"body\" (plain text, use \\n for newlines).\n"
-        "- No markdown fences, no preamble or explanation.\n"
-        "- Be warm and specific; reference the conversation history when relevant.\n"
-        "- Do not invent prices, terms, legal commitments, or promises Gary did not make.\n"
-        "- If history is thin, keep the note concise and invite a clear next step (call, samples, paperwork).\n"
-        "- Sign off as Gary.\n"
+        '- Output **only** valid JSON: one object with keys "subject" and "body" (plain text, use \\n for newlines).\n'
+        "- No markdown fences, no preamble, no placeholders like [Name] — use real details from context or a natural generic greeting (e.g. Hi —, or Hello —).\n"
+        "- **Body** structure: brief warm opening → 1–2 concrete sentences tying to **visit/DApp remarks** and/or **email thread** → "
+        "one clear **call to action** (reply with timing, quick call, samples, or next paperwork step — pick what fits) → "
+        "short **signature block** on separate lines:\n"
+        "  Gary\n"
+        "  Agroverse | ceremonial cacao for retail\n"
+        "  garyjob@agroverse.shop\n"
+        "- Sound human and specific; weave in **DApp visit remarks** and thread facts when provided. Do not invent numbers, legal terms, or deals not in the context.\n"
+        "- Subject: specific and scannable (shop name + short hook), not spammy. Under ~90 characters.\n"
+        "- Length: about 120–220 words in body unless context demands shorter.\n"
     )
 
 
@@ -464,21 +801,40 @@ def grok_generate_followup(
     store_key: str,
     to_email: str,
     hit_list_row: str,
+    city_state: str,
+    hit_list_notes: str,
+    dapp_remarks_log: str,
     conversation_history: str,
 ) -> tuple[str, str]:
+    crm_notes = (hit_list_notes or "").strip()
+    locality = (city_state or "").strip()
+    dapp_block = (dapp_remarks_log or "").strip()
     user = (
-        f"Lead context (from our CRM):\n"
+        f"Lead context (Hit List CRM):\n"
         f"- shop_name: {shop_name}\n"
         f"- store_key: {store_key}\n"
+        f"- city/state (if known): {locality or '(not provided)'}\n"
         f"- hit_list_row(s): {hit_list_row}\n"
         f"- recipient_email: {to_email}\n"
-        f"- hit_list_status: {HIT_STATUS_TARGET}\n\n"
-        f"Email thread history (chronological; may be truncated). Use only what is supported by this text:\n\n"
-        f"{conversation_history or '(No prior messages in export — write a concise first-style follow-up after an in-person visit.)'}\n"
+        f"- hit_list_status: {HIT_STATUS_TARGET}\n"
+    )
+    if crm_notes:
+        user += f"- internal_hit_list_notes (use for specificity; do not quote as if the merchant wrote this): {crm_notes}\n"
+    user += "\n"
+    if dapp_block:
+        user += (
+            "DApp field / visit remarks log (same shop or store key — chronological blocks separated by ---). "
+            "Prioritize concrete details here for a complete, send-ready email:\n\n"
+            f"{dapp_block}\n\n"
+        )
+    user += (
+        "Email thread history with this address (chronological; may be truncated). "
+        "Use only what is supported by this text:\n\n"
+        f"{conversation_history or '(No prior messages in export — lean on DApp remarks and Hit List notes if present.)'}\n"
     )
     payload = {
         "model": model,
-        "temperature": 0.55,
+        "temperature": 0.42,
         "messages": [
             {"role": "system", "content": grok_system_prompt()},
             {"role": "user", "content": user},
@@ -565,7 +921,12 @@ def draft_subject(shop_name: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create Gmail follow-up drafts for Manager Follow-up leads.")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--max-drafts", type=int, default=1, help="Max new drafts this run (default 1).")
+    parser.add_argument(
+        "--max-drafts",
+        type=int,
+        default=0,
+        help="Cap new drafts per run; **0 = no limit** (draft every eligible recipient). Use a positive number to throttle.",
+    )
     parser.add_argument(
         "--min-days-since-sent",
         type=float,
@@ -603,6 +964,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.max_drafts < 0:
+        sys.stderr.write("--max-drafts must be >= 0 (use 0 for no limit).\n")
+        sys.exit(2)
+
     if args.use_grok and not args.dry_run:
         if not get_grok_api_key():
             sys.stderr.write(
@@ -625,13 +990,37 @@ def main() -> None:
     hit_ws = sh.worksheet(HIT_LIST_WS)
     sugg_ws = ensure_suggestions_worksheet(sh)
     log_ws = open_follow_up_worksheet(sh)
+    log_tab_present = log_ws is not None
+    if not log_tab_present:
+        print(
+            f"WARNING: worksheet {LOG_WS!r} not found — no sent history in sheet; "
+            "every recipient is treated as having no logged send (cadence still enforces pending_review only)."
+        )
+    remarks_ws = open_dapp_remarks_worksheet(sh)
+    if remarks_ws is None and args.use_grok:
+        print(
+            f"Note: worksheet {DAPP_REMARKS_WS!r} not found — Grok context will omit DApp visit remarks."
+        )
     last_sent = last_sent_utctime_per_to_email(log_ws)
-    pending_to = pending_to_emails_from_suggestions(sugg_ws)
+    pending_to, n_reconciled = pending_review_emails_after_gmail_reconcile(
+        gsvc, sugg_ws, dry_run=args.dry_run, verbose=args.verbose
+    )
+    if n_reconciled:
+        print(
+            f"Reconciled {n_reconciled} row(s) in {SUGGESTIONS_WS!r}: "
+            "pending_review → discarded (Gmail draft was deleted or missing)."
+        )
     now = datetime.now(timezone.utc)
 
     targets = load_hit_list_targets(hit_ws)
     if not targets:
         print("No Hit List rows match Manager Follow-up with Email.")
+        print(
+            "EMAIL_AGENT_DRAFT_RESULT count=0 mode="
+            + ("dry_run" if args.dry_run else "live")
+            + " reason=no_manager_followup_targets"
+            + f" reconciled_stale_rows={n_reconciled}"
+        )
         return
 
     by_email: dict[str, list[dict]] = {}
@@ -645,7 +1034,10 @@ def main() -> None:
         if em in pending_to:
             skipped_pending += 1
             if args.verbose:
-                print(f"  skip {em}: pending_review draft already in {SUGGESTIONS_WS!r}")
+                print(
+                    f"  skip {em}: active pending_review in {SUGGESTIONS_WS!r} "
+                    f"(Gmail draft still exists for this address)"
+                )
             continue
         prev = last_sent.get(em)
         if prev is not None:
@@ -673,9 +1065,21 @@ def main() -> None:
     print(f"Manager-follow-up rows: {len(targets)} | distinct recipients: {len(by_email)}")
     print(f"Logged last-sent recipients: {len(last_sent)} | pending draft recipients: {len(pending_to)}")
     print(f"Skipped: {skipped_pending} (pending draft) | {skipped_cadence} (too soon since last send)")
-    print(f"Eligible: {len(candidates)} | will create up to {args.max_drafts} draft(s)")
+    cap_note = "no cap (all eligible)" if args.max_drafts == 0 else f"cap={args.max_drafts}"
+    print(f"Eligible: {len(candidates)} | will create drafts ({cap_note})")
 
-    if args.max_drafts <= 0 or not candidates:
+    if not candidates:
+        print(
+            "EMAIL_AGENT_DRAFT_RESULT count=0 mode="
+            + ("dry_run" if args.dry_run else "live")
+            + " reason=no_eligible_recipients"
+            + f" follow_up_tab_present={str(log_tab_present).lower()}"
+            + f" distinct_recipients={len(by_email)}"
+            + f" skipped_pending_review={skipped_pending}"
+            + f" skipped_cadence_too_soon={skipped_cadence}"
+            + f" min_days_since_sent={args.min_days_since_sent}"
+            + f" reconciled_stale_rows={n_reconciled}"
+        )
         return
 
     label_id: str | None = None
@@ -687,9 +1091,15 @@ def main() -> None:
     synced_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     for to_addr in candidates:
-        if n_made >= args.max_drafts:
+        if args.max_drafts > 0 and n_made >= args.max_drafts:
             break
-        sk, shop, rows_str = pick_primary_store(targets, to_addr)
+        sk, shop, rows_str, hit_notes, city_st = pick_primary_store(targets, to_addr)
+        dapp_ctx = format_dapp_remarks_for_grok(remarks_ws, shop, sk)
+        if args.verbose:
+            if dapp_ctx:
+                print(f"  DApp remarks for {to_addr}: {len(dapp_ctx)} chars (shop={shop!r})")
+            elif remarks_ws is not None:
+                print(f"  DApp remarks: no rows matched shop={shop!r} store_key={sk!r}")
         prev = last_sent.get(to_addr)
         prev_s = prev.strftime("%Y-%m-%d UTC") if prev else "none"
 
@@ -715,6 +1125,9 @@ def main() -> None:
                     store_key=sk,
                     to_email=to_addr,
                     hit_list_row=rows_str,
+                    city_state=city_st,
+                    hit_list_notes=hit_notes,
+                    dapp_remarks_log=dapp_ctx,
                     conversation_history=hist,
                 )
                 source = "grok"
@@ -730,7 +1143,7 @@ def main() -> None:
         raw = build_message_raw(me, to_addr, subj, body)
 
         if args.dry_run:
-            print(f"\n--- dry-run draft → {to_addr} ({shop}) ---")
+            print(f"\n--- dry-run draft #{n_made + 1} → {to_addr} ({shop}) ---")
             if args.use_grok:
                 print("(Note: --dry-run skips Grok; preview below is the template fallback.)")
             print(f"Subject: {subj}")
@@ -777,14 +1190,42 @@ def main() -> None:
         ]
         created_rows.append(row)
         n_made += 1
-        print(f"Created draft {draft_id!r} → {to_addr} ({shop})")
+        print(f"Created draft #{n_made} id={draft_id!r} → {to_addr} ({shop})")
 
     if args.dry_run:
+        print(
+            "EMAIL_AGENT_DRAFT_RESULT count="
+            + str(n_made)
+            + " mode=dry_run (previews only; nothing written to Gmail or Sheets)"
+            + f" follow_up_tab_present={str(log_tab_present).lower()}"
+            + f" eligible_cap={len(candidates)}"
+            + f" max_drafts_cap={'unlimited' if args.max_drafts == 0 else str(args.max_drafts)}"
+            + f" skipped_pending_review={skipped_pending}"
+            + f" skipped_cadence_too_soon={skipped_cadence}"
+            + f" min_days_since_sent={args.min_days_since_sent}"
+            + f" reconciled_stale_rows={n_reconciled}"
+        )
         return
 
     if created_rows:
         sugg_ws.append_rows(created_rows, value_input_option="USER_ENTERED")
         print(f"Appended {len(created_rows)} row(s) to {SUGGESTIONS_WS!r}. Review Drafts in Gmail (label: {DEFAULT_GMAIL_LABEL!r}).")
+
+    print(
+        "EMAIL_AGENT_DRAFT_RESULT count="
+        + str(len(created_rows))
+        + " mode=live gmail_drafts_created="
+        + str(len(created_rows))
+        + " sheet_rows_appended="
+        + str(len(created_rows))
+        + f" follow_up_tab_present={str(log_tab_present).lower()}"
+        + f" eligible_before_cap={len(candidates)}"
+        + f" max_drafts_cap={'unlimited' if args.max_drafts == 0 else str(args.max_drafts)}"
+        + f" skipped_pending_review={skipped_pending}"
+        + f" skipped_cadence_too_soon={skipped_cadence}"
+        + f" min_days_since_sent={args.min_days_since_sent}"
+        + f" reconciled_stale_rows={n_reconciled}"
+    )
 
 
 if __name__ == "__main__":
