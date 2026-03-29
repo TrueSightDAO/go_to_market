@@ -18,10 +18,6 @@ on:
         description: 'Use Grok for draft bodies (requires GROK_API_KEY)'
         type: boolean
         default: true
-      max_drafts:
-        description: 'Maximum drafts to create this run (eligible recipients only)'
-        type: string
-        default: '5'
       min_days_since_sent:
         description: 'Min days since last logged sent mail (Email Agent Follow Up) before drafting again'
         type: string
@@ -100,12 +96,10 @@ jobs:
         env:
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
           GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
-          INPUT_MAX_DRAFTS: ${{ github.event.inputs.max_drafts }}
           INPUT_MIN_DAYS: ${{ github.event.inputs.min_days_since_sent }}
           INPUT_USE_GROK: ${{ github.event.inputs.use_grok }}
           INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
         run: |
-          MAX="${INPUT_MAX_DRAFTS:-5}"
           MIN="${INPUT_MIN_DAYS:-7}"
           EXTRA=""
           if [ "${INPUT_USE_GROK:-true}" != "false" ]; then
@@ -114,7 +108,7 @@ jobs:
           if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
             EXTRA="$EXTRA --dry-run"
           fi
+          # No --max-drafts: script default is unlimited (0); optional throttle: --max-drafts N
           python scripts/suggest_manager_followup_drafts.py \
-            --max-drafts "$MAX" \
             --min-days-since-sent "$MIN" \
             $EXTRA
