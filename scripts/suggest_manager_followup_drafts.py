@@ -46,7 +46,9 @@ Grok (optional):
 `--use-grok` loads **full** Gmail messages (plain/HTML) between you and the recipient, caps size,
 then asks Grok for JSON with keys `subject` and `body`. The same spreadsheet tab **`DApp Remarks`**
 (rows matching **Shop Name** or **Store Key**) is included so drafts reflect field-visit / dapp notes.
-**Hit List** **Notes** and city/state are passed when present. On API/format errors, falls back to the template.
+**Hit List** **Notes** and city/state are passed when present. Draft rules (no in-person meeting invites;
+address **owner/buyer** when context says staff routed you there) are in the model system prompt and
+**`agentic_ai_context/PARTNER_OUTREACH_PROTOCOL.md`** §6. On API/format errors, falls back to the template.
 `--dry-run` with `--use-grok` does **not** call Grok (prints template preview only).
 """
 
@@ -781,8 +783,15 @@ def grok_system_prompt() -> str:
         "Rules:\n"
         '- Output **only** valid JSON: one object with keys "subject" and "body" (plain text, use \\n for newlines).\n'
         "- No markdown fences, no preamble, no placeholders like [Name] — use real details from context or a natural generic greeting (e.g. Hi —, or Hello —).\n"
+        "- **In-person meetings / another store visit to meet:** Do **not** propose or invite an in-person meeting, a return visit to the shop to connect, "
+        "\"stopping by\" again, or \"circling back\" in person. Gary often passes through and is **not** reliably available to come back for a sit-down. "
+        "Prefer: **reply by email**, a **scheduled phone or video call**, or **delivery / logistics / paperwork** next steps — never frame the ask as meeting them on-site.\n"
+        "- **Who to address:** If Hit List notes, DApp remarks, or the **email thread** show that **staff** provided the **owner**, **buyer**, **decision-maker**, "
+        "or their **name** or **this email** as the right person to speak with, the message must speak **to that person** (salutation + body). "
+        "Do **not** write as if the front-desk or staff contact is the primary reader when context clearly routes follow-up to **owner/buyer** (you may still "
+        "thank staff briefly if natural).\n"
         "- **Body** structure: brief warm opening → 1–2 concrete sentences tying to **visit/DApp remarks** and/or **email thread** → "
-        "one clear **call to action** (reply with timing, quick call, samples, or next paperwork step — pick what fits) → "
+        "one clear **call to action** (email reply with timing, **phone or video** call, samples, or paperwork — **never** in-person meetup) → "
         "short **signature block** on separate lines:\n"
         "  Gary\n"
         "  Agroverse | ceremonial cacao for retail\n"
@@ -820,6 +829,10 @@ def grok_generate_followup(
     )
     if crm_notes:
         user += f"- internal_hit_list_notes (use for specificity; do not quote as if the merchant wrote this): {crm_notes}\n"
+    user += (
+        "- If notes or thread mention owner, buyer, decision-maker, or \"speak with X\", treat **X** as the addressee "
+        "and **recipient_email** as the correct channel when it matches.\n"
+    )
     user += "\n"
     if dapp_block:
         user += (
@@ -895,8 +908,9 @@ def draft_body_template(shop_name: str, snippets: list[str]) -> str:
     lines = [
         f"Hi —",
         "",
-        f"Following up after our visit and conversation about carrying Agroverse ceremonial cacao (consignment-friendly terms). "
-        f"If it helps, I’m happy to confirm next steps, samples, or paperwork for {shop}.",
+        f"Following up on Agroverse ceremonial cacao and next steps for {shop} (consignment-friendly terms). "
+        f"I’m happy to answer questions by email or on a quick call — and to line up samples or simple paperwork — "
+        f"without needing another in-person meeting on my side.",
         "",
     ]
     if snippets:

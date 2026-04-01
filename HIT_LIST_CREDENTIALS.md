@@ -169,6 +169,8 @@ Options: `--skip-label`, `--expected-mailbox other@domain` (default `garyjob@agr
 
 **Grok (optional):** With **`--use-grok`**, the script loads up to **`--grok-max-messages`** full Gmail messages (plain text preferred, HTML stripped) for that recipient, capped at **`--grok-max-context-chars`**, and calls the xAI **chat/completions** API (`grok-3` by default) for JSON `subject` + `body`. On API/parse errors, the script falls back to the built-in template. **`--dry-run` does not call Grok** (shows template preview only).
 
+**Draft tone (system prompt + template):** Suggested copy does **not** invite **in-person meetings** or another on-site visit (Gary’s travel pattern). When Hit List **Notes**, **DApp Remarks**, or the thread show staff routed follow-up to **owner / buyer / decision-maker**, the draft should **address that person**, not staff — see **`agentic_ai_context/PARTNER_OUTREACH_PROTOCOL.md`** §6 and **`STORE_FOLLOW_UP_EMAIL_TEMPLATE.md`**.
+
 **`GROK_API_KEY` — local vs GitHub Actions**
 
 | Where you run | How to provide the key |
