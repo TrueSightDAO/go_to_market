@@ -22,10 +22,23 @@ credentials/**
 # OAuth client JSON may also live outside credentials/
 **/client_secret*.json
 
+# OAuth token / authorized-user exports (any folder — easy to drop beside a script)
+**/token.json
+**/authorized_user.json
+
+# Clasp user login (normally ~/.clasprc.json; ignore if copied into repo)
+.clasprc.json
+**/.clasprc.json
+
+# Private keys / signing material
+*.key
+*.p8
+
 # Other service account / key JSON naming
 service_account.json
 *service_account*.json
 **/*service-account*.json
+# Broad catch for ad-hoc Google key downloads; review before adding similarly named non-secret JSON
 *credentials*.json
 
 # Environment and API keys
