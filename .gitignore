@@ -12,10 +12,15 @@ google_credentials.json
 google_credentials*.json
 **/google_credentials.json
 
-# OAuth (Gmail, etc.): desktop client + refreshed user token
+# OAuth / API tokens under credentials/ (Search Console, Gmail, etc.)
+# Ignore the whole tree; only allow per-folder README + .gitignore in git.
+credentials/**
+!credentials/**/
+!credentials/**/README.md
+!credentials/**/.gitignore
+
+# OAuth client JSON may also live outside credentials/
 **/client_secret*.json
-credentials/**/token.json
-credentials/**/oauth*.json
 
 # Other service account / key JSON naming
 service_account.json

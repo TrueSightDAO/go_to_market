@@ -1,0 +1,64 @@
+# Substring match (case-insensitive). One phrase per line. Lines starting with # are ignored.
+# Retailers / chains
+whole foods
+vitamin shoppe
+vitacost
+costco
+# Competitor & boutique cacao brands from DataForSEO seed expansion
+navitas
+volupta
+keith
+equal exchange
+anthony
+viva naturals
+terrasoul
+sunfood
+natierra
+healthworks
+alovitox
+nutiva
+ojio
+zint
+imlak esh
+nana marin
+cacao lab
+firefly
+seleno
+sacred earth
+forever ceremonial
+nibmor
+nib mor
+food to live
+loving earth
+earth circle organics
+essential living
+now foods
+rebekah
+tantric rose
+tsatsayaku
+jennies
+organic traditions
+nativa cacao
+ora ceremonial
+ora cacao
+kakao ceremonial
+sacred taste
+# Hair / non-food noise that shares "cacau"
+brasil cacau
+cadiveu
+ecokeratin
+keratin brasil
+brazilian keratin
+keratin cacau
+keratin treatment brazil
+# Platforms / non-commercial landing
+reddit
+# Different category
+carob
+# Misspellings / near-miss brands
+viva cacao
+# Corporate / unrelated products
+mars fairtrade
+bulk powders
+# Hair treatments (keyword pollution)
+keratin
