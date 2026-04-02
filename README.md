@@ -2,6 +2,8 @@
 
 This repository contains tools and data for managing **multi-channel content marketing** and **physical store partnerships** for Agroverse.shop and TrueSight DAO.
 
+**Secrets:** Do not commit API keys, OAuth tokens, or service account JSON. See **[`SECURITY.md`](SECURITY.md)** and **`.gitignore`**.
+
 ## 📁 Repository Structure
 
 ```
