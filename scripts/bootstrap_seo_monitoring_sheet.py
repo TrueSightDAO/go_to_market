@@ -2,7 +2,7 @@
 """
 Create (or update) the Agroverse SEO monitoring spreadsheet in a Drive folder.
 
-Tabs: Instructions, Keywords_targets, Change_log, Weekly_GSC — formatted for human reading.
+Tabs: Instructions, Keywords_targets, Change_log, Weekly_GSC, DataForSEO_monthly_discovery — formatted for human reading.
 Seeds Keywords_targets from a DataForSEO non-brand CSV if present (see paths below).
 
 Requires:
@@ -57,6 +57,9 @@ INSTRUCTIONS_LINES = [
     "Search Console property (for Apps Script Config.gs): use EXACTLY how it appears in GSC, e.g.",
     "   sc-domain:agroverse.shop   OR   https://www.agroverse.shop/",
     "",
+    "4) DataForSEO_monthly_discovery — filled by Apps Script (1st of month). Ideas not already on Keywords_targets.",
+    "   Set Script properties DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD; run installMonthlyDataForSeoTrigger() once.",
+    "",
     "Sheet + folder: share this file with anyone who needs edit access.",
     "Service account (for this bootstrap script): must have Editor on the Drive folder.",
     "",
@@ -99,6 +102,18 @@ WEEKLY_HEADERS = [
     "impressions",
     "ctr",
     "position",
+]
+
+DATAFORSEO_MONTHLY_HEADERS = [
+    "pull_date",
+    "keyword",
+    "search_volume",
+    "competition",
+    "competition_index",
+    "cpc",
+    "low_top_of_page_bid",
+    "high_top_of_page_bid",
+    "note",
 ]
 
 
@@ -162,7 +177,7 @@ def _ensure_worksheets(sheets_svc, spreadsheet_id: str) -> dict[str, int]:
         )
         titles_to_ids["Instructions"] = titles_to_ids.pop("Sheet1")
 
-    for name in ("Keywords_targets", "Change_log", "Weekly_GSC"):
+    for name in ("Keywords_targets", "Change_log", "Weekly_GSC", "DataForSEO_monthly_discovery"):
         if name not in titles_to_ids:
             requests.append({"addSheet": {"properties": {"title": name}}})
 
@@ -419,7 +434,19 @@ def main() -> None:
         [],
     )
 
-    print("\nNext: bind Apps Script (see SEO_MONITORING_SHEET_WORKFLOW.md) and run installWeeklyTrigger() once.")
+    _write_table_with_header(
+        sheets_svc,
+        spreadsheet_id,
+        "DataForSEO_monthly_discovery",
+        title_to_id["DataForSEO_monthly_discovery"],
+        DATAFORSEO_MONTHLY_HEADERS,
+        [],
+    )
+
+    print(
+        "\nNext: bind Apps Script (see SEO_MONITORING_SHEET_WORKFLOW.md); "
+        "run installWeeklyTrigger() and installMonthlyDataForSeoTrigger() once after Script properties are set."
+    )
 
 
 if __name__ == "__main__":

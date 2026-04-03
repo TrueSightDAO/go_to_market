@@ -6,19 +6,19 @@
 
 **Spreadsheet tabs** are created by `market_research/scripts/bootstrap_seo_monitoring_sheet.py`.
 
-This folder holds the **container-bound** Apps Script: weekly Search Console export into `Weekly_GSC`.
+This folder holds the **container-bound** Apps Script: weekly Search Console export into `Weekly_GSC`, and **monthly** DataForSEO keyword ideas into **`DataForSEO_monthly_discovery`**.
 
 ## Conventions (aligned with tokenomics `google_app_scripts`)
 
 - File headers describe purpose and repo path.
-- Config in `Config.gs`; automations in `WeeklyGscSnapshot.gs` / `Triggers.gs`.
+- Config in `Config.gs`; GSC in `WeeklyGscSnapshot.gs`; DataForSEO in `MonthlyDataForSeoDiscovery.gs`; triggers in `Triggers.gs`.
 - **GSC access:** `appsscript.json` declares `webmasters.readonly`; code calls Search Analytics via **UrlFetch** (not the Search Console advanced service), so **`clasp push`** is not blocked by the “Service not found: searchconsole v1” manifest error.
 
 ## Prerequisites
 
 1. Spreadsheet exists and tabs match `SEO_MONITORING_CONFIG` names.
 2. **Google account** running the script has access to the Search Console property (`GSC_SITE_URL` in `Config.gs`).
-3. After a manifest change, **re-authorize** the project once so the new OAuth scopes (Sheets + webmasters) are granted.
+3. After a manifest change, **re-authorize** the project once so the new OAuth scopes are granted (Sheets, webmasters, `script.external_request`, `script.scriptapp`).
 4. **Google Cloud:** `UrlFetch` + `ScriptApp.getOAuthToken()` run against whatever **GCP project is linked to this Apps Script** (Project Settings → **Google Cloud Platform (GCP) Project**). **Recommended:** link **`get-data-io`** (`project_id` in `credentials/search_console/client_secret.json`) — **project number `667737028020`** — where **Search Console API** is already enabled for Python.
    - Apps Script → **Project Settings** → **Google Cloud Platform (GCP) Project** → **Change project** → enter **`667737028020`** (you need a role on that GCP project, e.g. Owner/Editor). Guide: [Change the Google Cloud project for a script](https://developers.google.com/apps-script/guides/cloud-platform-projects#change_the_google_cloud_project).
    - Confirm API: [Search Console API for this project](https://console.cloud.google.com/apis/library/searchconsole.googleapis.com?project=667737028020).
@@ -55,8 +55,41 @@ Then run the Python bootstrap with `--spreadsheet-id <id-from-clasp-output>` if 
 ## Manual install (no clasp)
 
 1. Open the spreadsheet → **Extensions** → **Apps Script**.
-2. Create files / paste contents: `Config.gs`, `WeeklyGscSnapshot.gs`, `Triggers.gs`, and manifest **`appsscript.json`** from this folder (`oauthScopes`: Sheets, `webmasters.readonly`, **`script.external_request`** for UrlFetch to Google APIs).
+2. Create files / paste contents: `Config.gs`, `WeeklyGscSnapshot.gs`, `MonthlyDataForSeoDiscovery.gs`, `Triggers.gs`, and manifest **`appsscript.json`** from this folder (`oauthScopes`: Sheets, `webmasters.readonly`, `script.external_request`, **`script.scriptapp`** for install*Trigger).
 3. Save → **Authorize** (grant those scopes).
 4. Run `installWeeklyTrigger()` once; use `runWeeklyGscSnapshotNow()` to test.
 
 Full ops context: `agentic_ai_context/SEO_MONITORING_SHEET_WORKFLOW.md`.
+
+---
+
+## DataForSEO monthly discovery (Script properties)
+
+Calls [DataForSEO Keywords For Keywords Live](https://docs.dataforseo.com/v3/keywords_data/google_ads/keywords_for_keywords/live/) (same family as `scripts/dataforseo_buyer_intent_keywords.py`). Appends rows that are **not** already on **`Keywords_targets`** column A.
+
+### You must set (Apps Script → **Project Settings** → **Script properties**)
+
+| Property | Required | Description |
+|----------|----------|-------------|
+| **`DATAFORSEO_LOGIN`** | **Yes** | API login from [DataForSEO API access](https://app.dataforseo.com/api-access) (same as `DATAFORSEO_LOGIN` in `market_research/.env`). |
+| **`DATAFORSEO_PASSWORD`** | **Yes** | API password (same as `DATAFORSEO_PASSWORD` in `.env`). **Never** paste these into `Config.gs` or git. |
+
+### Optional Script properties
+
+| Property | Description |
+|----------|-------------|
+| **`DATAFORSEO_SEEDS`** | Comma-separated seed keywords **(max 20 used)**. If omitted, **`Config.gs` → `DATAFORSEO_DEFAULT_SEEDS`** is used. |
+
+### Config in `Config.gs` (non-secret; edit in repo)
+
+- **`DATAFORSEO_LOCATION_CODE`** (default `2840` = United States) or set **`DATAFORSEO_LOCATION_NAME`** e.g. `"United States"` to override.
+- **`DATAFORSEO_LANGUAGE_CODE`**, **`DATAFORSEO_SORT_BY`**, **`DATAFORSEO_MAX_ROWS_PER_RUN`**, **`SH_MONTHLY_DFS`** (tab name).
+
+### Triggers
+
+1. After setting properties: run **`runMonthlyDataForSeoDiscoveryNow()`** once to verify billing and the **`DataForSEO_monthly_discovery`** tab (created automatically if missing).
+2. Run **`installMonthlyDataForSeoTrigger()`** once — schedules **`monthlyDataForSeoKeywordDiscovery`** on the **1st of each month at 09:00** (timezone from `appsscript.json`, default `America/Los_Angeles`).
+
+### Existing workbook without the new tab
+
+Either run the manual function above (it **inserts** the sheet), or re-run bootstrap with `--spreadsheet-id` only if you accept it **rewriting** tab contents per `bootstrap_seo_monitoring_sheet.py` (keywords seed, etc.).
