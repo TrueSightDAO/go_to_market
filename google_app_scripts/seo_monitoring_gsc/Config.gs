@@ -23,6 +23,36 @@ var SEO_MONITORING_CONFIG = {
   SH_KEYWORDS: 'Keywords_targets',
   SH_CHANGELOG: 'Change_log',
   SH_WEEKLY: 'Weekly_GSC',
+  /** Monthly DataForSEO keyword ideas not already on Keywords_targets (col A). */
+  SH_MONTHLY_DFS: 'DataForSEO_monthly_discovery',
+
+  /**
+   * DataForSEO keywords_for_keywords/live — seeds (max 20 sent per API call).
+   * Override via Script property DATAFORSEO_SEEDS (comma-separated).
+   */
+  DATAFORSEO_DEFAULT_SEEDS: [
+    'ceremonial cacao',
+    'buy ceremonial cacao',
+    'organic cacao nibs',
+    'cacao nibs organic',
+    'ceremonial grade cacao',
+    'bulk cacao nibs',
+    'brazilian cacao',
+    'single origin cacao',
+    'amazon rainforest cacao',
+    'fair trade cacao',
+    'wholesale cacao',
+    'cacao paste ceremonial',
+    'regenerative cacao',
+  ],
+
+  /** United States — use location_name instead to override (e.g. "United States"). */
+  DATAFORSEO_LOCATION_CODE: 2840,
+  DATAFORSEO_LOCATION_NAME: '',
+  DATAFORSEO_LANGUAGE_CODE: 'en',
+  DATAFORSEO_SORT_BY: 'search_volume',
+  /** Max opportunity rows appended per monthly run (after filters). */
+  DATAFORSEO_MAX_ROWS_PER_RUN: 500,
 };
 
 /**

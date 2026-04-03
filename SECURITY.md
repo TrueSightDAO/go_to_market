@@ -7,6 +7,7 @@ This repo is **not** a secrets store. Keep API keys, OAuth tokens, and service a
 - **`.env`**, **`.env.*`** (use a local file; see `DATAFORSEO_*` and other env-based scripts)
 - **`google_credentials.json`** and other service-account key JSON
 - **`credentials/**`** contents except **`README.md`** and **`.gitignore`** per subfolder
+- **DataForSEO** API login/password: store in **`market_research/.env`** (local) and/or **Apps Script → Script properties** — **never** in `Config.gs` or committed files
 - **`client_secret.json`**, **`token.json`**, **`authorized_user.json`** (any path)
 - **`.clasprc.json`** (clasp login; normally lives in your home directory)
 - **Private keys:** `*.pem`, `*.key`, `*.p8`, etc.
