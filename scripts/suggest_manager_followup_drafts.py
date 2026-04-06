@@ -141,7 +141,9 @@ def cell(row: list[str], idx: int | None) -> str:
     return (row[idx] or "").strip() if idx < len(row) else ""
 
 
-def load_hit_list_targets(ws) -> list[dict]:
+def load_hit_list_targets(ws, *, hit_status: str | None = None) -> list[dict]:
+    """Rows where Status matches *hit_status* (default: :data:`HIT_STATUS_TARGET`) and Email is set."""
+    target = HIT_STATUS_TARGET if hit_status is None else hit_status
     values = ws.get_all_values()
     if not values:
         return []
@@ -158,7 +160,7 @@ def load_hit_list_targets(ws) -> list[dict]:
 
     out: list[dict] = []
     for r, row in enumerate(values[1:], start=2):
-        if cell(row, status_i) != HIT_STATUS_TARGET:
+        if cell(row, status_i) != target:
             continue
         em = normalize_email(cell(row, email_i))
         if not em:
@@ -893,12 +895,29 @@ def ensure_user_label_id(service, label_name: str) -> str:
     return str(created["id"])
 
 
-def build_message_raw(sender: str, to: str, subject: str, body: str) -> dict:
+def build_message_raw(
+    sender: str,
+    to: str,
+    subject: str,
+    body: str,
+    *,
+    attachment_path: Path | None = None,
+    attachment_filename: str | None = None,
+) -> dict:
     msg = EmailMessage()
     msg["From"] = sender
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(body, charset="utf-8")
+    if attachment_path is not None:
+        path = Path(attachment_path)
+        fn = (attachment_filename or path.name).strip() or path.name
+        msg.add_attachment(
+            path.read_bytes(),
+            maintype="application",
+            subtype="pdf",
+            filename=fn,
+        )
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
     return {"raw": raw}
 

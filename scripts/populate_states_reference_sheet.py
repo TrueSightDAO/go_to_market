@@ -45,6 +45,10 @@ STATUSES: list[tuple[str, str]] = [
         "Manager Follow-up",
         "Visit done; follow up with manager using contact details.",
     ),
+    (
+        "Bulk Info Requested",
+        "Buyer asked for wholesale/bulk pricing; use bulk-info draft flow (PDF), not manager-follow-up template.",
+    ),
     ("Meeting Scheduled", "Meeting or call scheduled."),
     ("Followed Up", "Follow-up with manager completed; awaiting next step."),
     ("Partnered", "Active partner."),
