@@ -1,0 +1,5 @@
+# This folder is documentation-only in git. Do not add exports of ~/.openclaw here.
+*
+!.gitignore
+!.nvmrc
+!README.md

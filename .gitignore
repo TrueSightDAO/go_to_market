@@ -124,3 +124,9 @@ npm-debug.log*
 yarn-error.log
 .npm
 .yarn
+
+# OpenClaw: repo folder is docs-only — never commit ~/.openclaw exports dropped here
+openclaw/*
+!openclaw/README.md
+!openclaw/.gitignore
+!openclaw/.nvmrc
