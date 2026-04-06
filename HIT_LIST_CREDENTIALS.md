@@ -46,7 +46,7 @@ Columns written: `field`, `exact_value`, `notes`, `hit_list_column`. Important: 
 | Col | Name | Type | Notes |
 |-----|------|------|-------|
 | A | Shop Name | String | |
-| B | Status | String | See **States** tab — Research, Shortlisted, Instagram Followed, Contacted, Manager Follow-up, **Bulk Info Requested**, Meeting Scheduled, Followed Up, Partnered, On Hold, Rejected, Not Appropriate |
+| B | Status | String | See **States** tab — Research, Shortlisted, Instagram Followed, Contacted, Manager Follow-up, Meeting Scheduled, Followed Up, Partnered, On Hold, Rejected, Not Appropriate |
 | C | Priority | String | High, Medium, Low, Existing Partner (sheet-only; not on dapp suggest form) |
 | D | Address | String | |
 | E | City | String | |
@@ -71,7 +71,7 @@ Example: `go-ask-alice__1125-pacific-ave__santa-cruz__ca`
 
 ## Email Agent Follow Up tab (Gmail ↔ Hit List)
 
-**Purpose:** Append-only log of **sent** messages from the connected Gmail account (`credentials/gmail/token.json`), backfilled for leads on **Hit List** where **Status** is **`Manager Follow-up`** or **`Bulk Info Requested`** and **Email** is set.
+**Purpose:** Append-only log of **sent** messages from the connected Gmail account (`credentials/gmail/token.json`), backfilled for leads on **Hit List** where **Status** is **`Manager Follow-up`** and **Email** is set.
 
 **Sheet:** Same spreadsheet — tab name **`Email Agent Follow Up`**.  
 If the tab is missing, `scripts/sync_email_agent_followup.py` creates it and writes the header row.
@@ -102,10 +102,6 @@ python3 scripts/sync_email_agent_followup.py            # append new rows
 Options: `--limit N` (max distinct addresses), `--per-address-cap` (max messages per address, default 200).
 
 **Auth:** Sheets = **service account** (`google_credentials.json`). Gmail = **user OAuth** (`credentials/gmail/`). Future “draft + send + update Status” flows can extend this script or call the same libraries.
-
-**Wholesale PDF (GitHub, for Apps Script `UrlFetchApp`):** After you push `retail_price_list/agroverse_wholesale_retail_overview_2026.pdf` to **`TrueSightDAO/content_schedule`** branch **`main`**, the stable raw URL is  
-`https://raw.githubusercontent.com/TrueSightDAO/content_schedule/main/retail_price_list/agroverse_wholesale_retail_overview_2026.pdf`  
-(override with script property `BULK_PDF_RAW_URL` until merged). See `tokenomics/google_app_scripts/holistic_hit_list_store_history/email_agent_drafts.gs`.
 
 ### Readable layout (formatting)
 

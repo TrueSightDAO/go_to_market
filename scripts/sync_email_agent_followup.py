@@ -4,7 +4,7 @@ Sync sent-mail history from Gmail into the "Email Agent Follow Up" tab on the Hi
 
 Flow
 ----
-1. Open "Hit List" → rows where Status is **Manager Follow-up** or **Bulk Info Requested** and Email (column K) non-empty.
+1. Open "Hit List" → rows where Status == "Manager Follow-up" and Email (column K) non-empty.
 2. For each distinct email address, query Gmail (in:sent to:...) via OAuth token.
 3. Append new rows to "Email Agent Follow Up" keyed by gmail_message_id (no duplicates).
 
@@ -45,8 +45,7 @@ SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
 HIT_LIST_WS = "Hit List"
 LOG_WS = "Email Agent Follow Up"
 
-# Sync sent mail for these outreach queues (cadence + history for both flows).
-HIT_STATUSES_FOR_SYNC = ("Manager Follow-up", "Bulk Info Requested")
+HIT_STATUS_TARGET = "Manager Follow-up"
 # Must match (or be a subset of) scopes in credentials/gmail/token.json from gmail_oauth_authorize.py
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
@@ -106,7 +105,7 @@ def load_hit_list_targets(ws) -> list[dict]:
     out: list[dict] = []
     for r, row in enumerate(values[1:], start=2):
         status = cell(row, status_i)
-        if status not in HIT_STATUSES_FOR_SYNC:
+        if status != HIT_STATUS_TARGET:
             continue
         em = normalize_email(cell(row, email_i))
         if not em:
@@ -256,7 +255,7 @@ def main() -> None:
     if args.limit:
         distinct_emails = distinct_emails[: args.limit]
 
-    print(f"Hit List rows (status in {HIT_STATUSES_FOR_SYNC!r}) with Email: {len(targets)}")
+    print(f"Hit List '{HIT_STATUS_TARGET}' rows with Email: {len(targets)}")
     print(f"Distinct recipient emails to scan: {len(distinct_emails)}")
     if not distinct_emails:
         print("Nothing to scan.")
