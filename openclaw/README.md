@@ -19,32 +19,43 @@ OpenClaw links to **WhatsApp Web** and stores **all session credentials under yo
 
 - **CLI:** `npm install -g openclaw@latest` (re-run under Node 22 if you switch versions)
 
-## One-time: install gateway + AI (recommended)
+## One-time: gateway + local mode (done via CLI)
 
 From a terminal (Node 22 active):
 
 ```bash
-openclaw onboard --install-daemon
+export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh"
+nvm use 22
+
+# Fix permissions, session dirs, gateway token, LaunchAgent (macOS)
+openclaw doctor --fix
+
+# Required so the gateway can start
+openclaw config set gateway.mode local
+
+# WhatsApp ships disabled — enable and restart the gateway service
+openclaw plugins enable whatsapp
+launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway"
 ```
 
-Follow prompts for model/API keys and gateway. (You can skip what you do not need yet; WhatsApp login is separate.)
+Full interactive wizard (model keys, etc.): `openclaw onboard --install-daemon`
 
 ## Link WhatsApp (QR code)
 
-1. Use **Node 22** in the same terminal (`nvm use 22`).
-2. Run:
+**Run this in Terminal.app / iTerm** (not a dead script): you must scan within ~1–2 minutes while the process stays running.
 
-   ```bash
-   openclaw channels login --channel whatsapp
+1. `nvm use 22`
+2. ```bash
+   openclaw channels login --channel whatsapp --verbose
    ```
-
-3. **Scan the QR code** with WhatsApp on your phone (**Linked devices**).
-
-4. Confirm:
+3. In WhatsApp on your phone: **Settings → Linked devices → Link a device** — scan the **terminal QR**.
+4. When it succeeds, verify:
 
    ```bash
    openclaw channels list
    ```
+
+If the QR expires, run the login command again for a fresh code.
 
 Do **not** copy files from `~/.openclaw/` into `market_research/` or any git-tracked path.
 
