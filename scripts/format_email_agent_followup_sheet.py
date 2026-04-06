@@ -4,7 +4,7 @@ Apply readable formatting to the "Email Agent Follow Up" worksheet:
 - Freeze header row
 - Header: bold, white on green (Agroverse palette)
 - Column widths tuned for scanning
-- Snippet column: wrap text, top-align
+- Snippet and body_plain columns: wrap text, top-align
 - Auto filter on header row
 - Banded rows on data (alternating light gray / white)
 
@@ -26,7 +26,7 @@ _REPO = Path(__file__).resolve().parent.parent
 _SA_CREDS = _REPO / "google_credentials.json"
 SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
 LOG_WS = "Email Agent Follow Up"
-NUM_COLS = 9  # matches LOG_HEADERS in sync_email_agent_followup.py
+NUM_COLS = 10  # matches LOG_HEADERS in sync_email_agent_followup.py
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -34,8 +34,8 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 _HEADER_BG = {"red": 0.176, "green": 0.353, "blue": 0.153}
 _HEADER_FG = {"red": 1.0, "green": 1.0, "blue": 1.0}
 
-# Column widths (pixels) — A..I
-_COL_WIDTHS = [220, 150, 200, 160, 240, 280, 170, 420, 130]
+# Column widths (pixels) — A..J (snippet + body_plain)
+_COL_WIDTHS = [220, 150, 200, 160, 240, 280, 170, 320, 480, 130]
 
 
 def get_sheet_id(service, title: str) -> int:
@@ -135,7 +135,7 @@ def main() -> None:
                         "sheetId": sid,
                         "startRowIndex": 1,
                         "startColumnIndex": 7,
-                        "endColumnIndex": 8,
+                        "endColumnIndex": 9,
                     },
                     "cell": {
                         "userEnteredFormat": {

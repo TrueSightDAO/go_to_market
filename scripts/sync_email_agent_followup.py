@@ -6,7 +6,9 @@ Flow
 ----
 1. Open "Hit List" → rows where Status == "Manager Follow-up" and Email (column K) non-empty.
 2. For each distinct email address, query Gmail (in:sent to:...) via OAuth token.
-3. Append new rows to "Email Agent Follow Up" keyed by gmail_message_id (no duplicates).
+3. Append new rows to "Email Agent Follow Up" keyed by gmail_message_id (no duplicates). Each row includes
+   **snippet** (Gmail preview) and **body_plain** (best-effort full plain text from the sent message) for
+   draft/Grok context.
 
 Prerequisites
 -------------
@@ -35,6 +37,7 @@ from google.oauth2.credentials import Credentials as UserCredentials
 from google.oauth2.service_account import Credentials as SACredentials
 from googleapiclient.discovery import build
 
+from gmail_plain_body import PLAIN_BODY_MAX_CHARS, extract_plain_body_from_payload
 from gmail_user_credentials import load_gmail_user_credentials
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -64,6 +67,7 @@ LOG_HEADERS = [
     "subject",
     "sent_at",
     "snippet",
+    "body_plain",
     "sync_source",
 ]
 
@@ -143,7 +147,51 @@ def ensure_log_worksheet(sh):
     vals = ws.get_all_values()
     if not vals:
         ws.append_row(LOG_HEADERS, value_input_option="USER_ENTERED")
+    else:
+        migrate_followup_log_add_body_plain(ws, vals[0])
     return ws
+
+
+def migrate_followup_log_add_body_plain(ws: gspread.Worksheet, header_row: list[str]) -> None:
+    """Insert body_plain between snippet and sync_source on legacy 9-column sheets."""
+    hdr = [str(h or "").strip() for h in header_row]
+    if "body_plain" in hdr:
+        return
+    if len(hdr) != 9 or hdr[-1] != "sync_source" or hdr[7] != "snippet":
+        return
+    ws.spreadsheet.batch_update(
+        {
+            "requests": [
+                {
+                    "insertDimension": {
+                        "range": {
+                            "sheetId": ws.id,
+                            "dimension": "COLUMNS",
+                            "startIndex": 8,
+                            "endIndex": 9,
+                        }
+                    }
+                }
+            ]
+        }
+    )
+    ws.update_cell(1, 9, "body_plain")
+
+
+def fetch_plain_body_for_message(service, message_id: str) -> str:
+    full = (
+        service.users()
+        .messages()
+        .get(userId="me", id=message_id, format="full")
+        .execute()
+    )
+    pl = full.get("payload") or {}
+    text = extract_plain_body_from_payload(pl).strip()
+    if not text:
+        text = (full.get("snippet") or "").replace("\n", " ").strip()
+    if len(text) > PLAIN_BODY_MAX_CHARS:
+        text = text[: PLAIN_BODY_MAX_CHARS - 1] + "…"
+    return text
 
 
 def existing_message_ids(ws) -> set[str]:
@@ -277,6 +325,10 @@ def main() -> None:
             mid = m["gmail_message_id"]
             if mid in known_ids:
                 continue
+            if args.dry_run:
+                body_plain = ""
+            else:
+                body_plain = fetch_plain_body_for_message(service, mid)
             new_rows.append(
                 [
                     mid,
@@ -287,6 +339,7 @@ def main() -> None:
                     m["subject"],
                     m["sent_at"],
                     m["snippet"],
+                    body_plain,
                     "gmail_sent_sync",
                 ]
             )
