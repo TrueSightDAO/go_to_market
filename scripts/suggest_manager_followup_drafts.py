@@ -73,6 +73,7 @@ from google.oauth2.service_account import Credentials as SACredentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from gmail_plain_body import extract_plain_body_from_payload
 from gmail_user_credentials import load_gmail_user_credentials
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -440,6 +441,61 @@ def parse_sent_at_header(raw: str) -> datetime | None:
         return None
 
 
+def followup_sheet_logged_bodies_for_prompt(
+    log_ws: gspread.Worksheet | None,
+    partner_email: str,
+    *,
+    max_blocks: int = 2,
+    max_chars_per_block: int = 12_000,
+) -> str:
+    """Non-empty `body_plain` from Email Agent Follow Up (synced outbound), newest last."""
+    if log_ws is None:
+        return ""
+    want = normalize_email(partner_email)
+    if not want:
+        return ""
+    values = log_ws.get_all_values()
+    if len(values) < 2:
+        return ""
+    hdr = header_map(values[0])
+    to_i = hdr.get("to_email")
+    sent_i = hdr.get("sent_at")
+    body_i = hdr.get("body_plain")
+    subj_i = hdr.get("subject")
+    if to_i is None or sent_i is None:
+        return ""
+
+    rows: list[tuple[datetime, str]] = []
+    for row in values[1:]:
+        to = normalize_email(cell(row, to_i))
+        if to != want:
+            continue
+        dt = parse_sent_at_header(cell(row, sent_i))
+        if dt is None:
+            continue
+        parts: list[str] = []
+        if subj_i is not None:
+            sj = cell(row, subj_i)
+            if sj:
+                parts.append(f"Subject: {sj}")
+        if body_i is not None:
+            bp = (cell(row, body_i) or "").strip()
+            if bp:
+                chunk = bp[:max_chars_per_block]
+                if len(bp) > max_chars_per_block:
+                    chunk += "…"
+                parts.append(chunk)
+        if not parts:
+            continue
+        rows.append((dt, "\n".join(parts)))
+    rows.sort(key=lambda x: x[0])
+    tail = rows[-max_blocks:]
+    if not tail:
+        return ""
+    blocks = [f"[Logged send {dt.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC]\n{text}" for dt, text in tail]
+    return "\n\n---\n\n".join(blocks)
+
+
 def last_sent_utctime_per_to_email(log_ws: gspread.Worksheet | None) -> dict[str, datetime]:
     """Latest logged outbound `sent_at` per recipient (lowercase email)."""
     if log_ws is None:
@@ -636,21 +692,25 @@ def list_message_ids(service, partner_addr: str, max_list: int = 40) -> list[str
     return out
 
 
-def latest_thread_snippets(service, partner_addr: str, max_snippets: int = 3) -> list[str]:
+def latest_thread_excerpts(service, partner_addr: str, max_messages: int = 3) -> list[str]:
+    """Last N messages in the thread (full plain body when available), newest last — for templates."""
     ids = list_message_ids(service, partner_addr, max_list=60)
     metas: list[tuple[int, str]] = []
     for mid in ids:
-        full = service.users().messages().get(userId="me", id=mid, format="metadata").execute()
+        full = service.users().messages().get(userId="me", id=mid, format="full").execute()
         internal = full.get("internalDate")
         try:
             ms = int(internal) if internal is not None else 0
         except (TypeError, ValueError):
             ms = 0
-        sn = (full.get("snippet") or "").replace("\n", " ").strip()
-        if sn:
-            metas.append((ms, sn))
+        pl = full.get("payload") or {}
+        body = extract_plain_body_from_payload(pl).strip()
+        if not body:
+            body = (full.get("snippet") or "").replace("\n", " ").strip()
+        if body:
+            metas.append((ms, body))
     metas.sort(key=lambda x: x[0])
-    tail = metas[-max_snippets:]
+    tail = metas[-max_messages:]
     return [t[1] for t in tail]
 
 
@@ -673,52 +733,6 @@ def get_grok_api_key() -> str | None:
     return k or None
 
 
-def _decode_gmail_body_data(data: str) -> str:
-    if not data:
-        return ""
-    pad = "=" * ((4 - len(data) % 4) % 4)
-    try:
-        raw = base64.urlsafe_b64decode(data + pad)
-        return raw.decode("utf-8", errors="replace")
-    except (ValueError, UnicodeError):
-        return ""
-
-
-def _html_to_plain(html: str) -> str:
-    t = re.sub(r"(?is)<script[^>]*>.*?</script>", "", html)
-    t = re.sub(r"(?is)<style[^>]*>.*?</style>", "", t)
-    t = re.sub(r"(?s)<[^>]+>", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    return t[:PER_MESSAGE_BODY_CAP]
-
-
-def extract_plain_body_from_payload(payload: dict) -> str:
-    plain_chunks: list[str] = []
-    html_chunks: list[str] = []
-
-    def walk(part: dict) -> None:
-        mime = (part.get("mimeType") or "").lower()
-        body = part.get("body") or {}
-        data = body.get("data")
-        if data:
-            text = _decode_gmail_body_data(data)
-            if not text:
-                return
-            if "text/plain" in mime:
-                plain_chunks.append(text)
-            elif "text/html" in mime:
-                html_chunks.append(text)
-        for p in part.get("parts") or []:
-            walk(p)
-
-    walk(payload)
-    if plain_chunks:
-        return "\n\n".join(plain_chunks).strip()[:PER_MESSAGE_BODY_CAP]
-    if html_chunks:
-        return _html_to_plain("\n\n".join(html_chunks))[:PER_MESSAGE_BODY_CAP]
-    return ""
-
-
 def format_full_message_block(
     my_email: str,
     full: dict,
@@ -730,7 +744,11 @@ def format_full_message_block(
     frm = headers.get("from", "")
     to = headers.get("to", "")
     date = headers.get("date", "")
-    body_text = extract_plain_body_from_payload(pl).strip()
+    body_text = extract_plain_body_from_payload(
+        pl,
+        per_part_cap=PER_MESSAGE_BODY_CAP,
+        max_total=PER_MESSAGE_BODY_CAP,
+    ).strip()
     if not body_text:
         body_text = (full.get("snippet") or "").replace("\n", " ").strip()
     body_text = body_text[:PER_MESSAGE_BODY_CAP]
@@ -903,6 +921,9 @@ def build_message_raw(sender: str, to: str, subject: str, body: str) -> dict:
     return {"raw": raw}
 
 
+TEMPLATE_THREAD_EXCERPT_CHARS = 2000
+
+
 def draft_body_template(shop_name: str, snippets: list[str]) -> str:
     shop = shop_name or "there"
     lines = [
@@ -915,8 +936,9 @@ def draft_body_template(shop_name: str, snippets: list[str]) -> str:
     ]
     if snippets:
         lines.append("(Recent thread context for you — edit freely:)")
+        cap = TEMPLATE_THREAD_EXCERPT_CHARS
         for s in snippets:
-            lines.append(f"— {s[:400]}{'…' if len(s) > 400 else ''}")
+            lines.append(f"— {s[:cap]}{'…' if len(s) > cap else ''}")
         lines.append("")
     lines.extend(
         [
@@ -1117,7 +1139,7 @@ def main() -> None:
         prev = last_sent.get(to_addr)
         prev_s = prev.strftime("%Y-%m-%d UTC") if prev else "none"
 
-        snippets = latest_thread_snippets(gsvc, to_addr, max_snippets=3)
+        snippets = latest_thread_excerpts(gsvc, to_addr, max_messages=3)
         source = "template"
         subj: str
         body: str
@@ -1131,6 +1153,15 @@ def main() -> None:
                 max_messages=args.grok_max_messages,
                 max_total_chars=args.grok_max_context_chars,
             )
+            sheet_ctx = followup_sheet_logged_bodies_for_prompt(log_ws, to_addr)
+            if sheet_ctx:
+                hist = (
+                    "Outbound copies synced to the Hit List "
+                    "(Email Agent Follow Up — may overlap Gmail export):\n\n"
+                    + sheet_ctx
+                    + "\n\n---\n\n"
+                    + hist
+                )
             try:
                 subj, body = grok_generate_followup(
                     api_key=grok_key or "",
