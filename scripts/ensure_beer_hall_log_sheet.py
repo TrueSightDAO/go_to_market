@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Create the tab "Beer_Hall_Posts" on the TrueSight DAO Telegram compilation spreadsheet
-if missing, with a standard header row for logging OpenClaw → WhatsApp digests.
+Create the tab "OpenClaw Beer Hall updates" on the TrueSight DAO Telegram compilation
+spreadsheet if missing, with a standard header row for logging OpenClaw → WhatsApp digests.
+
+If the legacy tab "Beer_Hall_Posts" exists, it is renamed to "OpenClaw Beer Hall updates".
 
 Prevents duplicate/missed items across sessions: append one row per post (Beer Hall and/or
 Founder Haus AI). See agentic_ai_context OPENCLAW_WHATSAPP.md (outbound digests).
@@ -28,7 +30,8 @@ _SA_CREDS = _REPO / "google_credentials.json"
 
 # TrueSight DAO Telegram compilation
 SPREADSHEET_ID = "1qbZZhf-_7xzmDTriaJVWj6OZshyQsFkdsAV8-pyzASQ"
-LOG_WS = "Beer_Hall_Posts"
+LOG_WS = "OpenClaw Beer Hall updates"
+LEGACY_WS = "Beer_Hall_Posts"
 
 SHEETS_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -57,20 +60,32 @@ def get_client():
     return gspread.authorize(creds)
 
 
+def open_log_worksheet(sh: gspread.Spreadsheet) -> gspread.Worksheet:
+    try:
+        return sh.worksheet(LOG_WS)
+    except gspread.WorksheetNotFound:
+        pass
+    try:
+        legacy = sh.worksheet(LEGACY_WS)
+        legacy.update_title(LOG_WS)
+        print(f"Renamed legacy tab {LEGACY_WS!r} → {LOG_WS!r}.")
+        return sh.worksheet(LOG_WS)
+    except gspread.WorksheetNotFound:
+        pass
+    ws = sh.add_worksheet(title=LOG_WS, rows=2000, cols=len(LOG_HEADERS))
+    ws.append_row(LOG_HEADERS, value_input_option="USER_ENTERED")
+    print(f"Created tab {LOG_WS!r} with header row ({len(LOG_HEADERS)} columns).")
+    print(
+        "Append one row per WhatsApp digest. channel: Beer Hall | Founder Haus AI\n"
+        f"Sheet: https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit"
+    )
+    return ws
+
+
 def main() -> None:
     gc = get_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
-    try:
-        ws = sh.worksheet(LOG_WS)
-    except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=LOG_WS, rows=2000, cols=len(LOG_HEADERS))
-        ws.append_row(LOG_HEADERS, value_input_option="USER_ENTERED")
-        print(f"Created tab {LOG_WS!r} with header row ({len(LOG_HEADERS)} columns).")
-        print(
-            "Append one row per WhatsApp digest. channel: Beer Hall | Founder Haus AI\n"
-            f"Sheet: https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit"
-        )
-        return
+    ws = open_log_worksheet(sh)
 
     vals = ws.get_all_values()
     if not vals:
