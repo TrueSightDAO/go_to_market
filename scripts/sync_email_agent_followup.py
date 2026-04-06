@@ -20,9 +20,11 @@ Usage
 -----
   cd market_research
   source venv/bin/activate
-  python3 scripts/sync_email_agent_followup.py           # append new log rows
-  python3 scripts/sync_email_agent_followup.py --dry-run # print plan only
-  python3 scripts/sync_email_agent_followup.py --limit 5 # max distinct addresses (testing)
+  python3 scripts/sync_email_agent_followup.py              # migrate tab if needed, append new log rows
+  python3 scripts/sync_email_agent_followup.py --migrate-only  # insert body_plain header only (no Gmail)
+  python3 scripts/sync_email_agent_followup.py --backfill-body-plain  # fill empty body_plain for existing rows
+  python3 scripts/sync_email_agent_followup.py --dry-run
+  python3 scripts/sync_email_agent_followup.py --limit 5
 """
 
 from __future__ import annotations
@@ -48,7 +50,7 @@ SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
 HIT_LIST_WS = "Hit List"
 LOG_WS = "Email Agent Follow Up"
 
-HIT_STATUS_TARGET = "Manager Follow-up"
+HIT_STATUSES_FOR_SYNC = ("Manager Follow-up", "Bulk Info Requested")
 # Must match (or be a subset of) scopes in credentials/gmail/token.json from gmail_oauth_authorize.py
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
@@ -92,7 +94,7 @@ def cell(row: list[str], idx: int | None) -> str:
 
 
 def load_hit_list_targets(ws) -> list[dict]:
-    """Rows needing manager-follow-up with a usable Email."""
+    """Hit List rows in Manager Follow-up or Bulk Info Requested with Email set."""
     values = ws.get_all_values()
     if not values:
         return []
@@ -109,7 +111,7 @@ def load_hit_list_targets(ws) -> list[dict]:
     out: list[dict] = []
     for r, row in enumerate(values[1:], start=2):
         status = cell(row, status_i)
-        if status != HIT_STATUS_TARGET:
+        if status not in HIT_STATUSES_FOR_SYNC:
             continue
         em = normalize_email(cell(row, email_i))
         if not em:
@@ -152,13 +154,20 @@ def ensure_log_worksheet(sh):
     return ws
 
 
-def migrate_followup_log_add_body_plain(ws: gspread.Worksheet, header_row: list[str]) -> None:
-    """Insert body_plain between snippet and sync_source on legacy 9-column sheets."""
-    hdr = [str(h or "").strip() for h in header_row]
-    if "body_plain" in hdr:
-        return
-    if len(hdr) != 9 or hdr[-1] != "sync_source" or hdr[7] != "snippet":
-        return
+def migrate_followup_log_add_body_plain(ws: gspread.Worksheet, header_row: list[str]) -> bool:
+    """Insert **body_plain** immediately before **sync_source** if missing. Returns True if modified."""
+    hm = header_map(header_row)
+    if "body_plain" in hm:
+        return False
+    sync_i = hm.get("sync_source")
+    if sync_i is None:
+        print(
+            "migrate: no 'sync_source' column on Email Agent Follow Up — "
+            "set row 1 to match scripts/sync_email_agent_followup.py LOG_HEADERS or add columns manually.",
+            file=sys.stderr,
+        )
+        return False
+
     ws.spreadsheet.batch_update(
         {
             "requests": [
@@ -167,15 +176,91 @@ def migrate_followup_log_add_body_plain(ws: gspread.Worksheet, header_row: list[
                         "range": {
                             "sheetId": ws.id,
                             "dimension": "COLUMNS",
-                            "startIndex": 8,
-                            "endIndex": 9,
+                            "startIndex": sync_i,
+                            "endIndex": sync_i + 1,
                         }
                     }
                 }
             ]
         }
     )
-    ws.update_cell(1, 9, "body_plain")
+    # 1-based column index: inserted column is at sync_i + 1
+    ws.update_cell(1, sync_i + 1, "body_plain")
+    print(f"Migrated sheet: inserted column 'body_plain' before former column {sync_i + 1} (sync_source).")
+    return True
+
+
+def backfill_empty_body_plain(
+    service: object | None,
+    log_ws: gspread.Worksheet,
+    *,
+    dry_run: bool,
+    limit: int,
+) -> int:
+    """Fill **body_plain** for rows that have **gmail_message_id** but empty body. Returns rows updated."""
+    if not dry_run and service is None:
+        raise SystemExit("backfill: internal error (Gmail service missing).")
+    values = log_ws.get_all_values()
+    if len(values) < 2:
+        return 0
+    hdr = header_map(values[0])
+    mid_i = hdr.get("gmail_message_id")
+    body_i = hdr.get("body_plain")
+    if mid_i is None or body_i is None:
+        print(
+            "backfill: sheet needs columns gmail_message_id and body_plain "
+            "(run once with current script to migrate, or add header body_plain before sync_source).",
+            file=sys.stderr,
+        )
+        return 0
+
+    todo: list[tuple[int, str]] = []
+    for r, row in enumerate(values[1:], start=2):
+        mid = cell(row, mid_i)
+        if not mid:
+            continue
+        existing = cell(row, body_i) if body_i < len(row) else ""
+        if existing.strip():
+            continue
+        todo.append((r, mid))
+        if limit > 0 and len(todo) >= limit:
+            break
+
+    print(f"backfill: {len(todo)} row(s) with empty body_plain and a message id.")
+    if not todo:
+        return 0
+    if dry_run:
+        for r, mid in todo[:20]:
+            print(f"  dry-run row {r} gmail_message_id={mid[:16]}...")
+        if len(todo) > 20:
+            print(f"  ... and {len(todo) - 20} more")
+        return 0
+
+    col = body_i + 1
+    updated = 0
+    chunk: list[gspread.Cell] = []
+
+    def flush_chunk() -> None:
+        nonlocal chunk, updated
+        if not chunk:
+            return
+        log_ws.update_cells(chunk, value_input_option="USER_ENTERED")
+        updated += len(chunk)
+        chunk = []
+
+    for r, mid in todo:
+        try:
+            body_plain = fetch_plain_body_for_message(service, mid)  # type: ignore[arg-type]
+        except Exception as e:
+            print(f"  row {r} id={mid[:20]}... skip: {e}", file=sys.stderr)
+            continue
+        chunk.append(gspread.Cell(row=r, col=col, value=body_plain))
+        if len(chunk) >= 25:
+            flush_chunk()
+            print(f"  backfilled {updated}/{len(todo)}...")
+    flush_chunk()
+    print(f"backfill: wrote body_plain for {updated} row(s).")
+    return updated
 
 
 def fetch_plain_body_for_message(service, message_id: str) -> str:
@@ -273,6 +358,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Sync Gmail sent mail into Email Agent Follow Up.")
     parser.add_argument("--dry-run", action="store_true", help="Do not write to Sheets.")
     parser.add_argument(
+        "--migrate-only",
+        action="store_true",
+        help="Only ensure worksheet + insert body_plain column if missing (no Gmail).",
+    )
+    parser.add_argument(
+        "--backfill-body-plain",
+        action="store_true",
+        help="Fetch full message bodies from Gmail for rows with empty body_plain.",
+    )
+    parser.add_argument(
+        "--backfill-only",
+        action="store_true",
+        help="With --backfill-body-plain: do not scan Hit List / append new rows after backfill.",
+    )
+    parser.add_argument(
+        "--backfill-limit",
+        type=int,
+        default=0,
+        help="Max rows to backfill (0 = all rows that qualify).",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=0,
@@ -288,9 +394,24 @@ def main() -> None:
 
     sa = get_sheets_client()
     sh = sa.open_by_key(SPREADSHEET_ID)
-    hit_ws = sh.worksheet(HIT_LIST_WS)
     log_ws = ensure_log_worksheet(sh)
 
+    if args.migrate_only:
+        print(f"'{LOG_WS}' headers OK (body_plain present or migrated). Done.")
+        return
+
+    service = None
+    if args.backfill_body_plain:
+        if not args.dry_run:
+            gcreds = get_gmail_creds()
+            service = build("gmail", "v1", credentials=gcreds, cache_discovery=False)
+        backfill_empty_body_plain(
+            service, log_ws, dry_run=args.dry_run, limit=args.backfill_limit
+        )
+        if args.backfill_only:
+            return
+
+    hit_ws = sh.worksheet(HIT_LIST_WS)
     targets = load_hit_list_targets(hit_ws)
     distinct_emails: list[str] = []
     seen: set[str] = set()
@@ -303,7 +424,7 @@ def main() -> None:
     if args.limit:
         distinct_emails = distinct_emails[: args.limit]
 
-    print(f"Hit List '{HIT_STATUS_TARGET}' rows with Email: {len(targets)}")
+    print(f"Hit List rows (status in {HIT_STATUSES_FOR_SYNC!r}) with Email: {len(targets)}")
     print(f"Distinct recipient emails to scan: {len(distinct_emails)}")
     if not distinct_emails:
         print("Nothing to scan.")
@@ -312,8 +433,9 @@ def main() -> None:
     known_ids = existing_message_ids(log_ws)
     print(f"Existing log rows (message ids): {len(known_ids)}")
 
-    gcreds = get_gmail_creds()
-    service = build("gmail", "v1", credentials=gcreds, cache_discovery=False)
+    if service is None:
+        gcreds = get_gmail_creds()
+        service = build("gmail", "v1", credentials=gcreds, cache_discovery=False)
 
     synced_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     new_rows: list[list[str]] = []

@@ -1,6 +1,8 @@
-# Lightweight job: Gmail sent → "Email Agent Follow Up" only (no training, no drafts).
-# Keeps last-sent timestamps fresh for humans and for the daily cadence-gated draft workflow.
-# Pair with manager-followup-drafts.yml (daily). If you need fewer Gmail API calls, change cron to e.g. '0 */6 * * *'.
+# Gmail sent → "Email Agent Follow Up" tab (no training, no drafts).
+# Schedule: every hour (`cron: '0 * * * *'`). Code path: `scripts/sync_email_agent_followup.py`
+# on the **default branch** — merge PRs that change that script before expecting new columns (e.g. body_plain).
+# Optional one-time: run locally or add workflow_dispatch input `backfill_body_plain` to fill empty body_plain.
+# Pair with manager-followup-drafts.yml for draft generation.
 #
 # Secrets: GOOGLE_CREDENTIALS_JSON, GMAIL_TOKEN_JSON
 name: Email Agent Follow Up sync
@@ -10,6 +12,10 @@ on:
     inputs:
       dry_run:
         description: 'Dry run — no Sheet writes'
+        type: boolean
+        default: false
+      backfill_body_plain:
+        description: 'After sync, backfill empty body_plain via Gmail (uses quota; one-time catch-up)'
         type: boolean
         default: false
   schedule:
@@ -51,9 +57,13 @@ jobs:
         env:
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
           INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+          INPUT_BACKFILL: ${{ github.event.inputs.backfill_body_plain }}
         run: |
           if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
             python scripts/sync_email_agent_followup.py --dry-run
-          else
-            python scripts/sync_email_agent_followup.py
+            exit 0
+          fi
+          python scripts/sync_email_agent_followup.py
+          if [ "${INPUT_BACKFILL:-false}" = "true" ]; then
+            python scripts/sync_email_agent_followup.py --backfill-body-plain --backfill-only
           fi
