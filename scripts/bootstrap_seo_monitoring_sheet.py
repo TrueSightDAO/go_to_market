@@ -51,7 +51,7 @@ INSTRUCTIONS_LINES = [
     "SEO monitoring workbook — how to use",
     "",
     "1) Keywords_targets — curated queries we care about; edit intent_cluster, priority (P1/P2/P3), target_url.",
-    "2) Change_log — record every shipped SEO/content change (date, URL, summary, link).",
+    "2) Change_log — one row per shipped page URL; include **target_keyword** (last column) for the primary query that page is meant to win. Do not merge many URLs into one summary row.",
     "3) Weekly_GSC — filled by Apps Script (Search Console). Uses Monday–Sunday week with ~3-day GSC lag.",
     "",
     "Search Console property (for Apps Script Config.gs): use EXACTLY how it appears in GSC, e.g.",
@@ -91,6 +91,7 @@ CHANGELOG_HEADERS = [
     "link_pr_or_commit",
     "expected_impact",
     "follow_up_date",
+    "target_keyword",
 ]
 
 WEEKLY_HEADERS = [
