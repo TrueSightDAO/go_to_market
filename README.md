@@ -4,6 +4,8 @@ This repository contains tools and data for managing **multi-channel content mar
 
 **Secrets:** Do not commit API keys, OAuth tokens, or service account JSON. See **[`SECURITY.md`](SECURITY.md)** and **`.gitignore`**.
 
+**Fresh machine:** Copy **`.env.example`** → **`.env`** and add secrets locally. Notably **`GITHUB_PAT`** (see **GitHub PAT** below) if you automate ledger-related uploads to **`TrueSightDAO/.github`**.
+
 ## 📁 Repository Structure
 
 ```
@@ -60,7 +62,13 @@ source venv/bin/activate  # On macOS/Linux
 pip install -r requirements.txt
 ```
 
-### 2. Google Sheets API Setup
+### 2. Local environment (`.env`)
+
+1. **`cp .env.example .env`** in this directory.
+2. Set **`GITHUB_PAT`** if you use scripts or agents that push invoice PDFs to **[TrueSightDAO/.github](https://github.com/TrueSightDAO/.github)** **`main/assets/`** (see **`agentic_ai_context/WORKSPACE_CONTEXT.md`** §**3c**). The token must allow **Contents** read/write on that repo (classic **`repo`** scope, or a fine-grained token with **Contents** for **`.github`**). For **`gh pr create` / merge** using the same token as **`GH_TOKEN`**, also grant **Pull requests**.
+3. Add other keys (**DataForSEO**, **Grok**, **Wix**, etc.) as needed for specific scripts; never commit **`.env`**.
+
+### 3. Google Sheets API Setup
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project or select existing one
@@ -70,7 +78,7 @@ pip install -r requirements.txt
 6. Rename it to `google_credentials.json` and place it in the repository root
 7. Share your Google Sheets documents with the service account email
 
-### 3. Navigate to Specific Areas
+### 4. Navigate to Specific Areas
 
 **Physical Stores:**
 ```bash

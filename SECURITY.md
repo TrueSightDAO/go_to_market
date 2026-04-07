@@ -4,7 +4,7 @@ This repo is **not** a secrets store. Keep API keys, OAuth tokens, and service a
 
 ## Never commit
 
-- **`.env`**, **`.env.*`** (use a local file; see `DATAFORSEO_*` and other env-based scripts)
+- **`.env`**, **`.env.*`** (use a local file; see `DATAFORSEO_*` and other env-based scripts). **`GITHUB_PAT`** (if set) lives here for GitHub **Contents API** uploads to **`TrueSightDAO/.github`** and optional **`gh`** / **`GH_TOKEN`** use — see **`README.md`** and **`.env.example`**. Rotate if exposed.
 - **`google_credentials.json`** and other service-account key JSON
 - **`credentials/**`** contents except **`README.md`** and **`.gitignore`** per subfolder
 - **DataForSEO** API login/password: store in **`market_research/.env`** (local) and/or **Apps Script → Script properties** — **never** in `Config.gs` or committed files
