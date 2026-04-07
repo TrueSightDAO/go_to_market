@@ -27,7 +27,8 @@ API_URL = "https://api.dataforseo.com/v3/keywords_data/google_ads/keywords_for_k
 # US default (DataForSEO location_code for United States)
 DEFAULT_LOCATION_CODE = 2840
 
-# Buyer-intent seeds for Agroverse (ceremonial cacao, nibs, Brazil/regenerative story).
+# Buyer-intent seeds for Agroverse (ceremonial cacao, nibs, Brazil/regenerative, + chocolate adjacency for bar launch).
+# API accepts max 20 keywords per task; keep this list at or below 20.
 DEFAULT_SEEDS = [
     "ceremonial cacao",
     "buy ceremonial cacao",
@@ -42,6 +43,11 @@ DEFAULT_SEEDS = [
     "wholesale cacao",
     "cacao paste ceremonial",
     "regenerative cacao",
+    "single origin dark chocolate",
+    "organic dark chocolate bar",
+    "bean to bar chocolate",
+    "brazilian dark chocolate",
+    "craft chocolate bar",
 ]
 
 _SCRIPT_DIR = Path(__file__).resolve().parent

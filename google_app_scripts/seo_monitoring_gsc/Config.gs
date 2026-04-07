@@ -30,6 +30,7 @@ var SEO_MONITORING_CONFIG = {
    * DataForSEO keywords_for_keywords/live — seeds (max 20 sent per API call).
    * Override via Script property DATAFORSEO_SEEDS (comma-separated).
    */
+  /** Keep length ≤ 20 (keywords_for_keywords/live limit per task). Chocolate seeds = demand research ahead of bar SKUs. */
   DATAFORSEO_DEFAULT_SEEDS: [
     'ceremonial cacao',
     'buy ceremonial cacao',
@@ -44,6 +45,11 @@ var SEO_MONITORING_CONFIG = {
     'wholesale cacao',
     'cacao paste ceremonial',
     'regenerative cacao',
+    'single origin dark chocolate',
+    'organic dark chocolate bar',
+    'bean to bar chocolate',
+    'brazilian dark chocolate',
+    'craft chocolate bar',
   ],
 
   /** United States — use location_name instead to override (e.g. "United States"). */

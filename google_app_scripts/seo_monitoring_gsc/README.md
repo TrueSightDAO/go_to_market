@@ -85,6 +85,20 @@ Calls [DataForSEO Keywords For Keywords Live](https://docs.dataforseo.com/v3/key
 - **`DATAFORSEO_LOCATION_CODE`** (default `2840` = United States) or set **`DATAFORSEO_LOCATION_NAME`** e.g. `"United States"` to override.
 - **`DATAFORSEO_LANGUAGE_CODE`**, **`DATAFORSEO_SORT_BY`**, **`DATAFORSEO_MAX_ROWS_PER_RUN`**, **`SH_MONTHLY_DFS`** (tab name).
 
+### Keywords_targets: chocolate-scope rows (Python)
+
+From `market_research/`, after a successful `scripts/dataforseo_buyer_intent_keywords.py` run (CSV under `output/dataforseo/`), append deduped chocolate / bean-to-bar queries to **`Keywords_targets`** with DFS columns filled:
+
+`python3 scripts/append_chocolate_keywords_to_targets.py`  
+(`--dry-run` to preview; uses `brand_keyword_blocklist.txt` for substring excludes.)
+
+### Python equivalent (local)
+
+From `market_research/`, same logic as **`monthlyDataForSeoKeywordDiscovery()`** (append ideas not on **Keywords_targets** col A):
+
+- Live API: `python3 scripts/sync_dataforseo_monthly_discovery.py` (uses `.env` DataForSEO creds).
+- If the API returns **403** / errors: `python3 scripts/sync_dataforseo_monthly_discovery.py --use-latest-csv` after `dataforseo_buyer_intent_keywords.py` has written a CSV under `output/dataforseo/`.
+
 ### Triggers
 
 1. After setting properties: run **`runMonthlyDataForSeoDiscoveryNow()`** once to verify billing and the **`DataForSEO_monthly_discovery`** tab (created automatically if missing).
