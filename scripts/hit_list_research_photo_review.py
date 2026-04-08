@@ -53,6 +53,7 @@ GROK_ENDPOINT = "https://api.x.ai/v1/chat/completions"
 GROK_MODEL = "grok-4-1-fast-non-reasoning"
 SUBMITTED_BY_LABEL = "Grok photo scan (Google Places)"
 SUBMITTED_BY_NO_PHOTOS = "Hit List photo automation (no Places images)"
+SUBMITTED_BY_ERROR = "Hit List photo automation (run error)"
 MAX_PHOTOS_DEFAULT = 5
 PLACES_MAX_WIDTH = 1200
 SLEEP_BETWEEN_SHOPS_SEC = 3
@@ -292,6 +293,118 @@ def format_remarks_column_d(
     return "\n\n".join(paras)
 
 
+def format_run_error_remarks(
+    shop_name: str,
+    address: str,
+    city: str,
+    state: str,
+    exc: BaseException,
+) -> str:
+    msg = str(exc).strip() or exc.__class__.__name__
+    if len(msg) > 1200:
+        msg = msg[:1200] + "…"
+    loc_lines = [shop_name or "(unknown shop)"]
+    line2 = ", ".join(
+        p for p in [address.strip(), " ".join(x for x in [city.strip(), state.strip()] if x)] if p
+    )
+    if line2:
+        loc_lines.append(line2)
+    return (
+        "Location\n" + "\n".join(loc_lines) + "\n\n"
+        "Automation error\n"
+        "The hourly Hit List photo review job hit an exception for this row (Places lookup, "
+        "photo download, Grok, or Sheets write). No reliable vision score was produced.\n\n"
+        f"Error (trimmed):\n{msg}\n\n"
+        "Suggested Hit List status: AI: Photo needs review — retry manually, fix API access, "
+        "or disqualify the lead.\n\n"
+        "Status was set to AI: Photo needs review so the row does not stay in Research "
+        "and repeat on the next run (saves Grok/Places usage)."
+    )
+
+
+def append_dapp_remark_and_apply(
+    hit_ws: gspread.Worksheet,
+    remark_ws: gspread.Worksheet,
+    sheet_row: int,
+    name: str,
+    ai_status: str,
+    remarks: str,
+    submitted_by: str,
+    submitted_at: str,
+    submission_id: str,
+) -> None:
+    """Append one DApp Remarks row and sync Status / Sales Process Notes on Hit List."""
+    r_headers = remark_ws.row_values(1)
+    row_out: list[str] = []
+    for h in r_headers:
+        if h == "Submission ID":
+            row_out.append(submission_id)
+        elif h == "Shop Name":
+            row_out.append(name)
+        elif h == "Status":
+            row_out.append(ai_status)
+        elif h == "Remarks":
+            row_out.append(remarks)
+        elif h == "Submitted By":
+            row_out.append(submitted_by)
+        elif h == "Submitted At":
+            row_out.append(submitted_at)
+        elif h == "Processed":
+            row_out.append("")
+        elif h == "Processed At":
+            row_out.append("")
+        else:
+            row_out.append("")
+    remark_ws.append_row(row_out, value_input_option="USER_ENTERED")
+    time.sleep(1.5)
+    apply_remark_to_hit_list(
+        hit_ws,
+        remark_ws,
+        sheet_row,
+        submission_id,
+        name,
+        ai_status,
+        remarks,
+        submitted_by,
+        submitted_at,
+    )
+
+
+def record_run_error(
+    hit_ws: gspread.Worksheet,
+    remark_ws: gspread.Worksheet,
+    sheet_row: int,
+    fields: dict[str, Any],
+    exc: BaseException,
+    dry_run: bool,
+) -> None:
+    """Set Hit List to AI: Photo needs review and log error to DApp Remarks (unless dry_run)."""
+    name = (fields.get("Shop Name") or "").strip() or "(unknown shop)"
+    addr = (fields.get("Address") or "").strip()
+    city = (fields.get("City") or "").strip()
+    state = (fields.get("State") or "").strip()
+    remarks = format_run_error_remarks(name, addr, city, state, exc)
+    ai_status = "AI: Photo needs review"
+    submission_id = str(uuid.uuid4())
+    submitted_at = datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")
+    print(f"[{name}] RUN ERROR -> {ai_status} (failure logged; leaves Research queue)", flush=True)
+    if dry_run:
+        print("--- Error remarks (preview) ---", flush=True)
+        print(remarks, flush=True)
+        return
+    append_dapp_remark_and_apply(
+        hit_ws,
+        remark_ws,
+        sheet_row,
+        name,
+        ai_status,
+        remarks,
+        SUBMITTED_BY_ERROR,
+        submitted_at,
+        submission_id,
+    )
+
+
 def append_sales_note(existing: str, note_line: str) -> str:
     if not existing or not str(existing).strip():
         return note_line
@@ -510,40 +623,16 @@ def run_one_shop(
         print(remarks)
         return
 
-    r_headers = remark_ws.row_values(1)
-    row_out = []
-    for h in r_headers:
-        if h == "Submission ID":
-            row_out.append(submission_id)
-        elif h == "Shop Name":
-            row_out.append(name)
-        elif h == "Status":
-            row_out.append(ai_status)
-        elif h == "Remarks":
-            row_out.append(remarks)
-        elif h == "Submitted By":
-            row_out.append(submitted_by)
-        elif h == "Submitted At":
-            row_out.append(submitted_at)
-        elif h == "Processed":
-            row_out.append("")
-        elif h == "Processed At":
-            row_out.append("")
-        else:
-            row_out.append("")
-
-    remark_ws.append_row(row_out, value_input_option="USER_ENTERED")
-    time.sleep(1.5)
-    apply_remark_to_hit_list(
+    append_dapp_remark_and_apply(
         hit_ws,
         remark_ws,
         sheet_row,
-        submission_id,
         name,
         ai_status,
         remarks,
         submitted_by,
         submitted_at,
+        submission_id,
     )
 
 
@@ -586,9 +675,23 @@ def main() -> None:
             run_one_shop(hit_ws, remark_ws, sheet_row, fields, args.max_photos, args.dry_run)
         except Exception as exc:
             print(f"ERROR row {sheet_row} {fields.get('Shop Name')!r}: {exc}", flush=True)
+            try:
+                record_run_error(
+                    hit_ws,
+                    remark_ws,
+                    sheet_row,
+                    fields,
+                    exc,
+                    dry_run=args.dry_run,
+                )
+            except Exception as rec_exc:
+                print(
+                    f"Could not persist failure state for row {sheet_row}: {rec_exc}",
+                    flush=True,
+                )
+            failed += 1
             if args.fail_fast:
                 raise
-            failed += 1
             continue
         if i + 1 < len(targets):
             time.sleep(SLEEP_BETWEEN_SHOPS_SEC)
