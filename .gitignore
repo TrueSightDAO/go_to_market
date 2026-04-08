@@ -118,6 +118,11 @@ community_feedback.csv
 raw/
 online_content/agroverse_shop/**/raw/
 
+# Local Hit List exports / Place Photo cache (do not commit)
+data/hit_list.csv
+data/hit_list.csv.backup_*
+data/place_photos/
+
 # Node.js
 node_modules/
 npm-debug.log*
