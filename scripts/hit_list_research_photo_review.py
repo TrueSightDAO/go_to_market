@@ -290,6 +290,26 @@ def format_remarks_column_d(
         "A teammate should confirm or change status using their own judgment."
     )
 
+    if status == "AI: Photo needs review":
+        why_lines: list[str] = []
+        if photo_count == 0:
+            why_lines.append(
+                "• No usable Google Places listing photos in this run, so storefront fit could not be scored from images."
+            )
+        else:
+            why_lines.append(
+                f"• After {photo_count} photo(s), the vision model did not confidently shortlist or reject "
+                f"(confidence {conf:.2f})."
+            )
+        if negatives:
+            why_lines.append("• Model-flagged watchouts:")
+            why_lines.extend(f"  – {n}" for n in negatives)
+        elif photo_count > 0:
+            why_lines.append(
+                "• No watchout bullets were returned; use the model rationale above or review the listing on Google Maps."
+            )
+        paras.append("Why human review\n" + "\n".join(why_lines))
+
     return "\n\n".join(paras)
 
 
@@ -318,7 +338,10 @@ def format_run_error_remarks(
         "Suggested Hit List status: AI: Photo needs review — retry manually, fix API access, "
         "or disqualify the lead.\n\n"
         "Status was set to AI: Photo needs review so the row does not stay in Research "
-        "and repeat on the next run (saves Grok/Places usage)."
+        "and repeat on the next run (saves Grok/Places usage).\n\n"
+        "Why human review\n"
+        "• The automation failed before a vision score could be saved (see Automation error above). "
+        "Triage manually: retry this row, fix credentials or quotas, or drop the lead if it is a bad match."
     )
 
 
