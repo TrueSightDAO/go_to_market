@@ -38,12 +38,28 @@ SHEETS_SCOPES = [
 # Mirrors dapp/stores_nearby.html <select id="newStoreStatus"> and status filter values.
 STATUSES: list[tuple[str, str]] = [
     ("Research", "Store is being researched."),
+    (
+        "AI: Shortlisted",
+        "Automated storefront photo rubric passed; operator can confirm human Shortlisted or override.",
+    ),
+    (
+        "AI: Photo rejected",
+        "Automated photo rubric failed (poor fit from imagery); operator can confirm Rejected/Not Appropriate or override.",
+    ),
+    (
+        "AI: Photo needs review",
+        "Rubric inconclusive; operator should review photos and set the next status.",
+    ),
     ("Shortlisted", "Queued for outreach or visit."),
     ("Instagram Followed", "Followed on Instagram."),
     ("Contacted", "Initial contact made."),
     (
         "Manager Follow-up",
         "Visit done; follow up with manager using contact details.",
+    ),
+    (
+        "Bulk Info Requested",
+        "Buyer asked for wholesale or bulk pricing; use bulk-info email draft flow.",
     ),
     ("Meeting Scheduled", "Meeting or call scheduled."),
     ("Followed Up", "Follow-up with manager completed; awaiting next step."),

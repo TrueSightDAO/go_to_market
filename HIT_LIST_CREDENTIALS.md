@@ -29,6 +29,19 @@
 2. Save as `credentials.json` in this directory
 3. First run will open browser for consent; token cached for reuse
 
+## Research queue — Google Places + Grok photo review
+
+Rows with **Status = Research** are the default input for **`scripts/hit_list_research_photo_review.py`** (see also **`agentic_ai_context/WORKSPACE_CONTEXT.md`** — bullets under *Hit List — Status = Research*).
+
+1. **Places:** find + details + download up to **5** listing photos (`maxwidth` 1200). Requires **`GOOGLE_MAPS_API_KEY`** (server-usable key) in **`market_research/.env`**.
+2. **Vision:** **Grok** returns JSON → suggested status **`AI: Shortlisted`**, **`AI: Photo rejected`**, or **`AI: Photo needs review`** (`GROK_API_KEY`).
+3. **DApp Remarks:** append a row; column **Remarks** (D) is **plain text with blank lines** between sections (Location, Google Places review, bullet lists, model summary) so operators can enable **wrap** in Sheets and read it like mini memo.
+4. **Hit List:** status and **Sales Process Notes** updated in one pass (same semantics as **`physical_stores/process_dapp_remarks.py`**), and the new **DApp Remarks** row is marked **Processed**.
+
+**CLI:** `python3 scripts/hit_list_research_photo_review.py --limit 5` · one shop: `--shop "Naturales Elementa Apothecary"`. **`--dry-run`** prints the **Remarks** preview without writing.
+
+**GitHub Actions:** `.github/workflows/hit_list_research_photo_review.yml` — **hourly** schedule (UTC) with default **3** shops when not using `workflow_dispatch`; manual runs can set a higher **`limit`**. Secrets (repo **Actions**): **`GOOGLE_CREDENTIALS_JSON`**, **`GOOGLE_MAPS_API_KEY`**, **`GROK_API_KEY`**. (`GMAIL_TOKEN_JSON` is only for Gmail sync workflows.)
+
 ## States tab (canonical dapp / Hit List values)
 
 The worksheet **`States`** is the reference for **exact strings** used by [Stores Nearby](https://dapp.truesight.me/stores_nearby.html) and the Hit List (Status, Shop Type, US state codes, Priority). Re-populate after you change enums in `dapp/stores_nearby.html`:
@@ -46,7 +59,7 @@ Columns written: `field`, `exact_value`, `notes`, `hit_list_column`. Important: 
 | Col | Name | Type | Notes |
 |-----|------|------|-------|
 | A | Shop Name | String | |
-| B | Status | String | See **States** tab — Research, Shortlisted, Instagram Followed, Contacted, Manager Follow-up, Meeting Scheduled, Followed Up, Partnered, On Hold, Rejected, Not Appropriate |
+| B | Status | String | See **States** tab — Research, AI: Shortlisted, AI: Photo rejected, AI: Photo needs review, Shortlisted, Instagram Followed, Contacted, Manager Follow-up, Bulk Info Requested, Meeting Scheduled, Followed Up, Partnered, On Hold, Rejected, Not Appropriate |
 | C | Priority | String | High, Medium, Low, Existing Partner (sheet-only; not on dapp suggest form) |
 | D | Address | String | |
 | E | City | String | |
