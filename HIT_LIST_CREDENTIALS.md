@@ -40,7 +40,7 @@ Rows with **Status = Research** are the default input for **`scripts/hit_list_re
 
 **CLI:** `python3 scripts/hit_list_research_photo_review.py --limit 5` · one shop: `--shop "Naturales Elementa Apothecary"`. **`--dry-run`** prints the **Remarks** preview without writing.
 
-**GitHub Actions:** `.github/workflows/hit_list_research_photo_review.yml` — **hourly** schedule (UTC) with default **3** shops when not using `workflow_dispatch`; manual runs can set a higher **`limit`**. Secrets (repo **Actions**): **`GOOGLE_CREDENTIALS_JSON`**, **`GOOGLE_MAPS_API_KEY`**, **`GROK_API_KEY`**. (`GMAIL_TOKEN_JSON` is only for Gmail sync workflows.)
+**GitHub Actions:** `.github/workflows/hit_list_research_photo_review.yml` — **hourly** schedule (UTC) with default **20** shops when not using `workflow_dispatch`; manual runs can set a different **`limit`**. Secrets (repo **Actions**): **`GOOGLE_CREDENTIALS_JSON`**, **`GOOGLE_MAPS_API_KEY`**, **`GROK_API_KEY`**. (`GMAIL_TOKEN_JSON` is only for Gmail sync workflows.)
 
 ## States tab (canonical dapp / Hit List values)
 

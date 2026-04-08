@@ -6,8 +6,7 @@
 #   GOOGLE_MAPS_API_KEY — Places + Place Photos (must allow GitHub Actions egress IPs or be unrestricted for server use)
 #   GROK_API_KEY — xAI key with vision-capable model access (e.g. grok-4-1-fast-non-reasoning)
 #
-# Sheets / API quota: keep per-run --limit low. Scheduled runs default to 3 shops/hour; use
-# workflow_dispatch with a higher limit when catching up intentionally.
+# Sheets / API quota: scheduled runs default to 20 shops/hour; use workflow_dispatch to override.
 #
 # Hourly schedule processes rows with Status = Research only (see script). Overlap: one run
 # at a time per concurrency group so two hours do not double-write.
@@ -20,7 +19,7 @@ on:
       limit:
         description: Max Hit List rows to process (Research only unless shop is set)
         required: true
-        default: "3"
+        default: "20"
       shop:
         description: Optional shop name substring (bypasses Research-only filter)
         required: false
@@ -36,7 +35,7 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -63,7 +62,7 @@ jobs:
           GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           INPUT_LIMIT: ${{ github.event.inputs.limit || '' }}
           INPUT_SHOP: ${{ github.event.inputs.shop || '' }}
-          SCHEDULE_DEFAULT_LIMIT: "3"
+          SCHEDULE_DEFAULT_LIMIT: "20"
         run: |
           set -e
           LIMIT="${INPUT_LIMIT}"
