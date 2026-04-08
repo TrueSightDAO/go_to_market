@@ -561,7 +561,12 @@ def main() -> None:
     p.add_argument(
         "--fail-fast",
         action="store_true",
-        help="Stop the whole run on the first shop error (default: skip bad rows, exit 1 if any failed).",
+        help="Stop the whole run on the first shop error (default: skip bad rows and continue).",
+    )
+    p.add_argument(
+        "--strict-exit",
+        action="store_true",
+        help="Exit with code 1 if any shop in the batch raised (for CI alerting). Default: exit 0 so partial success keeps the job green.",
     )
     args = p.parse_args()
 
@@ -590,6 +595,12 @@ def main() -> None:
 
     print(f"Done. Shops in batch: {len(targets)}, failed: {failed}.")
     if failed:
+        print(
+            f"WARNING: {failed} shop(s) hit errors; others completed. "
+            "See ERROR lines above. Use --strict-exit to fail CI on any error.",
+            flush=True,
+        )
+    if args.strict_exit and failed:
         sys.exit(1)
 
 
