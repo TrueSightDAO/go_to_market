@@ -28,6 +28,7 @@ import base64
 import json
 import os
 import re
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -51,6 +52,7 @@ SCOPES = [
 GROK_ENDPOINT = "https://api.x.ai/v1/chat/completions"
 GROK_MODEL = "grok-4-1-fast-non-reasoning"
 SUBMITTED_BY_LABEL = "Grok photo scan (Google Places)"
+SUBMITTED_BY_NO_PHOTOS = "Hit List photo automation (no Places images)"
 MAX_PHOTOS_DEFAULT = 5
 PLACES_MAX_WIDTH = 1200
 SLEEP_BETWEEN_SHOPS_SEC = 3
@@ -131,6 +133,7 @@ def place_details(key: str, place_id: str) -> dict:
 
 
 def download_place_photos(key: str, place_id: str, out_dir: Path, max_n: int) -> list[Path]:
+    """Download up to max_n Place Photos. Skips failed refs / HTTP errors; returns 0..max_n paths."""
     det = place_details(key, place_id)
     if det.get("status") != "OK":
         raise RuntimeError(det)
@@ -139,18 +142,34 @@ def download_place_photos(key: str, place_id: str, out_dir: Path, max_n: int) ->
     paths: list[Path] = []
     url = "https://maps.googleapis.com/maps/api/place/photo"
     for i, ph in enumerate(photos[:max_n]):
-        ref = ph["photo_reference"]
-        r = requests.get(
-            url,
-            params={"maxwidth": PLACES_MAX_WIDTH, "photo_reference": ref, "key": key},
-            timeout=60,
-            allow_redirects=True,
-        )
-        r.raise_for_status()
-        ext = ".jpg" if "jpeg" in (r.headers.get("Content-Type") or "").lower() else ".bin"
-        p = out_dir / f"photo_{i + 1}{ext}"
-        p.write_bytes(r.content)
-        paths.append(p)
+        ref = ph.get("photo_reference")
+        if not ref:
+            continue
+        saved = False
+        for maxwidth in (PLACES_MAX_WIDTH, 800, 400):
+            try:
+                r = requests.get(
+                    url,
+                    params={"maxwidth": maxwidth, "photo_reference": ref, "key": key},
+                    timeout=60,
+                    allow_redirects=True,
+                )
+                r.raise_for_status()
+                if len(r.content or b"") < 200:
+                    continue
+                ext = ".jpg" if "jpeg" in (r.headers.get("Content-Type") or "").lower() else ".bin"
+                p = out_dir / f"photo_{len(paths) + 1}{ext}"
+                p.write_bytes(r.content)
+                paths.append(p)
+                saved = True
+                break
+            except requests.RequestException:
+                continue
+        if not saved:
+            print(
+                f"  (warn) Place Photo skip ref …{str(ref)[-8:]} index {i + 1}",
+                flush=True,
+            )
     return paths
 
 
@@ -238,13 +257,22 @@ def format_remarks_column_d(
     paras: list[str] = []
     paras.append("Location\n" + "\n".join(loc_bits))
 
-    paras.append(
-        "Google Places review\n"
-        f"We reviewed {photo_count} public listing photos from Google Places (max width {PLACES_MAX_WIDTH}px) "
-        f"for place_id {place_id}.\n\n"
-        "This is an automated visual pass only. It does not replace an in-person visit or a conversation "
-        "with the buyer."
-    )
+    if photo_count == 0:
+        paras.append(
+            "Google Places review\n"
+            f"No usable public listing photos were downloaded from Google Places for place_id {place_id}. "
+            "The listing may have no photos, or every photo request failed (quota, key restriction, or transient error). "
+            "This run cannot score visual fit without images.\n\n"
+            "Use Google Maps or an in-person visit to assess the storefront."
+        )
+    else:
+        paras.append(
+            "Google Places review\n"
+            f"We reviewed {photo_count} public listing photos from Google Places (max width {PLACES_MAX_WIDTH}px) "
+            f"for place_id {place_id}.\n\n"
+            "This is an automated visual pass only. It does not replace an in-person visit or a conversation "
+            "with the buyer."
+        )
 
     if positives:
         paras.append("What looks like a fit\n" + "\n".join(f"• {p}" for p in positives))
@@ -252,8 +280,11 @@ def format_remarks_column_d(
     if negatives:
         paras.append("Watchouts or conflicts\n" + "\n".join(f"• {n}" for n in negatives))
 
+    model_label = (
+        "No vision model run (0 images)" if photo_count == 0 else f"Model summary ({GROK_MODEL})"
+    )
     paras.append(
-        f"Model summary ({GROK_MODEL})\n{rationale}\n\n"
+        f"{model_label}\n{rationale}\n\n"
         f"Suggested Hit List status: {status} (confidence {conf:.2f}).\n"
         "A teammate should confirm or change status using their own judgment."
     )
@@ -431,18 +462,35 @@ def run_one_shop(
     slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", name).strip("_").lower()[:80]
     out_dir = REPO / "data" / "place_photos" / slug
     paths = download_place_photos(mkey, place_id, out_dir, max_photos)
-    if not paths:
-        raise RuntimeError("No photos downloaded")
 
-    ctx = f"Shop: {name}. Address: {addr}, {city}, {state}. place_id: {place_id}."
-    grok = grok_photo_rubric(paths, ctx)
-    ai_status = (grok.get("recommended_hit_list_status") or "").strip()
-    if ai_status not in ("AI: Shortlisted", "AI: Photo rejected", "AI: Photo needs review"):
+    if paths:
+        ctx = f"Shop: {name}. Address: {addr}, {city}, {state}. place_id: {place_id}."
+        grok = grok_photo_rubric(paths, ctx)
+        ai_status = (grok.get("recommended_hit_list_status") or "").strip()
+        if ai_status not in ("AI: Shortlisted", "AI: Photo rejected", "AI: Photo needs review"):
+            ai_status = "AI: Photo needs review"
+        photo_count = len(paths)
+    else:
+        grok = {
+            "recommended_hit_list_status": "AI: Photo needs review",
+            "confidence": 0.0,
+            "positives": [],
+            "negatives": [
+                "No Google Places listing photos were returned, or every photo download failed for this run."
+            ],
+            "rationale": (
+                "Automation could not obtain storefront images from the Places API, so visual fit was not scored. "
+                "Confirm on Google Maps or in person."
+            ),
+        }
         ai_status = "AI: Photo needs review"
+        photo_count = 0
+        print(f"[{name}] place_id={place_id} photos=0 -> {ai_status} (no images; remarks only)", flush=True)
 
-    remarks = format_remarks_column_d(name, addr, city, state, place_id, len(paths), grok)
+    remarks = format_remarks_column_d(name, addr, city, state, place_id, photo_count, grok)
     submission_id = str(uuid.uuid4())
     submitted_at = datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")
+    submitted_by = SUBMITTED_BY_LABEL if paths else SUBMITTED_BY_NO_PHOTOS
 
     manifest = {
         "submission_id": submission_id,
@@ -454,7 +502,8 @@ def run_one_shop(
     }
     (out_dir / "last_run.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    print(f"[{name}] place_id={place_id} photos={len(paths)} -> {ai_status}")
+    if paths:
+        print(f"[{name}] place_id={place_id} photos={len(paths)} -> {ai_status}", flush=True)
 
     if dry_run:
         print("--- Remarks (preview) ---")
@@ -473,7 +522,7 @@ def run_one_shop(
         elif h == "Remarks":
             row_out.append(remarks)
         elif h == "Submitted By":
-            row_out.append(SUBMITTED_BY_LABEL)
+            row_out.append(submitted_by)
         elif h == "Submitted At":
             row_out.append(submitted_at)
         elif h == "Processed":
@@ -493,7 +542,7 @@ def run_one_shop(
         name,
         ai_status,
         remarks,
-        SUBMITTED_BY_LABEL,
+        submitted_by,
         submitted_at,
     )
 
@@ -509,6 +558,11 @@ def main() -> None:
     )
     p.add_argument("--max-photos", type=int, default=MAX_PHOTOS_DEFAULT, help="Place photos to fetch (default 5).")
     p.add_argument("--dry-run", action="store_true", help="Do not write Sheets; print remarks preview.")
+    p.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Stop the whole run on the first shop error (default: skip bad rows, exit 1 if any failed).",
+    )
     args = p.parse_args()
 
     gc = gspread_client()
@@ -521,16 +575,22 @@ def main() -> None:
         print("No matching Hit List rows (Status=Research, or use --shop).")
         return
 
+    failed = 0
     for i, (sheet_row, fields) in enumerate(targets):
         try:
             run_one_shop(hit_ws, remark_ws, sheet_row, fields, args.max_photos, args.dry_run)
         except Exception as exc:
             print(f"ERROR row {sheet_row} {fields.get('Shop Name')!r}: {exc}", flush=True)
-            raise
+            if args.fail_fast:
+                raise
+            failed += 1
+            continue
         if i + 1 < len(targets):
             time.sleep(SLEEP_BETWEEN_SHOPS_SEC)
 
-    print("Done.")
+    print(f"Done. Shops in batch: {len(targets)}, failed: {failed}.")
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
