@@ -14,7 +14,7 @@ so the log includes sends for **Bulk Info Requested** rows (sync script includes
 
 Usage:
   cd market_research
-  python3 retail_price_list/generate_retailer_wholesale_attachment_pdf.py   # refresh PDF if needed
+  # PDF: retail_price_list/agroverse_wholesale_price_list_2026.pdf (commit to repo for CI)
   python3 scripts/sync_email_agent_followup.py
   python3 scripts/suggest_bulk_info_drafts.py --dry-run
   python3 scripts/suggest_bulk_info_drafts.py --max-drafts 5
@@ -37,8 +37,8 @@ import suggest_manager_followup_drafts as sm
 
 BULK_STATUS = "Bulk Info Requested"
 BULK_PROTOCOL_VERSION = "BULK_INFO_PDF v0.1"
-DEFAULT_PDF = _REPO / "retail_price_list" / "agroverse_wholesale_retail_overview_2026.pdf"
-DEFAULT_ATTACH_FILENAME = "Agroverse_wholesale_retail_overview_2026.pdf"
+DEFAULT_PDF = _REPO / "retail_price_list" / "agroverse_wholesale_price_list_2026.pdf"
+DEFAULT_ATTACH_FILENAME = "Agroverse_wholesale_price_list_2026.pdf"
 
 
 def draft_subject_bulk(shop_name: str) -> str:
