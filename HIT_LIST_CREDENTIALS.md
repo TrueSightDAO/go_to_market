@@ -42,6 +42,44 @@ Rows with **Status = Research** are the default input for **`scripts/hit_list_re
 
 **GitHub Actions:** `.github/workflows/hit_list_research_photo_review.yml` — **hourly** schedule (UTC) with default **20** shops when not using `workflow_dispatch`; manual runs can set a different **`limit`**. Secrets (repo **Actions**): **`GOOGLE_CREDENTIALS_JSON`**, **`GOOGLE_MAPS_API_KEY`**, **`GROK_API_KEY`**. (`GMAIL_TOKEN_JSON` is only for Gmail sync workflows.)
 
+## Bulk discovery — append `Research` rows (Google Places Nearby)
+
+**Script:** `scripts/discover_apothecaries_la_hit_list.py` (multi-region; filename is historical).
+
+**What it does:** Runs [Nearby Search](https://developers.google.com/maps/documentation/places/web-service/search-nearby) from several **centroids** per metro (radius up to **50 km** per Google), keyword default **`apothecary`**, dedupes by **`place_id`**, excludes obvious pharmacies / mall beauty / cannabis via **`should_exclude`**, constrains to a **lat/lng bounding box** and **state** (default **CA**), loads [Place Details](https://developers.google.com/maps/documentation/places/web-service/details) for survivors, then **appends** rows to the **Hit List** tab with **Status = Research**, **Priority = Low**, and **Notes** containing `Auto-discovered (Google Places Nearby, <region label>). place_id: …` for dedupe and audit.
+
+**Credentials (local):**
+
+- **`GOOGLE_MAPS_API_KEY`** or **`GOOGLE_PLACES_API_KEY`** in **`market_research/.env`** (server/IP–allowed key with Places enabled).
+- **`google_credentials.json`** — service account with **Editor** on the spreadsheet (same as other Hit List automation).
+
+**CLI:**
+
+```bash
+cd market_research
+python3 scripts/discover_apothecaries_la_hit_list.py --region la --dry-run
+python3 scripts/discover_apothecaries_la_hit_list.py --region sf_bay --dry-run
+python3 scripts/discover_apothecaries_la_hit_list.py --region sf_bay --max-new 200
+python3 scripts/discover_apothecaries_la_hit_list.py --region i5_corridor --max-new 400
+python3 scripts/discover_apothecaries_la_hit_list.py --region ca_hwy_101 --max-new 400
+python3 scripts/discover_apothecaries_la_hit_list.py --region ca_i280 --max-new 150
+```
+
+**California Hwy 101 / I-280** — presets **`ca_hwy_101`** (San Diego metro → Crescent City along the 101 corridor) and **`ca_i280`** (San Francisco south through the Peninsula to San Jose). Same Nearby + Details flow, **CA-only** bbox; existing Hit List dedupe applies. Optional one-shot + Instagram:  
+`python3 scripts/discover_apothecaries_i5_pipeline.py --region ca_hwy_101 --max-new 400 --instagram-limit 200`.
+
+**I-5 corridor (San Diego → Seattle)** — region preset **`i5_corridor`**: multi-centroid Nearby search along **CA / OR / WA** with a west-coast bounding box and **`allowed_states`**. One-shot discovery + optional Instagram pass: **`python3 scripts/discover_apothecaries_i5_pipeline.py`** (`--dry-run` skips the sheet write and the Instagram step; `--instagram-ddg` enables slower DuckDuckGo fallback for handles).
+
+**Regions:** Presets live in **`REGIONS`** in that script: **`la`**, **`sf_bay`**, **`i5_corridor`**, **`i5_sd_portland`**, **`ca_hwy_101`**, **`ca_i280`**, etc. Each preset defines **`notes_label`** (appears in **Notes**), **centroids** `(lat, lng, radius_m, label)`, **min/max lat/lng** (post-details filter), **`fallback_city`** when Places omits a city, **`required_state`**, and optionally **`allowed_states`** for multi-state corridors.
+
+**Adding a new metro:** Copy a **`RegionConfig` entry** in **`REGIONS`**: pick **6–10 overlapping circles** so union covers the target area without huge ocean-only overlap; tighten **bbox** to drop adjacent states or the wrong MSA; set **`notes_label`** to a human-readable region name; open a PR or edit locally and document the preset here (key + intent).
+
+**After append:** Optional Instagram backfill — **`scripts/backfill_instagram_la_discovery.py`** keys off **Notes** containing `Auto-discovered (Google Places Nearby` (not LA-specific). New **Research** rows are picked up by **`hit_list_research_photo_review.py`** / the hourly Actions workflow like any other **Research** row.
+
+**Dedupe (why duplicates can appear):** Older rows often have **no `place_id` in Notes**, so a second discovery pass only sees **`place_id`** on the new row; **Store Key** can also differ when Google’s street line differs slightly (`St` vs `Street`, suite text). The discovery script indexes **literal + normalized + legacy Store Keys**, **`place_id`** (flexible regex), and a **name + lat/lng (4 decimals)** fingerprint so reruns skip the same storefront. To audit the sheet: **`python3 scripts/hit_list_report_duplicates.py`** — groups rows by repeated **`place_id`**, repeated keys, or same name+coordinates; delete or merge the extra rows in Sheets as needed.
+
+**Contact enrichment (AI: Enrich with contact):** Script **`scripts/hit_list_enrich_contact.py`** processes rows with that exact Status (default **10** per run): fetches **Website** (or Places **website** via `place_id` in Notes), scans pages for **email** and **contact-form** heuristics, optional **Grok** disambiguation, then sets **AI: Email found** (fills **Email**), **AI: Contact Form found** (fills **Contact Form URL**), or **AI: Enrich — manual**. **GitHub Actions:** `.github/workflows/hit_list_enrich_contact.yml` — same secrets as photo review (`GOOGLE_CREDENTIALS_JSON`, `GOOGLE_MAPS_API_KEY`, `GROK_API_KEY`); scheduled every **6 hours** (max 10 rows) plus **`workflow_dispatch`**.
+
 ## States tab (canonical dapp / Hit List values)
 
 The worksheet **`States`** is the reference for **exact strings** used by [Stores Nearby](https://dapp.truesight.me/stores_nearby.html) and the Hit List (Status, Shop Type, US state codes, Priority). Re-populate after you change enums in `dapp/stores_nearby.html`:
@@ -59,7 +97,7 @@ Columns written: `field`, `exact_value`, `notes`, `hit_list_column`. Important: 
 | Col | Name | Type | Notes |
 |-----|------|------|-------|
 | A | Shop Name | String | |
-| B | Status | String | See **States** tab — Research, AI: Shortlisted, AI: Photo rejected, AI: Photo needs review, Shortlisted, Instagram Followed, Contacted, Manager Follow-up, Bulk Info Requested, Meeting Scheduled, Followed Up, Partnered, On Hold, Rejected, Not Appropriate |
+| B | Status | String | See **States** tab — includes Research; AI: Shortlisted / Photo rejected / Photo needs review; **AI: Enrich with contact**, **AI: Email found**, **AI: Contact Form found**, **AI: Enrich — manual**, **AI: Warm up prospect**; Shortlisted; Instagram Followed; Contacted; Manager Follow-up; Bulk Info Requested; Meeting Scheduled; Followed Up; Partnered; On Hold; Rejected; Not Appropriate |
 | C | Priority | String | High, Medium, Low, Existing Partner (sheet-only; not on dapp suggest form) |
 | D | Address | String | |
 | E | City | String | |
@@ -74,6 +112,9 @@ Columns written: `field`, `exact_value`, `notes`, `hit_list_column`. Important: 
 | N-AB | Contact Date, Contact Method, Follow Up Date, etc. | | See sheet |
 | AC | Instagram Follow Count | String | Follower count from Instagram profile |
 | AD | Store Key | String | shop-name__address__city__state (lowercase, hyphens) |
+| AE | Contact Form URL | String | Public contact-page or form URL when status is **AI: Contact Form found** (empty otherwise) |
+
+After adding **AE**, run **`python3 scripts/populate_states_reference_sheet.py`** and **`python3 scripts/format_states_reference_sheet.py`** so the **States** tab lists the new status strings for the dapp and operators.
 
 ## Store Key Format
 

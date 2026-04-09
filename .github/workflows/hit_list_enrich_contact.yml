@@ -1,0 +1,65 @@
+# Hit List: enrich contact for rows with Status = AI: Enrich with contact
+# (fetch website + /contact paths, regex email, contact-form heuristic, optional Grok).
+#
+# Secrets: GOOGLE_CREDENTIALS_JSON, GOOGLE_MAPS_API_KEY, GROK_API_KEY (same as photo review).
+#
+# Scheduled runs process up to 10 rows per execution to stay within HTTP/API budget.
+
+name: Hit List enrich contact
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Max rows to process (Status AI: Enrich with contact only)
+        required: true
+        default: "10"
+      dry_run:
+        description: Set to "true" to print plan only (no sheet writes)
+        required: false
+        default: "false"
+  schedule:
+    - cron: "35 */6 * * *" # Every 6 hours at :35 UTC
+
+concurrency:
+  group: hit-list-enrich-contact
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Write service account JSON
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: printf '%s' "$GOOGLE_CREDENTIALS_JSON" > google_credentials.json
+
+      - name: Run enrich contact script
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          INPUT_LIMIT: ${{ github.event.inputs.limit || '' }}
+          DRY: ${{ github.event.inputs.dry_run || '' }}
+          SCHEDULE_DEFAULT_LIMIT: "10"
+        run: |
+          set -e
+          LIMIT="${INPUT_LIMIT}"
+          if [ -z "$LIMIT" ]; then LIMIT="$SCHEDULE_DEFAULT_LIMIT"; fi
+          EXTRA=""
+          if [ "${DRY}" = "true" ]; then EXTRA="--dry-run"; fi
+          python3 scripts/hit_list_enrich_contact.py --limit "$LIMIT" $EXTRA
