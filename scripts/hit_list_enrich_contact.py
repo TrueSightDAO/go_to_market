@@ -10,6 +10,11 @@ For each row (default max 10 per run):
       **AI: Email found** + column Email (K),
       **AI: Contact Form found** + column Contact Form URL (AE),
       **AI: Enrich — manual** if neither works.
+  - Log each run on tab **DApp Remarks** (same columns as human DApp submits), then apply to
+    **Hit List** (Status, **Sales Process Notes**, Status Updated By/Date) and mark the remark
+    **Processed** — same pipeline as ``hit_list_research_photo_review`` / ``process_dapp_remarks``.
+    Audit text is ``[enrich-contact ISO8601] outcome=…`` in the remark **Remarks** cell; **Notes**
+    is left unchanged (still used for place_id / discovery context).
 
 Does not send email or submit forms — enrichment only.
 
@@ -32,6 +37,7 @@ import os
 import re
 import sys
 import time
+import uuid
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,9 +47,13 @@ import gspread
 import requests
 from google.oauth2.service_account import Credentials
 
+from hit_list_dapp_remarks_sheet import append_dapp_remark_and_apply
+
 REPO = Path(__file__).resolve().parents[1]
 SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
 HIT_LIST_WS = "Hit List"
+DAPP_REMARKS_WS = "DApp Remarks"
+SUBMITTED_BY_ENRICH = "hit_list_enrich_contact"
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
@@ -358,7 +368,9 @@ def main() -> None:
     args = p.parse_args()
 
     gc = gspread_client()
-    ws = gc.open_by_key(SPREADSHEET_ID).worksheet(HIT_LIST_WS)
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet(HIT_LIST_WS)
+    remark_ws = sh.worksheet(DAPP_REMARKS_WS)
     rows = ws.get_all_values()
     if len(rows) < 2:
         print("No data rows.")
@@ -383,13 +395,6 @@ def main() -> None:
             "Hit List missing column Contact Form URL (expected after Store Key, column AE). "
             "Add header Contact Form URL."
         )
-    try:
-        i_upd_by = header.index("Status Updated By")
-        i_upd_at = header.index("Status Updated Date")
-    except ValueError:
-        i_upd_by = -1
-        i_upd_at = -1
-
     mkey = maps_api_key()
     use_grok = not args.no_grok and bool(grok_api_key())
     if not use_grok and not args.no_grok:
@@ -409,7 +414,6 @@ def main() -> None:
         return
 
     print(f"Processing {len(queued)} row(s). dry_run={args.dry_run} grok={use_grok}", flush=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     for rn, cells in queued:
         shop = cells[i_shop].strip()
@@ -422,17 +426,24 @@ def main() -> None:
             website = place_details_website(mkey, pid)
             time.sleep(0.15)
 
-        note_add = f"[enrich-contact {stamp}]"
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        submitted_at = datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")
+
         if not website:
             print(f"  row {rn} {shop!r}: no website — {STATUS_MANUAL}", flush=True)
-            new_notes = (notes + "\n" + note_add + " outcome=no_website").strip()
+            remark = f"[enrich-contact {stamp}] outcome=no_website"
             if not args.dry_run:
-                ws.update_cell(rn, i_status + 1, STATUS_MANUAL)
-                ws.update_cell(rn, i_notes + 1, new_notes)
-                if i_upd_by >= 0:
-                    ws.update_cell(rn, i_upd_by + 1, "hit_list_enrich_contact")
-                if i_upd_at >= 0:
-                    ws.update_cell(rn, i_upd_at + 1, stamp[:10])
+                append_dapp_remark_and_apply(
+                    ws,
+                    remark_ws,
+                    rn,
+                    shop,
+                    STATUS_MANUAL,
+                    remark,
+                    SUBMITTED_BY_ENRICH,
+                    submitted_at,
+                    str(uuid.uuid4()),
+                )
             continue
 
         page_triples, combined = collect_fetched_pages(website, args.sleep_fetch, 12000)
@@ -463,17 +474,20 @@ def main() -> None:
                 f"  row {rn} {shop!r}: {STATUS_EMAIL} email={chosen_email!r}",
                 flush=True,
             )
-            new_notes = (
-                notes + "\n" + note_add + f" outcome=email website={website[:80]}"
-            ).strip()
+            remark = f"[enrich-contact {stamp}] outcome=email website={website[:80]}"
             if not args.dry_run:
-                ws.update_cell(rn, i_status + 1, STATUS_EMAIL)
                 ws.update_cell(rn, i_email + 1, chosen_email)
-                ws.update_cell(rn, i_notes + 1, new_notes)
-                if i_upd_by >= 0:
-                    ws.update_cell(rn, i_upd_by + 1, "hit_list_enrich_contact")
-                if i_upd_at >= 0:
-                    ws.update_cell(rn, i_upd_at + 1, stamp[:10])
+                append_dapp_remark_and_apply(
+                    ws,
+                    remark_ws,
+                    rn,
+                    shop,
+                    outcome_status,
+                    remark,
+                    SUBMITTED_BY_ENRICH,
+                    submitted_at,
+                    str(uuid.uuid4()),
+                )
         elif form_pages:
             candidates_urls = list({u for u, _, _ in form_pages})
             form_url_final = pick_form_url(form_pages)
@@ -487,32 +501,38 @@ def main() -> None:
                 f"  row {rn} {shop!r}: {STATUS_FORM} url={form_url_final!r}",
                 flush=True,
             )
-            new_notes = (
-                notes + "\n" + note_add + f" outcome=contact_form website={website[:80]}"
-            ).strip()
+            remark = f"[enrich-contact {stamp}] outcome=contact_form website={website[:80]}"
             if not args.dry_run:
-                ws.update_cell(rn, i_status + 1, STATUS_FORM)
                 ws.update_cell(rn, i_form + 1, form_url_final or "")
-                ws.update_cell(rn, i_notes + 1, new_notes)
-                if i_upd_by >= 0:
-                    ws.update_cell(rn, i_upd_by + 1, "hit_list_enrich_contact")
-                if i_upd_at >= 0:
-                    ws.update_cell(rn, i_upd_at + 1, stamp[:10])
+                append_dapp_remark_and_apply(
+                    ws,
+                    remark_ws,
+                    rn,
+                    shop,
+                    outcome_status,
+                    remark,
+                    SUBMITTED_BY_ENRICH,
+                    submitted_at,
+                    str(uuid.uuid4()),
+                )
         else:
             print(
                 f"  row {rn} {shop!r}: {STATUS_MANUAL} (no email / no form heuristic)",
                 flush=True,
             )
-            new_notes = (
-                notes + "\n" + note_add + f" outcome=manual website={website[:80]}"
-            ).strip()
+            remark = f"[enrich-contact {stamp}] outcome=manual website={website[:80]}"
             if not args.dry_run:
-                ws.update_cell(rn, i_status + 1, STATUS_MANUAL)
-                ws.update_cell(rn, i_notes + 1, new_notes)
-                if i_upd_by >= 0:
-                    ws.update_cell(rn, i_upd_by + 1, "hit_list_enrich_contact")
-                if i_upd_at >= 0:
-                    ws.update_cell(rn, i_upd_at + 1, stamp[:10])
+                append_dapp_remark_and_apply(
+                    ws,
+                    remark_ws,
+                    rn,
+                    shop,
+                    STATUS_MANUAL,
+                    remark,
+                    SUBMITTED_BY_ENRICH,
+                    submitted_at,
+                    str(uuid.uuid4()),
+                )
 
         time.sleep(0.35)
 
