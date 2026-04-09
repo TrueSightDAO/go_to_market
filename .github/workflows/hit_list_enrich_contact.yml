@@ -19,7 +19,7 @@ on:
         required: false
         default: "false"
   schedule:
-    - cron: "35 */6 * * *" # Every 6 hours at :35 UTC
+    - cron: "35 * * * *" # Every hour at :35 UTC (staggered from photo review on the hour)
 
 concurrency:
   group: hit-list-enrich-contact
