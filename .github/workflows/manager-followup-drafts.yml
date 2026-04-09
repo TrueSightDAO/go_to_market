@@ -2,10 +2,12 @@
 # Hourly "Email Agent Follow Up" refresh runs in email-agent-sync-followup.yml (same sync also
 # runs here before drafts so this job stays self-contained if the hourly workflow is off).
 #
-# Cadence: suggest_manager_followup_drafts uses the latest sent_at in "Email Agent Follow Up"
-# per recipient (filled by sync_email_agent_followup from Gmail sent mail). A draft is created
-# only if that send is at least min_days_since_sent ago (default 7) and there is no pending_review
-# row in Email Agent Suggestions. Most runs may create zero drafts if no one is "due."
+# Cadence: suggest_manager_followup_drafts + suggest_warmup_prospect_drafts use the latest sent_at
+# in "Email Agent Follow Up" per recipient (filled by sync_email_agent_followup from Gmail sent mail).
+# A draft is created only if that send is at least min_days_since_sent ago (default 7) and there is
+# no pending_review row in Email Agent Suggestions. Warmup also promotes AI: Warm up prospect →
+# AI: Prospect replied when Gmail shows inbound from the prospect after the last logged send.
+# Most runs may create zero drafts if no one is "due."
 #
 # Secrets: GOOGLE_CREDENTIALS_JSON, GMAIL_TOKEN_JSON, GROK_API_KEY (for --use-grok).
 # Gmail: CI does not write refreshed tokens back to secrets — agentic_ai_context/GMAIL_OAUTH_WORKFLOW.md
@@ -110,5 +112,25 @@ jobs:
           fi
           # No --max-drafts: script default is unlimited (0); optional throttle: --max-drafts N
           python scripts/suggest_manager_followup_drafts.py \
+            --min-days-since-sent "$MIN" \
+            $EXTRA
+
+      - name: Suggest AI Warm up prospect drafts (intro + wholesale PDF + reply promotion)
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          INPUT_MIN_DAYS: ${{ github.event.inputs.min_days_since_sent }}
+          INPUT_USE_GROK: ${{ github.event.inputs.use_grok }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          MIN="${INPUT_MIN_DAYS:-7}"
+          EXTRA=""
+          if [ "${INPUT_USE_GROK:-true}" != "false" ]; then
+            EXTRA="$EXTRA --use-grok"
+          fi
+          if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
+            EXTRA="$EXTRA --dry-run"
+          fi
+          python scripts/suggest_warmup_prospect_drafts.py \
             --min-days-since-sent "$MIN" \
             $EXTRA

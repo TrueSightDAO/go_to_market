@@ -97,7 +97,7 @@ Columns written: `field`, `exact_value`, `notes`, `hit_list_column`. Important: 
 | Col | Name | Type | Notes |
 |-----|------|------|-------|
 | A | Shop Name | String | |
-| B | Status | String | See **States** tab — includes Research; AI: Shortlisted / Photo rejected / Photo needs review; **AI: Enrich with contact**, **AI: Email found**, **AI: Contact Form found**, **AI: Enrich — manual**, **AI: Warm up prospect**; Shortlisted; Instagram Followed; Contacted; Manager Follow-up; Bulk Info Requested; Meeting Scheduled; Followed Up; Partnered; On Hold; Rejected; Not Appropriate |
+| B | Status | String | See **States** tab — includes Research; AI: Shortlisted / Photo rejected / Photo needs review; **AI: Enrich with contact**, **AI: Email found**, **AI: Contact Form found**, **AI: Enrich — manual**, **AI: Warm up prospect**, **AI: Prospect replied**; Shortlisted; Instagram Followed; Contacted; Manager Follow-up; Bulk Info Requested; Meeting Scheduled; Followed Up; Partnered; On Hold; Rejected; Not Appropriate |
 | C | Priority | String | High, Medium, Low, Existing Partner (sheet-only; not on dapp suggest form) |
 | D | Address | String | |
 | E | City | String | |
@@ -125,7 +125,7 @@ Example: `go-ask-alice__1125-pacific-ave__santa-cruz__ca`
 
 ## Email Agent Follow Up tab (Gmail ↔ Hit List)
 
-**Purpose:** Append-only log of **sent** messages from the connected Gmail account (`credentials/gmail/token.json`), backfilled for leads on **Hit List** where **Status** is **`Manager Follow-up`** and **Email** is set.
+**Purpose:** Append-only log of **sent** messages from the connected Gmail account (`credentials/gmail/token.json`), backfilled for leads on **Hit List** where **Status** is **`Manager Follow-up`**, **`Bulk Info Requested`**, **`AI: Warm up prospect`**, **`AI: Prospect replied`**, and **Email** is set.
 
 **Sheet:** Same spreadsheet — tab name **`Email Agent Follow Up`**.  
 If the tab is missing, `scripts/sync_email_agent_followup.py` creates it and writes the header row.
@@ -207,7 +207,9 @@ python3 scripts/format_email_agent_suggestions_sheet.py
 
 ### Create drafts from Hit List (`garyjob@agroverse.shop`)
 
-Script: **`scripts/suggest_manager_followup_drafts.py`** — loads **Manager Follow-up** + **Email**, skips `store_key` that already has `pending_review` on this tab, builds a **Gmail draft** (template body + recent thread snippets), applies label **`Email Agent suggestions`**, appends a row here.
+Script: **`scripts/suggest_manager_followup_drafts.py`** — loads **Manager Follow-up** + **Email**, skips recipients that already have **`pending_review`** (and an open Gmail draft), builds a **Gmail draft** (optional **Grok** + DApp Remarks context), applies label **`Email Agent suggestions`**, appends a row here.
+
+**Warm up prospect (first touch + PDF):** **`scripts/suggest_warmup_prospect_drafts.py`** — **Status** **`AI: Warm up prospect`** + **Email**; same cadence (**7** days default since last logged send in **Email Agent Follow Up**), **`Email Agent Suggestions`** queue, and optional **`--use-grok`** (same xAI API as manager follow-up). Attaches **`retail_price_list/agroverse_wholesale_price_list_2026.pdf`**. Style reference: **`templates/warmup_outreach_reference.md`**. Before drafting, promotes **AI: Warm up prospect → AI: Prospect replied** when Gmail shows an **inbound** from the prospect **after** your latest logged **sent** to that address. CI: **`manager-followup-drafts.yml`** runs this step after manager drafts. Flags: **`--reply-promotion-only`**, **`--skip-reply-promotion`**.
 
 OAuth must include **`https://www.googleapis.com/auth/gmail.modify`**. If your `token.json` was created with older scopes, delete it and run `python3 scripts/gmail_oauth_authorize.py` again (add scope on Google Cloud consent screen first).
 
@@ -221,7 +223,9 @@ Options: `--skip-label`, `--expected-mailbox other@domain` (default `garyjob@agr
 
 **Cadence / anti-spam:** Only one **pending** draft per **`to_email`** (see **Email Agent Suggestions** `status=pending_review`). The next draft is allowed only after **`min-days-since-sent`** (default **7**) since the latest **`sent_at`** for that address in **Email Agent Follow Up**. Recipients with no follow-up log row are eligible immediately. Use `--verbose` to print per-address skips. When you **Send** from Gmail, run `sync_email_agent_followup.py`, then set the suggestion row to `sent` (or `discarded`); the next scheduled run can draft again once cadence passes.
 
-**Grok (optional):** With **`--use-grok`**, the script loads up to **`--grok-max-messages`** full Gmail messages (plain text preferred, HTML stripped) for that recipient, capped at **`--grok-max-context-chars`**, and calls the xAI **chat/completions** API (`grok-3` by default) for JSON `subject` + `body`. On API/parse errors, the script falls back to the built-in template. **`--dry-run` does not call Grok** (shows template preview only).
+**`Bulk Info Requested`:** **`scripts/suggest_bulk_info_drafts.py`** — wholesale-focused template + same PDF attachment; same cadence rules.
+
+**Grok (optional):** With **`--use-grok`**, **manager** follow-up and **warmup** scripts load Gmail thread context and call the xAI **chat/completions** API (`grok-3` by default) for JSON `subject` + `body`. On API/parse errors, each script falls back to its built-in template. **`--dry-run` does not call Grok** (shows template preview only). **Bulk info** drafts use a **fixed template** only unless extended later.
 
 **Draft tone (system prompt + template):** Suggested copy does **not** invite **in-person meetings** or another on-site visit (Gary’s travel pattern). When Hit List **Notes**, **DApp Remarks**, or the thread show staff routed follow-up to **owner / buyer / decision-maker**, the draft should **address that person**, not staff — see **`agentic_ai_context/PARTNER_OUTREACH_PROTOCOL.md`** §6 and **`STORE_FOLLOW_UP_EMAIL_TEMPLATE.md`**.
 

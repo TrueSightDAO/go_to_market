@@ -4,7 +4,8 @@ Sync sent-mail history from Gmail into the "Email Agent Follow Up" tab on the Hi
 
 Flow
 ----
-1. Open "Hit List" → rows where Status == "Manager Follow-up" and Email (column K) non-empty.
+1. Open "Hit List" → rows where Status is one of the outreach sync statuses (Manager Follow-up,
+   Bulk Info Requested, AI: Warm up prospect, AI: Prospect replied) and Email (column K) non-empty.
 2. For each distinct email address, query Gmail (in:sent to:...) via OAuth token.
 3. Append new rows to "Email Agent Follow Up" keyed by gmail_message_id (no duplicates). Each row includes
    **snippet** (Gmail preview) and **body_plain** (best-effort full plain text from the sent message) for
@@ -50,7 +51,12 @@ SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
 HIT_LIST_WS = "Hit List"
 LOG_WS = "Email Agent Follow Up"
 
-HIT_STATUSES_FOR_SYNC = ("Manager Follow-up", "Bulk Info Requested")
+HIT_STATUSES_FOR_SYNC = (
+    "Manager Follow-up",
+    "Bulk Info Requested",
+    "AI: Warm up prospect",
+    "AI: Prospect replied",
+)
 # Must match (or be a subset of) scopes in credentials/gmail/token.json from gmail_oauth_authorize.py
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
@@ -94,7 +100,7 @@ def cell(row: list[str], idx: int | None) -> str:
 
 
 def load_hit_list_targets(ws) -> list[dict]:
-    """Hit List rows in Manager Follow-up or Bulk Info Requested with Email set."""
+    """Hit List rows in configured outreach statuses with Email set."""
     values = ws.get_all_values()
     if not values:
         return []
