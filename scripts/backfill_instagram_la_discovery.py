@@ -80,7 +80,9 @@ IG_HREF_RE = re.compile(
     re.IGNORECASE,
 )
 
-PLACE_ID_IN_NOTES = re.compile(r"place_id:\s*([A-Za-z0-9_-]+)")
+PLACE_ID_IN_NOTES = re.compile(
+    r"(?i)place[_\s-]*id\s*:\s*([A-Za-z0-9_-]{12,})",
+)
 
 
 def load_dotenv_repo() -> None:
