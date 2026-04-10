@@ -446,6 +446,17 @@ def geo_name_fingerprint(
     return (slug_segment(name), f"{la:.4f}", f"{ln:.4f}")
 
 
+def name_address_fingerprint(name: str, street: str) -> tuple[str, str] | None:
+    """Dedupe key for Shop Name (A) + Address (D) only — normalized like Store Key street line."""
+    n = (name or "").strip()
+    if not n:
+        return None
+    st = normalize_street_line(street)
+    if not st:
+        return None
+    return (slug_segment(n), st)
+
+
 def _norm_haystack(name: str, vicinity: str = "") -> str:
     return f"{name} {vicinity}".lower()
 
@@ -560,11 +571,13 @@ def parse_address_components(comps: list[dict[str, Any]]) -> dict[str, str]:
     return out
 
 
-def extract_existing_for_dedupe(ws: gspread.Worksheet) -> tuple[set[str], set[str], set[tuple[str, str, str]]]:
-    """Store keys (literal + computed), place_ids from Notes, and name+lat/lng fingerprints."""
+def extract_existing_for_dedupe(
+    ws: gspread.Worksheet,
+) -> tuple[set[str], set[str], set[tuple[str, str, str]], set[tuple[str, str]]]:
+    """Store keys, place_ids in Notes, name+geo fingerprints, and name+Address (normalized) keys."""
     rows = ws.get_all_values()
     if len(rows) < 2:
-        return set(), set(), set()
+        return set(), set(), set(), set()
     header = rows[0]
 
     def col(name: str) -> int:
@@ -585,6 +598,7 @@ def extract_existing_for_dedupe(ws: gspread.Worksheet) -> tuple[set[str], set[st
     keys: set[str] = set()
     place_ids: set[str] = set()
     geo_name: set[tuple[str, str, str]] = set()
+    name_addr: set[tuple[str, str]] = set()
 
     pid_re = re.compile(
         r"(?i)place[_\s-]*id\s*:\s*([A-Za-z0-9_-]{12,})",
@@ -620,7 +634,11 @@ def extract_existing_for_dedupe(ws: gspread.Worksheet) -> tuple[set[str], set[st
         if fp:
             geo_name.add(fp)
 
-    return keys, place_ids, geo_name
+        na = name_address_fingerprint(name, street)
+        if na:
+            name_addr.add(na)
+
+    return keys, place_ids, geo_name, name_addr
 
 
 def row_dict_for_append(
@@ -746,25 +764,28 @@ def main() -> None:
     existing_keys: set[str] = set()
     existing_pids: set[str] = set()
     existing_geo_name: set[tuple[str, str, str]] = set()
+    existing_name_addr: set[tuple[str, str]] = set()
     if gc is not None:
         ws0 = gc.open_by_key(SPREADSHEET_ID).worksheet(HIT_LIST_WS)
-        existing_keys, existing_pids, existing_geo_name = extract_existing_for_dedupe(ws0)
+        existing_keys, existing_pids, existing_geo_name, existing_name_addr = extract_existing_for_dedupe(ws0)
         print(
             f"Hit List dedupe index: {len(existing_keys)} store keys, "
-            f"{len(existing_pids)} place_ids in Notes, {len(existing_geo_name)} name+geo fingerprints"
+            f"{len(existing_pids)} place_ids in Notes, {len(existing_geo_name)} name+geo fingerprints, "
+            f"{len(existing_name_addr)} name+address keys"
         )
     elif args.dry_run:
         try:
             gc_dry = gspread_client()
             ws0 = gc_dry.open_by_key(SPREADSHEET_ID).worksheet(HIT_LIST_WS)
-            existing_keys, existing_pids, existing_geo_name = extract_existing_for_dedupe(ws0)
+            existing_keys, existing_pids, existing_geo_name, existing_name_addr = extract_existing_for_dedupe(ws0)
             print(
                 f"Dry-run: loaded Hit List — store keys: {len(existing_keys)}, "
                 f"place_ids in Notes: {len(existing_pids)}, "
-                f"name+geo fingerprints: {len(existing_geo_name)}"
+                f"name+geo fingerprints: {len(existing_geo_name)}, "
+                f"name+address keys: {len(existing_name_addr)}"
             )
         except Exception as exc:
-            existing_keys, existing_pids, existing_geo_name = set(), set(), set()
+            existing_keys, existing_pids, existing_geo_name, existing_name_addr = set(), set(), set(), set()
             print(f"Dry-run: could not load Hit List ({exc}); dedupe vs existing rows disabled.")
 
     to_append: list[list[str]] = []
@@ -774,6 +795,7 @@ def main() -> None:
         "skip_filter": 0,
         "skip_dup": 0,
         "skip_dup_geo": 0,
+        "skip_dup_name_addr": 0,
         "skip_closed": 0,
     }
 
@@ -874,11 +896,18 @@ def main() -> None:
             stats["skip_dup"] += 1
             continue
 
+        nafp = name_address_fingerprint(name, street)
+        if nafp and nafp in existing_name_addr:
+            stats["skip_dup_name_addr"] += 1
+            continue
+
         to_append.append([rd[c] for c in HIT_LIST_COLS])
         existing_keys.add(sk)
         existing_keys.add(sk_legacy)
         if gfp:
             existing_geo_name.add(gfp)
+        if nafp:
+            existing_name_addr.add(nafp)
 
     print("\n--- Summary ---")
     for k, v in stats.items():
