@@ -1,0 +1,87 @@
+# Hit List: guardrailed status promotions + DApp Remarks apply
+#   shortlisted-to-enrich — before enrich-contact hourly job
+#   email-to-warmup — lower cap (Gmail warmup draft pipeline)
+#
+# Does not touch AI: Contact Form found (manual follow-up only).
+#
+# Secret: GOOGLE_CREDENTIALS_JSON (same as other Hit List workflows)
+
+name: Hit List status promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      shortlisted_limit:
+        description: shortlisted-to-enrich --limit
+        required: true
+        default: "15"
+      warmup_limit:
+        description: email-to-warmup --limit
+        required: true
+        default: "5"
+      require_website:
+        description: shortlisted-to-enrich --require-website (true/false)
+        required: false
+        default: "false"
+      dry_run:
+        description: Set to "true" for no sheet writes
+        required: false
+        default: "false"
+  schedule:
+    # 20 * * * * — before hit_list_enrich_contact at :35 UTC
+    - cron: "20 * * * *"
+
+concurrency:
+  group: hit-list-status-promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Write service account JSON
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: printf '%s' "$GOOGLE_CREDENTIALS_JSON" > google_credentials.json
+
+      - name: Promote Shortlisted → Enrich with contact
+        env:
+          SL: ${{ github.event.inputs.shortlisted_limit || '' }}
+          RW: ${{ github.event.inputs.require_website || '' }}
+          DRY: ${{ github.event.inputs.dry_run || '' }}
+          SCHEDULE_SL: "15"
+        run: |
+          set -e
+          LIMIT="${SL:-$SCHEDULE_SL}"
+          EXTRA=""
+          if [ "${DRY}" = "true" ]; then EXTRA="--dry-run"; fi
+          REQ=""
+          if [ "${RW}" = "true" ]; then REQ="--require-website"; fi
+          python3 scripts/hit_list_promote_status.py shortlisted-to-enrich --limit "$LIMIT" $REQ $EXTRA
+
+      - name: Promote Email found → Warm up prospect
+        env:
+          WL: ${{ github.event.inputs.warmup_limit || '' }}
+          DRY: ${{ github.event.inputs.dry_run || '' }}
+          SCHEDULE_WL: "5"
+        run: |
+          set -e
+          LIMIT="${WL:-$SCHEDULE_WL}"
+          EXTRA=""
+          if [ "${DRY}" = "true" ]; then EXTRA="--dry-run"; fi
+          python3 scripts/hit_list_promote_status.py email-to-warmup --limit "$LIMIT" $EXTRA
