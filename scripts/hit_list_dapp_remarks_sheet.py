@@ -35,18 +35,29 @@ def _parse_row_from_append_response(res: dict) -> int | None:
     return None
 
 
+def _retryable_sheets_api_error(e: APIError) -> bool:
+    """True when the Sheets API error is worth backing off and retrying."""
+    err = getattr(e, "response", None)
+    http = getattr(err, "status_code", None) if err is not None else None
+    code = getattr(e, "code", None)
+    # 429: read/write quota (e.g. Read requests per minute per user).
+    if http == 429 or code == 429:
+        return True
+    # 502/503/504: transient backend issues (e.g. "Visibility check was unavailable").
+    if http in (502, 503, 504) or code in (502, 503, 504):
+        return True
+    return False
+
+
 def _gspread_call_with_retry(fn, *, max_attempts: int = 5) -> object:
-    """Retry on Sheets 429 read/write quota (Read requests per minute per user)."""
+    """Retry on Sheets 429 quota and transient 5xx (502/503/504) responses."""
     delay = 2.0
     # jitter so concurrent CI jobs don't stampede the same retry instant
     for attempt in range(max_attempts):
         try:
             return fn()
         except APIError as e:
-            err = getattr(e, "response", None)
-            http = getattr(err, "status_code", None) if err is not None else None
-            # Google Sheets returns HTTP 429; error body may also include code 429.
-            if (http == 429 or getattr(e, "code", None) == 429) and attempt < max_attempts - 1:
+            if _retryable_sheets_api_error(e) and attempt < max_attempts - 1:
                 time.sleep(delay + random.uniform(0, 1.5))
                 delay = min(delay * 1.8, 75.0)
                 continue
@@ -116,14 +127,16 @@ def apply_remark_to_hit_list(
     c_by = hidx["Status Updated By"] + 1
     c_dt = hidx["Status Updated Date"] + 1
 
-    hit_ws.batch_update(
-        [
-            {"range": rowcol_to_a1(hit_row, c_status), "values": [[status]]},
-            {"range": rowcol_to_a1(hit_row, c_notes), "values": [[new_notes]]},
-            {"range": rowcol_to_a1(hit_row, c_by), "values": [[submitted_by]]},
-            {"range": rowcol_to_a1(hit_row, c_dt), "values": [[now_iso]]},
-        ],
-        value_input_option="USER_ENTERED",
+    _gspread_call_with_retry(
+        lambda: hit_ws.batch_update(
+            [
+                {"range": rowcol_to_a1(hit_row, c_status), "values": [[status]]},
+                {"range": rowcol_to_a1(hit_row, c_notes), "values": [[new_notes]]},
+                {"range": rowcol_to_a1(hit_row, c_by), "values": [[submitted_by]]},
+                {"range": rowcol_to_a1(hit_row, c_dt), "values": [[now_iso]]},
+            ],
+            value_input_option="USER_ENTERED",
+        )
     )
 
     ridx_row = remark_row
@@ -136,12 +149,14 @@ def apply_remark_to_hit_list(
     else:
         r_headers = _gspread_call_with_retry(lambda: remark_ws.row_values(1))
     ridx = {h: i for i, h in enumerate(r_headers)}
-    remark_ws.batch_update(
-        [
-            {"range": rowcol_to_a1(ridx_row, ridx["Processed"] + 1), "values": [["Yes"]]},
-            {"range": rowcol_to_a1(ridx_row, ridx["Processed At"] + 1), "values": [[now_iso]]},
-        ],
-        value_input_option="USER_ENTERED",
+    _gspread_call_with_retry(
+        lambda: remark_ws.batch_update(
+            [
+                {"range": rowcol_to_a1(ridx_row, ridx["Processed"] + 1), "values": [["Yes"]]},
+                {"range": rowcol_to_a1(ridx_row, ridx["Processed At"] + 1), "values": [[now_iso]]},
+            ],
+            value_input_option="USER_ENTERED",
+        )
     )
 
 
