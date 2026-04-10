@@ -37,7 +37,7 @@ from pathlib import Path
 import gspread
 from google.oauth2.service_account import Credentials
 
-from hit_list_dapp_remarks_sheet import append_dapp_remark_and_apply
+from hit_list_dapp_remarks_sheet import append_dapp_remark_and_apply, gspread_retry
 
 REPO = Path(__file__).resolve().parents[1]
 SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
@@ -122,6 +122,8 @@ def run_shortlisted_to_enrich(
     ws: gspread.Worksheet,
     remark_ws: gspread.Worksheet,
     header: list[str],
+    rows: list[list[str]],
+    remark_headers: list[str],
     limit: int,
     dry_run: bool,
     require_website: bool,
@@ -132,7 +134,6 @@ def run_shortlisted_to_enrich(
     i_notes = col_idx(header, "Notes")
     i_website = col_idx(header, "Website")
     width = len(header)
-    rows = ws.get_all_values()
     if len(rows) < 2:
         print("No data rows.")
         return
@@ -193,6 +194,8 @@ def run_shortlisted_to_enrich(
             SUBMITTED_BY,
             submitted_at,
             str(uuid.uuid4()),
+            hit_headers=header,
+            remark_headers=remark_headers,
         )
         time.sleep(1.0)
 
@@ -203,6 +206,8 @@ def run_email_to_warmup(
     ws: gspread.Worksheet,
     remark_ws: gspread.Worksheet,
     header: list[str],
+    rows: list[list[str]],
+    remark_headers: list[str],
     limit: int,
     dry_run: bool,
     shop_filter: str | None,
@@ -211,7 +216,6 @@ def run_email_to_warmup(
     i_shop = col_idx(header, "Shop Name")
     i_email = col_idx(header, "Email")
     width = len(header)
-    rows = ws.get_all_values()
     if len(rows) < 2:
         print("No data rows.")
         return
@@ -277,6 +281,8 @@ def run_email_to_warmup(
             SUBMITTED_BY,
             submitted_at,
             str(uuid.uuid4()),
+            hit_headers=header,
+            remark_headers=remark_headers,
         )
         time.sleep(1.0)
 
@@ -325,11 +331,12 @@ def main() -> None:
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet(HIT_LIST_WS)
     remark_ws = sh.worksheet(DAPP_REMARKS_WS)
-    rows = ws.get_all_values()
+    rows = gspread_retry(lambda: ws.get_all_values())
     if len(rows) < 2:
         print("No Hit List header/data.")
         sys.exit(0)
     header = rows[0]
+    remark_headers = gspread_retry(lambda: remark_ws.row_values(1))
 
     shop_filter = (args.shop or "").strip() or None
 
@@ -338,6 +345,8 @@ def main() -> None:
             ws,
             remark_ws,
             header,
+            rows,
+            remark_headers,
             args.limit,
             args.dry_run,
             args.require_website,
@@ -348,6 +357,8 @@ def main() -> None:
             ws,
             remark_ws,
             header,
+            rows,
+            remark_headers,
             args.limit,
             args.dry_run,
             shop_filter,
