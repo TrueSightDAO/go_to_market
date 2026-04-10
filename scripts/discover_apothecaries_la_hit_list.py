@@ -283,7 +283,41 @@ EXCLUDE_TYPES = frozenset(
         # “Apothecary” keyword often matches mall / dept-store beauty counters.
         "department_store",
         "shopping_mall",
+        # Drink venues: keyword “apothecary” often matches themed cocktail bars (e.g. cocktail bar
+        # inside a bar collective). Legacy Places types — see Google legacy Table 1.
+        "bar",
+        "night_club",
+        "brewery",
+        "liquor_store",
+        # Newer Places type strings sometimes appear alongside legacy types in Details.
+        "cocktail_bar",
+        "wine_bar",
+        "sports_bar",
+        "lounge_bar",
+        "irish_pub",
+        "hookah_bar",
+        "beer_garden",
+        "brewpub",
+        "gastropub",
     }
+)
+
+# Name / vicinity hints for drink-first venues when Google types are generic (establishment only).
+BAR_NAME_FRAGMENTS = (
+    "cocktail bar",
+    "cocktail lounge",
+    "craft cocktail",
+    " speakeasy",
+    "speakeasy ",
+    " tiki bar",
+    " rum bar",
+    " gin bar",
+    " whiskey bar",
+    " whisky bar",
+    "wine bar",
+    "brewpub",
+    " taproom",
+    "beer garden",
 )
 
 # Name / vicinity heuristics (case-insensitive)
@@ -479,6 +513,9 @@ def should_exclude(name: str, types: list[str], vicinity: str = "") -> tuple[boo
     for frag in COSMETICS_RETAIL_FRAGMENTS:
         if frag in hay:
             return True, f"cosmetics:{frag.strip()}"
+    for frag in BAR_NAME_FRAGMENTS:
+        if frag in hay:
+            return True, f"bar_name:{frag.strip()}"
 
     return False, ""
 
