@@ -6,7 +6,13 @@ Modes:
   shortlisted-to-enrich — Status **AI: Shortlisted** → **AI: Enrich with contact**
     Guardrails: cap per run (--limit), and by default require **Website** OR **place_id** in **Notes**
     (so enrich-contact has something to work with). Optional --require-website for stricter checks.
+    Use **--skip-contact-guardrail** to promote every matching row anyway (enrich may return
+    **AI: Enrich — manual** when there is no website / place_id).
     Does **not** change **AI: Contact Form found** (manual follow-up only).
+
+  human-shortlisted-to-enrich — Status **Shortlisted** (human-confirmed) → **AI: Enrich with contact**
+    Same guardrails as shortlisted-to-enrich. Use this when the Hit List uses plain **Shortlisted**
+    rather than **AI: Shortlisted**.
 
   email-to-warmup — Status **AI: Email found** → **AI: Warm up prospect**
     Guardrails: cap per run (lower default), **Email** must be non-empty.
@@ -20,6 +26,7 @@ Environment:
 Usage:
   cd market_research
   python3 scripts/hit_list_promote_status.py shortlisted-to-enrich --dry-run --limit 5
+  python3 scripts/hit_list_promote_status.py human-shortlisted-to-enrich --limit 20
   python3 scripts/hit_list_promote_status.py email-to-warmup --limit 3
 """
 
@@ -50,7 +57,8 @@ SCOPES = [
 
 SUBMITTED_BY = "hit_list_status_promote"
 
-STATUS_SHORTLISTED = "AI: Shortlisted"
+STATUS_AI_SHORTLISTED = "AI: Shortlisted"
+STATUS_HUMAN_SHORTLISTED = "Shortlisted"
 STATUS_ENRICH = "AI: Enrich with contact"
 STATUS_EMAIL_FOUND = "AI: Email found"
 STATUS_WARMUP = "AI: Warm up prospect"
@@ -127,7 +135,9 @@ def run_shortlisted_to_enrich(
     limit: int,
     dry_run: bool,
     require_website: bool,
+    skip_contact_guardrail: bool,
     shop_filter: str | None,
+    from_status: str,
 ) -> None:
     i_status = col_idx(header, "Status")
     i_shop = col_idx(header, "Shop Name")
@@ -141,11 +151,13 @@ def run_shortlisted_to_enrich(
     candidates: list[tuple[int, list[str]]] = []
     for ri, row in enumerate(rows[1:], start=2):
         cells = row_cells(row, width)
-        if cells[i_status].strip() != STATUS_SHORTLISTED:
+        if cells[i_status].strip() != from_status:
             continue
         if shop_filter and shop_filter.strip().lower() not in cells[i_shop].lower():
             continue
-        if not enrich_predicate(cells, i_notes, i_website, require_website):
+        if not skip_contact_guardrail and not enrich_predicate(
+            cells, i_notes, i_website, require_website
+        ):
             continue
         candidates.append((ri, cells))
         if len(candidates) >= max(1, limit):
@@ -153,13 +165,19 @@ def run_shortlisted_to_enrich(
 
     if not candidates:
         print(
-            f"No rows with Status={STATUS_SHORTLISTED!r} passing guardrails "
-            f"(limit={limit}, require_website={require_website}).",
+            f"No rows with Status={from_status!r} passing guardrails "
+            f"(limit={limit}, require_website={require_website}, "
+            f"skip_contact_guardrail={skip_contact_guardrail}).",
             flush=True,
         )
         return
 
-    pred = "Website or place_id in Notes" if not require_website else "Website only"
+    if skip_contact_guardrail:
+        pred = "contact guardrail skipped (all matching rows up to limit)"
+    elif require_website:
+        pred = "Website only"
+    else:
+        pred = "Website or place_id in Notes"
     print(
         f"Promoting {len(candidates)} row(s) → {STATUS_ENRICH!r} "
         f"(guardrail: {pred}). dry_run={dry_run}",
@@ -172,13 +190,13 @@ def run_shortlisted_to_enrich(
         shop = cells[i_shop].strip()
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         remarks = (
-            f"Automated promotion {stamp}: {STATUS_SHORTLISTED} → {STATUS_ENRICH}. "
+            f"Automated promotion {stamp}: {from_status} → {STATUS_ENRICH}. "
             f"Guardrails: cap/limit run, {pred}. "
             f"AI: Contact Form found rows are never auto-promoted (manual follow-up). "
             f"Next: hit_list_enrich_contact queue."
         )
         live = current_status(ws, ri, i_status + 1)
-        if live != STATUS_SHORTLISTED:
+        if live != from_status:
             print(f"  skip row {ri} {shop!r}: status now {live!r}", flush=True)
             continue
         print(f"  row {ri} {shop!r}", flush=True)
@@ -199,7 +217,7 @@ def run_shortlisted_to_enrich(
         )
         time.sleep(1.0)
 
-    print("Done (shortlisted-to-enrich).", flush=True)
+    print(f"Done ({from_status!r} → {STATUS_ENRICH} promotion).", flush=True)
 
 
 def run_email_to_warmup(
@@ -289,6 +307,27 @@ def run_email_to_warmup(
     print("Done (email-to-warmup).", flush=True)
 
 
+def _add_shortlist_to_enrich_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--limit", type=int, default=15, help="Max rows per run (default 15).")
+    parser.add_argument(
+        "--require-website",
+        action="store_true",
+        help="Require Website non-empty (ignore place_id-only Notes).",
+    )
+    parser.add_argument(
+        "--skip-contact-guardrail",
+        action="store_true",
+        help="Promote every matching row (ignore missing Website/place_id). Enrich may yield manual.",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Print plan only; no sheet writes.")
+    parser.add_argument(
+        "--shop",
+        type=str,
+        default="",
+        help="Only rows whose Shop Name contains this substring (case-insensitive).",
+    )
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description="Hit List status promotions with DApp Remarks (guardrailed)."
@@ -297,21 +336,15 @@ def main() -> None:
 
     p_s = sub.add_parser(
         "shortlisted-to-enrich",
-        help=f"{STATUS_SHORTLISTED} → {STATUS_ENRICH}",
+        help=f"{STATUS_AI_SHORTLISTED} → {STATUS_ENRICH}",
     )
-    p_s.add_argument("--limit", type=int, default=15, help="Max rows per run (default 15).")
-    p_s.add_argument(
-        "--require-website",
-        action="store_true",
-        help="Require Website non-empty (ignore place_id-only Notes).",
+    _add_shortlist_to_enrich_args(p_s)
+
+    p_h = sub.add_parser(
+        "human-shortlisted-to-enrich",
+        help=f"{STATUS_HUMAN_SHORTLISTED} (human) → {STATUS_ENRICH}",
     )
-    p_s.add_argument("--dry-run", action="store_true", help="Print plan only; no sheet writes.")
-    p_s.add_argument(
-        "--shop",
-        type=str,
-        default="",
-        help="Only rows whose Shop Name contains this substring (case-insensitive).",
-    )
+    _add_shortlist_to_enrich_args(p_h)
 
     p_e = sub.add_parser(
         "email-to-warmup",
@@ -340,7 +373,14 @@ def main() -> None:
 
     shop_filter = (args.shop or "").strip() or None
 
-    if args.cmd == "shortlisted-to-enrich":
+    if args.cmd in ("shortlisted-to-enrich", "human-shortlisted-to-enrich"):
+        if args.require_website and args.skip_contact_guardrail:
+            p.error("Use only one of --require-website and --skip-contact-guardrail.")
+        from_status = (
+            STATUS_AI_SHORTLISTED
+            if args.cmd == "shortlisted-to-enrich"
+            else STATUS_HUMAN_SHORTLISTED
+        )
         run_shortlisted_to_enrich(
             ws,
             remark_ws,
@@ -350,7 +390,9 @@ def main() -> None:
             args.limit,
             args.dry_run,
             args.require_website,
+            args.skip_contact_guardrail,
             shop_filter,
+            from_status,
         )
     elif args.cmd == "email-to-warmup":
         run_email_to_warmup(
