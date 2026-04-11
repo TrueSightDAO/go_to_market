@@ -17,8 +17,8 @@ on:
         required: false
         default: "false"
   schedule:
-    # Every 3 hours at :20 UTC (staggered from other Hit List jobs)
-    - cron: "20 */3 * * *"
+    # Every hour at :20 UTC (staggered from on-the-hour Hit List jobs)
+    - cron: "20 * * * *"
 
 concurrency:
   group: field-agent-location-places-pull
