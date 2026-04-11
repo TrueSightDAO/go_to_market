@@ -29,6 +29,27 @@
 2. Save as `credentials.json` in this directory
 3. First run will open browser for consent; token cached for reuse
 
+## Field agent location — **Recent Field Agent Location** → Places → Hit List
+
+**Tab:** **`Recent Field Agent Location`** on the same spreadsheet (`gid=881847228`).
+
+1. **DApp → GAS:** Signed **`stores_nearby.html`** attaches **`save_location=true`** + **`digital_signature`** on the normal store-search **`GET`** (throttled in **`localStorage`**, ~24h; page query **`save_location=true`** forces intent for testing). **Stores Nearby** web app: `tokenomics/clasp_mirrors/1NpHrKJW8Q4suu6-f5gXQcbjHqUZtGOG-KcIf81M1GG8lDShm5-fLphD2/Code.js` — **`clasp push`** then **Deploy → New version** for `/exec` to pick up changes.
+2. **Row shape:** Row 1 must be **`Logged At` | `Latitude` | `Longitude` | `Digital Signature` | `Location ID` | `Status`**. New pings append with **`Status` = `pending`**.
+3. **Automation:** **`scripts/field_agent_location_places_pull.py`** — processes **`pending`**; skips a new Places pull if another **`pulled`** row is within **20 miles** and **24 hours** (override with **`--dedupe-miles`** / **`--dedupe-hours`**, or **`--no-recent-dedupe`**); otherwise **Places Nearby** + dedupe → append **Hit List** (**Research**); sets **`pulled`** or **`ignored because already pulled`**; appends a summary row to **DApp Remarks** (Processed = Yes).
+4. **CI:** **`.github/workflows/field_agent_location_places_pull.yml`** — `workflow_dispatch` + schedule; secrets **`GOOGLE_CREDENTIALS_JSON`**, **`GOOGLE_MAPS_API_KEY`** (or **`GOOGLE_PLACES_API_KEY`**).
+
+**CLI:**
+
+```bash
+cd market_research
+python3 scripts/field_agent_location_places_pull.py --dry-run --limit 3
+python3 scripts/field_agent_location_places_pull.py --limit 10
+```
+
+Cross-links: **`agentic_ai_context/DAPP_PAGE_CONVENTIONS.md`** §14 (*Field agent location*), **`tokenomics/SCHEMA.md`** §4.
+
+---
+
 ## Research queue — Google Places + Grok photo review
 
 Rows with **Status = Research** are the default input for **`scripts/hit_list_research_photo_review.py`** (see also **`agentic_ai_context/WORKSPACE_CONTEXT.md`** — bullets under *Hit List — Status = Research*).
