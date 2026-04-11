@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: Max rows to process (Status AI: Enrich with contact only)
+        description: 'Max rows to process (Status AI: Enrich with contact only)'
         required: true
         default: "10"
       dry_run:
