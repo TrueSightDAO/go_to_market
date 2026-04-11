@@ -1,0 +1,64 @@
+# Recent Field Agent Location → Google Places Nearby → Hit List (Research, deduped).
+# Uses same secrets pattern as hit_list_enrich_contact / discover scripts.
+#
+# Secrets: GOOGLE_CREDENTIALS_JSON, GOOGLE_MAPS_API_KEY (or GOOGLE_PLACES_API_KEY)
+
+name: Field agent location Places pull
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Max pending "Recent Field Agent Location" rows to process this run
+        required: true
+        default: "10"
+      dry_run:
+        description: Set to "true" to print plan only (no sheet / Places writes)
+        required: false
+        default: "false"
+  schedule:
+    # Every 3 hours at :20 UTC (staggered from other Hit List jobs)
+    - cron: "20 */3 * * *"
+
+concurrency:
+  group: field-agent-location-places-pull
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Write service account JSON
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: printf '%s' "$GOOGLE_CREDENTIALS_JSON" > google_credentials.json
+
+      - name: Run field agent Places pull
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          INPUT_LIMIT: ${{ github.event.inputs.limit || '' }}
+          DRY: ${{ github.event.inputs.dry_run || '' }}
+          SCHEDULE_DEFAULT_LIMIT: "10"
+        run: |
+          set -e
+          LIMIT="${INPUT_LIMIT}"
+          if [ -z "$LIMIT" ]; then LIMIT="$SCHEDULE_DEFAULT_LIMIT"; fi
+          EXTRA=""
+          if [ "${DRY}" = "true" ]; then EXTRA="--dry-run"; fi
+          python3 scripts/field_agent_location_places_pull.py --limit "$LIMIT" $EXTRA
