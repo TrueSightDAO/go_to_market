@@ -6,8 +6,9 @@ Gmail **drafts** for Hit List rows with Status = **AI: Warm up prospect** and Em
   while the Gmail draft exists; next draft only after **Email Agent Follow Up** shows a prior
   **sent** at least ``--min-days-since-sent`` ago (default **7**). Run **sync_email_agent_followup.py** first.
 - **Attachment:** ``retail_price_list/agroverse_wholesale_price_list_2026.pdf`` on each draft.
-- **Grok** (optional ``--use-grok``): first-touch intro; no in-person visit assumption; consignment + bulk paths;
-  style reference in ``templates/warmup_outreach_reference.md``.
+- **Grok** (optional ``--use-grok``): first-touch intro; no in-person visit assumption; flexible consignment or bulk;
+  lead with Amazon rainforest restoration (tree per bag, QR traceability); style reference in
+  ``templates/warmup_outreach_reference.md``.
 - **Reply promotion:** By default, before drafting, promotes rows to **AI: Prospect replied** when Gmail shows
   an **inbound** message **from** the prospect **after** the latest logged **sent_at** for that address in
   **Email Agent Follow Up**.
@@ -241,8 +242,16 @@ def grok_warmup_system_prompt() -> str:
         "- No markdown fences, no preamble.\n"
         "- **Do not** assume Gary is **in their city** or will **visit their shop**. No “stopping by,” "
         "**in-person meetings**, or return-visit framing. Prefer **email reply** or a **short call** they schedule.\n"
-        "- Acknowledge retailers differ: some prefer **consignment**, others prefer **bulk / wholesale purchase**. "
-        "Offer both paths briefly and neutrally.\n"
+        "- **Lead with mission impact:** purchases support **restoration of the Amazon rainforest**; **each bag "
+        "plants a new tree**, **directly traceable** via the **unique QR code on that bag** (keep this accurate "
+        "and prominent — at least one clear sentence early in the body).\n"
+        "- **Commercial fit:** say Agroverse is **flexible** and happy with **either** a **consignment-friendly** "
+        "retail path **or** **wholesale / bulk** — present them as **parallel options**, not as a contrast "
+        "(avoid lines like “while others choose wholesale for margins” or any implication that bulk is mainly "
+        "about beating other retailers’ choices).\n"
+        "- **Do not** assume, imply, or acknowledge that the shop **already carries cacao**, has their **own "
+        "cacao supplier**, or needs an “alongside what you stock” angle. Do not invite them to compare against "
+        "an existing cacao line you do not know they have.\n"
         "- State clearly that a **wholesale price list PDF is attached** (do not paste prices in the body unless "
         "already in context notes).\n"
         "- Salutation: use a natural greeting for the **shop** or a generic “Hi —” if no contact name is known.\n"
@@ -356,19 +365,21 @@ def build_message_raw_with_pdf(
 
 def warmup_subject_template(shop_name: str) -> str:
     s = (shop_name or "Intro").strip()
-    return f"Ceremonial cacao for {s} — wholesale options (PDF attached)"
+    return f"Ceremonial cacao for {s} — each bag plants a tree (PDF attached)"
 
 
 def warmup_body_template(shop_name: str) -> str:
     shop = shop_name or "your shop"
     return (
         f"Hi —\n\n"
-        f"I’m Gary with Agroverse (farm-linked ceremonial cacao). I’m reaching out to {shop} because "
-        f"I think your customers may appreciate a transparent, craft cacao option alongside what you already carry.\n\n"
-        f"Some retailers start with **consignment-friendly** terms; others prefer a **straight bulk order** when they "
-        f"know their velocity. I’ve attached our **wholesale price list PDF** so you can skim SKUs and tiers — "
-        f"no need to meet in person on my side; happy to answer by email or on a quick call if that’s easier.\n\n"
-        f"If you tell me which path fits you better (consignment vs bulk), I can point you to the lightest next step.\n\n"
+        f"I’m Gary with Agroverse (farm-linked ceremonial cacao). I’m reaching out to {shop} because our model ties "
+        f"every sale to **Amazon rainforest restoration**: **each bag plants a new tree**, and the **unique QR code "
+        f"on that bag** links to **direct traceability** for that planting.\n\n"
+        f"We’re **flexible on structure** — **either** **consignment-friendly** retail **or** **wholesale / bulk** "
+        f"works on our side; I’ve attached our **wholesale price list PDF** so you can skim SKUs and tiers. "
+        f"No need to meet in person on my side; happy to answer by email or on a quick call if that’s easier.\n\n"
+        f"If you tell me which path you’d rather explore first (consignment vs bulk), I can point you to the lightest "
+        f"next step.\n\n"
         f"Thanks,\n"
         f"Gary\n"
         f"Agroverse | ceremonial cacao for retail\n"
