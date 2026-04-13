@@ -31,6 +31,7 @@ import os
 import re
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,36 @@ SCOPES = [
 ]
 
 # Column order must match Hit List tab (see HIT_LIST_CREDENTIALS.md, append_to_hit_list.py)
+HIT_LIST_OPENING_HOUR_COLS: tuple[str, ...] = (
+    "Monday Open",
+    "Monday Close",
+    "Tuesday Open",
+    "Tuesday Close",
+    "Wednesday Open",
+    "Wednesday Close",
+    "Thursday Open",
+    "Thursday Close",
+    "Friday Open",
+    "Friday Close",
+    "Saturday Open",
+    "Saturday Close",
+    "Sunday Open",
+    "Sunday Close",
+)
+
+# Google Place Details ``business_status`` → Hit List cell (empty = operational / unknown).
+GOOGLE_LISTING_COL = "Google listing"
+
+
+def google_listing_from_business_status(status: str | None) -> str:
+    s = (status or "").strip().upper()
+    if s == "CLOSED_PERMANENTLY":
+        return "Closed"
+    if s == "CLOSED_TEMPORARILY":
+        return "Temporarily closed"
+    return ""
+
+
 HIT_LIST_COLS = [
     "Shop Name",
     "Status",
@@ -80,10 +111,37 @@ HIT_LIST_COLS = [
     "Instagram Follow Count",
     "Store Key",
     "Contact Form URL",
+    *HIT_LIST_OPENING_HOUR_COLS,
+    GOOGLE_LISTING_COL,
 ]
 
 NEARBY_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
 DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
+FIND_PLACE_URL = "https://maps.googleapis.com/maps/api/place/findplacefromtext/json"
+
+
+def find_place_from_text(
+    key: str,
+    query: str,
+    lat: float | None,
+    lng: float | None,
+    radius_m: float = 50000.0,
+) -> dict[str, Any]:
+    """
+    Find Place from Text (legacy Places API). Prefer ``locationbias`` when lat/lng are known.
+    Returns the full JSON (status, candidates, …).
+    """
+    params: dict[str, Any] = {
+        "input": (query or "").strip(),
+        "inputtype": "textquery",
+        "fields": "place_id,name,formatted_address,business_status",
+        "key": key,
+    }
+    if lat is not None and lng is not None:
+        params["locationbias"] = f"circle:{int(radius_m)}@{lat},{lng}"
+    r = requests.get(FIND_PLACE_URL, params=params, timeout=45)
+    r.raise_for_status()
+    return r.json()
 
 
 @dataclass(frozen=True)
@@ -571,7 +629,7 @@ def collect_nearby_for_center(
 def place_details(key: str, place_id: str) -> dict[str, Any]:
     fields = (
         "place_id,name,formatted_address,formatted_phone_number,website,geometry,"
-        "types,address_component,business_status,url"
+        "types,address_component,business_status,url,opening_hours"
     )
     r = requests.get(
         DETAILS_URL,
@@ -580,6 +638,88 @@ def place_details(key: str, place_id: str) -> dict[str, Any]:
     )
     r.raise_for_status()
     return r.json()
+
+
+# Google weekday on periods: 0 = Sunday .. 6 = Saturday.
+_GOOGLE_DAY_TO_PAIR_START: dict[int, int] = {
+    0: 12,
+    1: 0,
+    2: 2,
+    3: 4,
+    4: 6,
+    5: 8,
+    6: 10,
+}
+
+
+def opening_hours_week_grid_from_place_result(res: dict[str, Any]) -> dict[str, str]:
+    """
+    Build the 14 Hit List hour cells from legacy Place Details ``opening_hours.periods``.
+    Multiple same-day segments: earliest open and latest close (lunch gaps not modeled).
+    """
+    out: dict[str, str] = {c: "" for c in HIT_LIST_OPENING_HOUR_COLS}
+    oh = res.get("opening_hours") or {}
+    periods = oh.get("periods") or []
+    if not periods:
+        return out
+
+    # Per Google day index: list of (open_min, close_min) where close may be >1440 if overnight.
+    intervals: dict[int, list[tuple[int, int]]] = {d: [] for d in range(7)}
+
+    def parse_day_time(day: Any, tim: str | None) -> tuple[int, int] | None:
+        try:
+            d = int(day)
+        except (TypeError, ValueError):
+            return None
+        if d < 0 or d > 6:
+            return None
+        s = (tim or "").strip()
+        if not s.isdigit():
+            return None
+        if len(s) == 3:
+            s = s.zfill(4)
+        if len(s) != 4:
+            return None
+        mins = int(s[:2]) * 60 + int(s[2:])
+        return d, mins
+
+    for p in periods:
+        o = p.get("open") or {}
+        c = p.get("close") or {}
+        op = parse_day_time(o.get("day"), o.get("time"))
+        if not op:
+            continue
+        open_day, open_m = op
+        cp = parse_day_time(c.get("day"), c.get("time"))
+        if not cp:
+            # Open 24h (no close) — treat as full day for that weekday.
+            intervals[open_day].append((0, 24 * 60))
+            continue
+        close_day, close_m = cp
+        if close_day == open_day:
+            end_m = close_m if close_m > open_m else close_m + 24 * 60
+            intervals[open_day].append((open_m, end_m))
+        else:
+            # Overnight (e.g. Mon 22:00 → Tue 02:00): measure from open day's midnight.
+            span = (24 * 60 - open_m) + close_m
+            end_m = open_m + span
+            intervals[open_day].append((open_m, end_m))
+
+    for d, segs in intervals.items():
+        if not segs:
+            continue
+        start = min(s for s, _ in segs)
+        end = max(e for _, e in segs)
+        pair0 = _GOOGLE_DAY_TO_PAIR_START.get(d)
+        if pair0 is None:
+            continue
+        open_col = HIT_LIST_OPENING_HOUR_COLS[pair0]
+        close_col = HIT_LIST_OPENING_HOUR_COLS[pair0 + 1]
+        out[open_col] = f"{start // 60:02d}:{start % 60:02d}"
+        end_norm = end % (24 * 60)
+        out[close_col] = f"{end_norm // 60:02d}:{end_norm % 60:02d}"
+
+    return out
 
 
 def parse_address_components(comps: list[dict[str, Any]]) -> dict[str, str]:
@@ -690,13 +830,15 @@ def row_dict_for_append(
     shop_type: str,
     place_id: str,
     region_notes_label: str,
+    opening_hours_row: Mapping[str, str] | None = None,
+    google_listing: str = "",
 ) -> dict[str, str]:
     notes = (
         f"Auto-discovered (Google Places Nearby, {region_notes_label}). place_id: {place_id}. "
         "Pre-filtered pharmacies/cannabis chains; confirm shop type before outreach."
     )
     sk = compute_store_key(name, street, city, state)
-    return {
+    rd: dict[str, str] = {
         "Shop Name": name,
         "Status": "Research",
         "Priority": "Low",
@@ -729,6 +871,15 @@ def row_dict_for_append(
         "Store Key": sk,
         "Contact Form URL": "",
     }
+    for c in HIT_LIST_OPENING_HOUR_COLS:
+        rd[c] = ""
+    if opening_hours_row:
+        for c in HIT_LIST_OPENING_HOUR_COLS:
+            v = (opening_hours_row.get(c) or "").strip()
+            if v:
+                rd[c] = v
+    rd[GOOGLE_LISTING_COL] = (google_listing or "").strip()
+    return rd
 
 
 def main() -> None:
@@ -910,6 +1061,7 @@ def main() -> None:
         phone = (res.get("formatted_phone_number") or "").strip()
         website = (res.get("website") or "").strip()
 
+        hours = opening_hours_week_grid_from_place_result(res)
         rd = row_dict_for_append(
             name=name,
             street=street,
@@ -922,6 +1074,8 @@ def main() -> None:
             shop_type=args.shop_type,
             place_id=pid,
             region_notes_label=region.notes_label,
+            opening_hours_row=hours,
+            google_listing=google_listing_from_business_status(res.get("business_status")),
         )
         sk = rd["Store Key"]
         sk_legacy = compute_store_key_legacy(name, street, city, state)
@@ -965,6 +1119,20 @@ def main() -> None:
         return
 
     ws = gc.open_by_key(SPREADSHEET_ID).worksheet(HIT_LIST_WS)
+    hdr = [str(x or "").strip() for x in ws.row_values(1)]
+    missing_h = [c for c in HIT_LIST_OPENING_HOUR_COLS if c not in hdr]
+    if missing_h:
+        raise SystemExit(
+            "Hit List row 1 is missing opening-hour column(s): "
+            + ", ".join(missing_h)
+            + ". Add them (after Contact Form URL) to match scripts/discover_apothecaries_la_hit_list.py, then re-run."
+        )
+    if GOOGLE_LISTING_COL not in hdr:
+        next_col = len(hdr) + 1
+        if ws.col_count < next_col:
+            ws.add_cols(next_col - ws.col_count)
+        ws.update_cell(1, next_col, GOOGLE_LISTING_COL)
+        hdr.append(GOOGLE_LISTING_COL)
     ws.append_rows(to_append, value_input_option="USER_ENTERED")
     print(f"Appended {len(to_append)} rows to {HIT_LIST_WS!r}.")
 

@@ -28,6 +28,19 @@
  *   shop_type=<string>    : Filter by shop type (optional)
  *                           Valid values: "Metaphysical/Spiritual", "Wellness Center", "Health Food Store", etc.
  *                           Use empty string "" or omit parameter to show all shop types
+ *   save_location=true    : When present with a valid lat/lng search, append one row to the
+ *                           "Recent Field Agent Location" tab (Status=pending) for Python automation.
+ *                           Requires digital_signature (or submitted_by) when save_location is enabled.
+ *                           Response may include field_agent_location: { saved, location_id?, reason? }.
+ *   open_now=true         : When present, only return stores that appear open at the viewer's
+ *                           local wall-clock time in time zone ``tz`` (IANA), e.g. America/Los_Angeles.
+ *                           Requires ``tz`` when ``open_now`` is enabled. Rows missing hour cells for
+ *                           that weekday are excluded. Hours use columns Monday Open … Sunday Close
+ *                           (24h HH:MM as written by Places automation / the DApp). Rows whose
+ *                           **Google listing** cell is **Closed** (permanently closed on Google) are
+ *                           always excluded when ``open_now`` is enabled.
+ *   tz=<IANA>             : Time zone for open_now (e.g. America/Los_Angeles). Defaults to script
+ *                           time zone when open_now is set but tz is omitted.
  * 
  * Query parameters (for status update):
  *   action=update_status     : Action to update store status
@@ -96,6 +109,149 @@
 const SPREADSHEET_ID = '1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc';
 const SHEET_NAME = 'Hit List';
 const DAPP_REMARKS_SHEET = 'DApp Remarks';
+/** Tab for DApp “field agent was here” pings (Python automation reads Status). */
+const RECENT_FIELD_AGENT_SHEET = 'Recent Field Agent Location';
+const FIELD_AGENT_STATUS_PENDING = 'pending';
+
+/** Hit List weekday hour columns (Monday … Sunday; open/close pairs, 24h HH:MM). */
+const HIT_LIST_OPENING_HOUR_HEADERS = [
+  'Monday Open', 'Monday Close',
+  'Tuesday Open', 'Tuesday Close',
+  'Wednesday Open', 'Wednesday Close',
+  'Thursday Open', 'Thursday Close',
+  'Friday Open', 'Friday Close',
+  'Saturday Open', 'Saturday Close',
+  'Sunday Open', 'Sunday Close'
+];
+
+/** Hit List column: Google ``business_status`` as sheet text (e.g. **Closed** = permanently closed). */
+const GOOGLE_LISTING_HEADER = 'Google listing';
+
+/**
+ * Sheets often returns times as Date (1899-12-30 wall clock) or as a day-fraction number.
+ * Open-now parsing expects "HH:mm" text; this normalizes before parseHmToMinutes_.
+ * @param {*} raw Cell value from getValues()
+ * @param {string} sheetTz Spreadsheet time zone from spreadsheet.getSpreadsheetTimeZone()
+ * @return {string}
+ */
+function normalizeHourCellToHmString_(raw, sheetTz) {
+  if (raw === null || raw === undefined || raw === '') {
+    return '';
+  }
+  var tz = sheetTz || Session.getScriptTimeZone();
+  if (Object.prototype.toString.call(raw) === '[object Date]') {
+    var d = /** @type {Date} */ (raw);
+    if (isNaN(d.getTime())) {
+      return '';
+    }
+    return Utilities.formatDate(d, tz, 'HH:mm');
+  }
+  if (typeof raw === 'number' && isFinite(raw)) {
+    var frac = raw;
+    if (frac < 0) {
+      return '';
+    }
+    if (frac >= 1) {
+      frac = frac - Math.floor(frac);
+    }
+    var totalMinutes = Math.round(frac * 24 * 60);
+    if (totalMinutes >= 24 * 60) {
+      totalMinutes = totalMinutes % (24 * 60);
+    }
+    if (totalMinutes < 0) {
+      totalMinutes = 0;
+    }
+    var hh = Math.floor(totalMinutes / 60);
+    var mm = totalMinutes % 60;
+    return (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
+  }
+  return String(raw).trim();
+}
+
+/**
+ * @param {string} s
+ * @return {number|null} minutes since midnight
+ */
+function parseHmToMinutes_(s) {
+  var t = String(s || '').trim();
+  if (!t) {
+    return null;
+  }
+  var m = t.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!m) {
+    return null;
+  }
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
+/**
+ * ISO weekday in time zone: 1=Monday … 7=Sunday (Java ``u`` pattern).
+ * @param {string} timeZone
+ * @return {{u:number, minutes:number}}
+ */
+function localWallClockFromTz_(timeZone) {
+  var now = new Date();
+  var u = parseInt(Utilities.formatDate(now, timeZone, 'u'), 10);
+  var hm = Utilities.formatDate(now, timeZone, 'HH:mm');
+  var parts = hm.split(':');
+  var minutes = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+  return { u: u, minutes: minutes };
+}
+
+/**
+ * @param {Array} row
+ * @param {Object} headerIndex map header -> 0-based column index
+ * @param {string} viewerTimeZone IANA time zone for "now" (e.g. America/Los_Angeles)
+ * @param {string} sheetTz Spreadsheet time zone for interpreting time-typed cells
+ * @return {boolean}
+ */
+function isHitListRowOpenNow_(row, headerIndex, viewerTimeZone, sheetTz) {
+  var ctx = localWallClockFromTz_(viewerTimeZone);
+  var u = ctx.u;
+  var nowM = ctx.minutes;
+  // u: 1 Mon .. 6 Sat, 7 Sun -> pair start index in HIT_LIST_OPENING_HOUR_HEADERS
+  var pairStart = (u === 7) ? 12 : (u - 1) * 2;
+  var openH = HIT_LIST_OPENING_HOUR_HEADERS[pairStart];
+  var closeH = HIT_LIST_OPENING_HOUR_HEADERS[pairStart + 1];
+  var oi = headerIndex[openH];
+  var ci = headerIndex[closeH];
+  var oRaw = (oi >= 0 && oi < row.length) ? row[oi] : '';
+  var cRaw = (ci >= 0 && ci < row.length) ? row[ci] : '';
+  var oS = normalizeHourCellToHmString_(oRaw, sheetTz);
+  var cS = normalizeHourCellToHmString_(cRaw, sheetTz);
+  if (!oS) {
+    return false;
+  }
+  var openM = parseHmToMinutes_(oS);
+  if (openM === null) {
+    return false;
+  }
+  if (!cS) {
+    return nowM >= openM;
+  }
+  var closeM = parseHmToMinutes_(cS);
+  if (closeM === null) {
+    return nowM >= openM;
+  }
+  if (closeM < openM) {
+    return nowM >= openM || nowM <= closeM;
+  }
+  return nowM >= openM && nowM <= closeM;
+}
+
+/**
+ * @param {Array} row
+ * @param {Object} headerIndex map header -> 0-based column index
+ * @return {boolean} True when the sheet marks this row as permanently closed on Google.
+ */
+function isHitListRowPermanentlyClosed_(row, headerIndex) {
+  var hi = headerIndex[GOOGLE_LISTING_HEADER];
+  if (hi === undefined || hi === null || hi < 0) {
+    return false;
+  }
+  var v = String((row[hi] || '')).trim().toLowerCase();
+  return v === 'closed';
+}
 
 /**
  * Calculate distance between two points using Haversine formula
@@ -193,9 +349,10 @@ function isWithinBounds(lat, lng, neLat, neLng, swLat, swLng) {
  * @param {Array<string>|null} statusFilters - Filter by store status(es) (default: ["Contacted"]). Use null or empty array to show all statuses
  * @param {Object|null} bounds - Optional bounds object with neLat, neLng, swLat, swLng to filter stores by visible area
  * @param {Array<string>|null} shopTypeFilters - Filter by shop type(s) (optional). Use null or empty array to show all shop types
+ * @param {{enabled:boolean,timeZone:string}|null} openNowFilter When enabled, only rows open at local wall time in timeZone.
  * @return {Array} Array of store objects with distance
  */
-function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTypeFilters) {
+function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTypeFilters, openNowFilter) {
   // If statusFilters is null, undefined, or empty array, it means show all statuses
   if (statusFilters === undefined || statusFilters === null) {
     statusFilters = null; // Show all
@@ -214,6 +371,9 @@ function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTy
   } else if (!Array.isArray(shopTypeFilters)) {
     shopTypeFilters = [shopTypeFilters];
   }
+  if (openNowFilter === undefined) {
+    openNowFilter = null;
+  }
   try {
     // Open the spreadsheet
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -222,6 +382,11 @@ function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTy
     if (!sheet) {
       throw new Error(`Sheet "${SHEET_NAME}" not found`);
     }
+
+    ensureHitListOpeningHourColumns_(sheet);
+    ensureHitListGoogleListingColumn_(sheet);
+
+    const sheetTz = spreadsheet.getSpreadsheetTimeZone();
     
     // Get all data
     const data = sheet.getDataRange().getValues();
@@ -231,6 +396,10 @@ function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTy
     
     // Find column indices
     const headers = data[0];
+    const headerIndex = {};
+    headers.forEach(function (h, idx) {
+      headerIndex[String(h || '').trim()] = idx;
+    });
     const shopNameIdx = headers.indexOf("Shop Name");
     const statusIdx = headers.indexOf("Status");
     const latIdx = headers.indexOf("Latitude");
@@ -339,6 +508,15 @@ function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTy
       
       // Calculate distance
       const distance = calculateDistance(userLat, userLng, storeLat, storeLng);
+
+      if (openNowFilter && openNowFilter.enabled && openNowFilter.timeZone) {
+        if (isHitListRowPermanentlyClosed_(row, headerIndex)) {
+          continue;
+        }
+        if (!isHitListRowOpenNow_(row, headerIndex, openNowFilter.timeZone, sheetTz)) {
+          continue;
+        }
+      }
       
       // Build store object with all available fields
       const store = {
@@ -366,10 +544,26 @@ function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTy
         visit_date: visitDateIdx >= 0 ? (row[visitDateIdx] || "") : "",
         outcome: outcomeIdx >= 0 ? (row[outcomeIdx] || "") : "",
         sales_process_notes: salesNotesIdx >= 0 ? (row[salesNotesIdx] || "") : "",
+        google_listing: (function () {
+          var gli = headerIndex.hasOwnProperty(GOOGLE_LISTING_HEADER) ? headerIndex[GOOGLE_LISTING_HEADER] : -1;
+          if (gli < 0 || gli >= row.length) {
+            return '';
+          }
+          return String(row[gli] || '').trim();
+        })(),
         latitude: storeLat,
         longitude: storeLng,
         distance: Math.round(distance * 10) / 10 // Round to 1 decimal place
       };
+
+      HIT_LIST_OPENING_HOUR_HEADERS.forEach(function (hh) {
+        var di = headerIndex[hh];
+        var key = String(hh || '').trim().toLowerCase().replace(/\s+/g, '_');
+        if (key) {
+          var rawCell = di >= 0 && di < row.length ? row[di] : '';
+          store[key] = normalizeHourCellToHmString_(rawCell, sheetTz);
+        }
+      });
       
       stores.push(store);
     }
@@ -384,6 +578,83 @@ function findNearbyStores(userLat, userLng, limit, statusFilters, bounds, shopTy
     Logger.log("Error in findNearbyStores: " + error.toString());
     throw error;
   }
+}
+
+/**
+ * Ensure “Recent Field Agent Location” exists with expected headers.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} spreadsheet
+ * @return {GoogleAppsScript.Spreadsheet.Sheet}
+ */
+function ensureRecentFieldAgentLocationSheet_(spreadsheet) {
+  let sheet = spreadsheet.getSheetByName(RECENT_FIELD_AGENT_SHEET);
+  const headers = [
+    'Logged At',
+    'Latitude',
+    'Longitude',
+    'Digital Signature',
+    'Location ID',
+    'Status'
+  ];
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(RECENT_FIELD_AGENT_SHEET);
+    sheet.appendRow(headers);
+    return sheet;
+  }
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = Math.max(sheet.getLastColumn(), headers.length);
+  const firstRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const row1Blank = firstRow.every(function (cell) {
+    return String(cell || '').trim() === '';
+  });
+
+  // Tab exists but has no header row yet (completely empty sheet is common).
+  if (lastRow === 0 || row1Blank) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    return sheet;
+  }
+
+  const matches = headers.every(function (h, i) {
+    return String(firstRow[i] || '').trim() === h;
+  });
+  if (matches) {
+    return sheet;
+  }
+
+  // Row 1 has text but not our canonical headers (e.g. placeholders or different labels).
+  // Safe to overwrite only when there is no data in row 2+.
+  if (lastRow <= 1) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    return sheet;
+  }
+
+  throw new Error(
+    'Sheet "' + RECENT_FIELD_AGENT_SHEET + '" row 1 must be exactly: ' + headers.join(', ') +
+      '. Fix row 1 in the spreadsheet, or move existing rows down so row 1 can be the header row.'
+  );
+}
+
+/**
+ * Append one field-agent location row (Status pending for downstream Python).
+ * @param {number} lat
+ * @param {number} lng
+ * @param {string} digitalSignature
+ * @return {string} Location ID (UUID)
+ */
+function appendFieldAgentLocation_(lat, lng, digitalSignature) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ensureRecentFieldAgentLocationSheet_(spreadsheet);
+  const locationId = Utilities.getUuid();
+  const now = new Date();
+  sheet.appendRow([
+    now,
+    lat,
+    lng,
+    digitalSignature || '',
+    locationId,
+    FIELD_AGENT_STATUS_PENDING
+  ]);
+  return locationId;
 }
 
 function ensureDappRemarksSheet_(spreadsheet) {
@@ -630,6 +901,39 @@ function updateStoreStatus(shopName, newStatus, digitalSignature, remarks, submi
   }
 }
 
+function ensureHitListOpeningHourColumns_(sheet) {
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, Math.max(lastCol, 1)).getValues()[0];
+  var missing = [];
+  HIT_LIST_OPENING_HOUR_HEADERS.forEach(function (h) {
+    if (headers.indexOf(h) === -1) {
+      missing.push(h);
+    }
+  });
+  if (!missing.length) {
+    return;
+  }
+  var nextCol = sheet.getLastColumn() + 1;
+  sheet.getRange(1, nextCol, 1, nextCol + missing.length - 1).setValues([missing]);
+}
+
+/**
+ * Ensure **Google listing** column exists (Place business status summary for the DApp).
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ */
+function ensureHitListGoogleListingColumn_(sheet) {
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, Math.max(lastCol, 1)).getValues()[0];
+  var trimmed = headers.map(function (h) {
+    return String(h || '').trim();
+  });
+  if (trimmed.indexOf(GOOGLE_LISTING_HEADER) !== -1) {
+    return;
+  }
+  var nextCol = sheet.getLastColumn() + 1;
+  sheet.getRange(1, nextCol).setValue(GOOGLE_LISTING_HEADER);
+}
+
 function addNewStore(storeData) {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = spreadsheet.getSheetByName(SHEET_NAME);
@@ -648,6 +952,11 @@ function addNewStore(storeData) {
     data = sheet.getDataRange().getValues();
     headers = data[0];
   }
+
+  ensureHitListOpeningHourColumns_(sheet);
+  ensureHitListGoogleListingColumn_(sheet);
+  data = sheet.getDataRange().getValues();
+  headers = data[0];
 
   const headerIndex = {};
   headers.forEach((header, idx) => {
@@ -747,6 +1056,17 @@ function addNewStore(storeData) {
   setValue('Status Updated Date', now);
   setValue('Store Key', storeKey);
 
+  HIT_LIST_OPENING_HOUR_HEADERS.forEach(function (h) {
+    var k = String(h || '').trim().toLowerCase().replace(/\s+/g, '_');
+    if (k && storeData[k]) {
+      setValue(h, storeData[k]);
+    }
+  });
+
+  if (storeData.google_listing) {
+    setValue(GOOGLE_LISTING_HEADER, storeData.google_listing);
+  }
+
   sheet.appendRow(row);
 
   const submissionId = logDappSubmission_(spreadsheet, storeData.shopName, storeData.status, storeData.remarks, submittedBy, true);
@@ -792,6 +1112,15 @@ function doGet(e) {
         longitude: (e.parameter.longitude || '').trim(),
         submittedBy: (e.parameter.submitted_by || e.parameter.digital_signature || '').trim()
       };
+
+      HIT_LIST_OPENING_HOUR_HEADERS.forEach(function (h) {
+        var k = String(h || '').trim().toLowerCase().replace(/\s+/g, '_');
+        if (k) {
+          storeData[k] = (e.parameter[k] || '').trim();
+        }
+      });
+
+      storeData.google_listing = (e.parameter.google_listing || '').trim();
 
       let salesNotes = '';
       if (storeData.remarks) {
@@ -878,7 +1207,7 @@ function doGet(e) {
     const statusRegex = /[&?]status=([^&]*)/g;
     let match;
     while ((match = statusRegex.exec(queryString)) !== null) {
-      const value = decodeURIComponent(match[1].replace(/\+/g, ' ')).trim();
+      const value = decodeURIComponent(match[1].replace(/\+/g, ' '));
       if (value && value !== "" && value !== "All") {
         statusMatches.push(value);
       }
@@ -973,20 +1302,53 @@ function doGet(e) {
         }))
         .setMimeType(ContentService.MimeType.JSON);
     }
+
+    /** Optional: log signed contributor location for automation (see Recent Field Agent Location). */
+    let fieldAgentLocation = undefined;
+    const saveLocRaw = String(e.parameter.save_location || '').toLowerCase();
+    if (saveLocRaw === 'true' || saveLocRaw === '1') {
+      const ds = (e.parameter.digital_signature || e.parameter.submitted_by || '').trim();
+      if (!ds) {
+        fieldAgentLocation = { saved: false, reason: 'missing digital_signature' };
+      } else {
+        try {
+          const locationId = appendFieldAgentLocation_(lat, lng, ds);
+          fieldAgentLocation = { saved: true, location_id: locationId };
+        } catch (locErr) {
+          Logger.log('appendFieldAgentLocation_: ' + locErr.toString());
+          fieldAgentLocation = { saved: false, reason: String(locErr) };
+        }
+      }
+    }
     
+    const openNowRaw = String(e.parameter.open_now || '').toLowerCase();
+    const openNowEnabled = openNowRaw === 'true' || openNowRaw === '1';
+    const openNowTz = (e.parameter.tz || e.parameter.time_zone || Session.getScriptTimeZone() || 'Etc/UTC').trim();
+    let openNowFilter = null;
+    if (openNowEnabled) {
+      openNowFilter = { enabled: true, timeZone: openNowTz };
+    }
+
     // Find nearby stores
-    const stores = findNearbyStores(lat, lng, limit, statusFilters, bounds, shopTypeFilters);
-    
+    const stores = findNearbyStores(lat, lng, limit, statusFilters, bounds, shopTypeFilters, openNowFilter);
+
+    const payload = {
+      success: true,
+      location: { latitude: lat, longitude: lng },
+      status_filters: statusFilters || [],
+      shop_type_filters: shopTypeFilters || [],
+      open_now: !!openNowFilter,
+      open_now_tz: openNowFilter ? openNowTz : '',
+      count: stores.length,
+      stores: stores
+    };
+    if (fieldAgentLocation !== undefined) {
+      payload.field_agent_location = fieldAgentLocation;
+    }
+
     // Return JSON response
     return ContentService
-      .createTextOutput(JSON.stringify({
-        success: true,
-        location: { latitude: lat, longitude: lng },
-        status_filters: statusFilters || [],
-        shop_type_filters: shopTypeFilters || [],
-        count: stores.length,
-        stores: stores
-      }))
+      .createTextOutput(JSON.stringify(payload))
       .setMimeType(ContentService.MimeType.JSON);
       
   } catch (error) {
@@ -1053,7 +1415,7 @@ function testFindNearbyStores() {
     Logger.log("");
   
     try {
-      const stores = findNearbyStores(lat, lng, limit, testCase.status);
+      const stores = findNearbyStores(lat, lng, limit, testCase.status, null, null, null);
     
       Logger.log("✅ Test successful!");
       Logger.log("Found " + stores.length + " stores");
