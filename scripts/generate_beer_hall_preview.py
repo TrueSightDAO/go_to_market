@@ -7,6 +7,7 @@ Follows the same evidence steps as **`agentic_ai_context/OPENCLAW_WHATSAPP.md`**
   - **§ Gathering what merged** — `git fetch` + `git log` on `origin/<default>` for each clone
   - **Merged PRs** — `gh pr list -R TrueSightDAO/<repo> --state merged` (optional if `gh` missing)
   - **§ Gathering Telegram Chat Logs** — `list_recent_telegram_chat_logs_for_digest.py`
+  - **§ DApp Remarks (Hit List)** — `list_recent_dapp_remarks_for_digest.py` (offline / field human notes)
 
 Output is Markdown (for reading in Cursor / Git). Paste into WhatsApp manually if desired;
 use WhatsApp formatting rules from **`OPENCLAW_WHATSAPP.md`** (no `**bold**` in the bubble).
@@ -14,6 +15,7 @@ use WhatsApp formatting rules from **`OPENCLAW_WHATSAPP.md`** (no `**bold**` in 
 Usage (from `market_research/`):
   python3 scripts/generate_beer_hall_preview.py
   python3 scripts/generate_beer_hall_preview.py --since-days 3 --telegram-hours 48
+  python3 scripts/generate_beer_hall_preview.py --dapp-include-automation
   python3 scripts/generate_beer_hall_preview.py --output /path/to/preview.md
 
 Default output: **`agentic_ai_context/previews/beer_hall_preview_latest.md`** when that
@@ -151,10 +153,28 @@ def _telegram_block(hours: int) -> str:
     return "```\n" + out.strip() + "\n```\n"
 
 
+def _dapp_remarks_block(hours: int, *, include_automation: bool) -> str:
+    script = _REPO / "scripts" / "list_recent_dapp_remarks_for_digest.py"
+    if not script.is_file():
+        return "_(DApp Remarks helper script missing)_\n"
+    cmd = [sys.executable, str(script), "--hours", str(float(hours))]
+    if include_automation:
+        cmd.append("--include-automation")
+    code, out = _run(cmd, cwd=_REPO)
+    if code != 0:
+        return f"_(DApp Remarks helper exit {code})_\n```\n{out[:4000]}\n```\n"
+    return "```\n" + out.strip() + "\n```\n"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Beer Hall digest preview (no WhatsApp send).")
     ap.add_argument("--since-days", type=int, default=7, help="Look-back for git log / gh (calendar days).")
     ap.add_argument("--telegram-hours", type=int, default=48, help="Passed to list_recent_telegram_chat_logs_for_digest.py.")
+    ap.add_argument(
+        "--dapp-include-automation",
+        action="store_true",
+        help="Pass --include-automation to list_recent_dapp_remarks_for_digest.py (default: human-oriented rows only).",
+    )
     ap.add_argument("--output", type=Path, default=None, help="Markdown output path.")
     ap.add_argument(
         "--no-stdout",
@@ -174,7 +194,11 @@ def main() -> int:
     parts.append(f"# Beer Hall digest — **PREVIEW** (no OpenClaw send)\n")
     parts.append(f"- Generated: **{dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}**\n")
     parts.append(f"- Git window: `{since_iso}` → `{until_iso}` (local clone `origin` default branch)\n")
-    parts.append(f"- Telegram helper look-back: **{args.telegram_hours}h**\n")
+    parts.append(
+        f"- Telegram + DApp Remarks helper look-back: **{args.telegram_hours}h** "
+        f"(same window for both; DApp default excludes script submitters unless "
+        f"`--dapp-include-automation`)\n"
+    )
     parts.append("\n---\n\n## Message 1 (TLDR only — WhatsApp paste)\n\n")
     parts.append(
         "_Draft manually from the evidence below. No GitHub URLs in Message 1. "
@@ -186,7 +210,7 @@ def main() -> int:
     parts.append("\n---\n\n## Message 2 (Shipped + links — WhatsApp paste)\n\n")
     parts.append(
         "_Use `*Shipped*` then bullets. **Only** `https://github.com/TrueSightDAO/...` for GitHub. "
-        "Optional: **Community (Telegram log):** after bullets._\n\n"
+        "Optional: **Community (Telegram log):** and/or **Community (DApp Remarks / field):** after bullets._\n\n"
         "*Shipped*\n\n"
         "- …\n"
     )
@@ -228,6 +252,9 @@ def main() -> int:
 
     parts.append("---\n\n## Evidence — Telegram Chat Logs helper output\n\n")
     parts.append(_telegram_block(args.telegram_hours))
+
+    parts.append("---\n\n## Evidence — DApp Remarks (Hit List) helper output\n\n")
+    parts.append(_dapp_remarks_block(args.telegram_hours, include_automation=args.dapp_include_automation))
 
     parts.append(
         "\n---\n\n## Operator checklist before a real Beer Hall send\n\n"
