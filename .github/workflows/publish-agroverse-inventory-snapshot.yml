@@ -7,6 +7,10 @@
 #     (classic PAT with `repo` scope also works). Needed because GITHUB_TOKEN cannot push to another repo by default.
 #
 # Outputs: store-inventory.json, partners-inventory.json on agroverse-inventory default branch (main).
+#
+# Script behavior (sync_agroverse_store_inventory.py): store totals use Contributors column T only;
+# partner venue JSON uses any ledger location that matches Agroverse Partners contributor_contact_id.
+# After reading many managed ledgers, the script pauses before further SKUs reads to reduce 429s.
 
 name: Publish Agroverse inventory snapshots
 
