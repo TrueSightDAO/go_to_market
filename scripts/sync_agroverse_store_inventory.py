@@ -2,9 +2,13 @@
 """
 Port of `agroverse_shop/google-app-script/update_store_inventory.gs` (Python).
 
-1. Reads store managers, currency→SKU mapping, main-ledger inventory, and managed-ledger balances.
-2. Writes computed totals to **Agroverse SKUs** column **I** (Store inventory).
-3. Writes `store-inventory.json` for the public GitHub snapshot (same shape as today).
+1. Reads store managers (Contributors column **T**: website / online-fulfillment locations),
+   currency→SKU mapping, main-ledger inventory, and managed-ledger balances.
+2. Writes computed totals to **Agroverse SKUs** column **I** (Store inventory) — **only** locations
+   flagged as store managers (online-fulfillable stock).
+3. Writes `store-inventory.json` and `partners-inventory.json`. Partner venue totals attribute any
+   ledger row whose **Location** matches an active **Agroverse Partners** `contributor_contact_id`,
+   regardless of column **T** (venue vs online).
 
 Requires `market_research/google_credentials.json` with access to:
 - Main workbook `1GE7PUq-UT6x2rBN-Q2ksogbWpgyuh2SaxJyG_uEK6PU`
@@ -122,7 +126,11 @@ def _last_filled_row_in_col_a(ws: gspread.Worksheet) -> int:
     return len(vals)
 
 
-def get_main_ledger_inventory(sh: gspread.Spreadsheet, store_managers: set[str]) -> dict[str, dict[str, float]]:
+def get_main_ledger_inventory(
+    sh: gspread.Spreadsheet, restrict_locations_to: set[str] | None
+) -> dict[str, dict[str, float]]:
+    """Read offchain asset location rows. If ``restrict_locations_to`` is set, only those locations;
+    if ``None``, include every non-empty location (used for partner venue aggregation)."""
     ws = sh.worksheet(OFFCHAIN_ASSET_LOCATION_SHEET_NAME)
     last_row = _last_filled_row_in_col_a(ws)
     if last_row < 5:
@@ -140,7 +148,9 @@ def get_main_ledger_inventory(sh: gspread.Spreadsheet, store_managers: set[str])
         currency = row[0].strip() if row[0] else ""
         location = row[1].strip() if row[1] else ""
         amount = _to_float(row[2])
-        if not currency or not location or location not in store_managers or amount <= 0:
+        if not currency or not location or amount <= 0:
+            continue
+        if restrict_locations_to is not None and location not in restrict_locations_to:
             continue
         inv.setdefault(currency, {})
         inv[currency][location] = inv[currency].get(location, 0.0) + amount
@@ -162,8 +172,23 @@ def get_managed_ledger_urls(sh: gspread.Spreadsheet) -> list[str]:
     return urls
 
 
+LedgerCurrencyMaps = tuple[
+    dict[str, dict[str, float]],
+    list[tuple[str, dict[str, dict[str, float]]]],
+]
+
+
+def load_ledger_currency_maps(gc: gspread.Client, sh: gspread.Spreadsheet) -> LedgerCurrencyMaps:
+    """Read main + every managed Balance sheet once (all locations). Caller filters for store vs partner."""
+    main_full = get_main_ledger_inventory(sh, None)
+    managed: list[tuple[str, dict[str, dict[str, float]]]] = []
+    for url in get_managed_ledger_urls(sh):
+        managed.append((url, get_managed_ledger_inventory(gc, url, None)))
+    return main_full, managed
+
+
 def get_managed_ledger_inventory(
-    gc: gspread.Client, ledger_url: str, store_managers: set[str]
+    gc: gspread.Client, ledger_url: str, restrict_locations_to: set[str] | None
 ) -> dict[str, dict[str, float]]:
     sid = _extract_spreadsheet_id(ledger_url)
     if not sid:
@@ -189,7 +214,9 @@ def get_managed_ledger_inventory(
         location = row[0].strip() if row[0] else ""
         amount = _to_float(row[1])
         currency = row[2].strip() if row[2] else ""
-        if not currency or not location or location not in store_managers or amount <= 0:
+        if not currency or not location or amount <= 0:
+            continue
+        if restrict_locations_to is not None and location not in restrict_locations_to:
             continue
         inv.setdefault(currency, {})
         inv[currency][location] = inv[currency].get(location, 0.0) + amount
@@ -197,7 +224,11 @@ def get_managed_ledger_inventory(
 
 
 def calculate_sku_inventory(
-    gc: gspread.Client, sh: gspread.Spreadsheet, *, managers: list[str] | None = None
+    gc: gspread.Client,
+    sh: gspread.Spreadsheet,
+    *,
+    managers: list[str] | None = None,
+    ledger_cache: LedgerCurrencyMaps | None = None,
 ) -> dict[str, float]:
     if managers is None:
         managers = get_store_managers(sh)
@@ -208,22 +239,24 @@ def calculate_sku_inventory(
     if not cur_to_sku:
         raise RuntimeError("No currency→SKU mappings found (Currencies columns A and M).")
 
+    if ledger_cache is None:
+        ledger_cache = load_ledger_currency_maps(gc, sh)
+    main_full, managed_full = ledger_cache
+
     sku_totals: dict[str, float] = {}
 
-    main = get_main_ledger_inventory(sh, ms)
-    for currency, by_mgr in main.items():
-        sku = cur_to_sku.get(currency)
-        if not sku:
-            continue
-        sku_totals[sku] = sku_totals.get(sku, 0.0) + sum(by_mgr.values())
-
-    for url in get_managed_ledger_urls(sh):
-        led = get_managed_ledger_inventory(gc, url, ms)
-        for currency, by_mgr in led.items():
+    def add_filtered(currency_map: dict[str, dict[str, float]]) -> None:
+        for currency, by_mgr in currency_map.items():
             sku = cur_to_sku.get(currency)
             if not sku:
                 continue
-            sku_totals[sku] = sku_totals.get(sku, 0.0) + sum(by_mgr.values())
+            subtotal = sum(qty for loc, qty in by_mgr.items() if loc in ms)
+            if subtotal:
+                sku_totals[sku] = sku_totals.get(sku, 0.0) + subtotal
+
+    add_filtered(main_full)
+    for _url, led in managed_full:
+        add_filtered(led)
 
     return sku_totals
 
@@ -268,8 +301,7 @@ def read_partners_by_contributor(sh: gspread.Spreadsheet) -> dict[str, list[str]
 
 def read_sku_metadata(sh: gspread.Spreadsheet) -> dict[str, dict[str, str]]:
     """Read key SKU fields used for partner product snippets."""
-    ws = sh.worksheet(SKUS_SHEET_NAME)
-    rows = _gspread_retry(lambda: ws.get_all_values())
+    rows = _gspread_retry(lambda: sh.worksheet(SKUS_SHEET_NAME).get_all_values())
     if not rows:
         return {}
     header = [c.strip().lower() for c in rows[0]]
@@ -310,15 +342,20 @@ def read_sku_metadata(sh: gspread.Spreadsheet) -> dict[str, dict[str, str]]:
 
 
 def calculate_partner_sku_inventory(
-    gc: gspread.Client, sh: gspread.Spreadsheet, *, managers: list[str] | None = None
+    gc: gspread.Client,
+    sh: gspread.Spreadsheet,
+    *,
+    ledger_cache: LedgerCurrencyMaps | None = None,
 ) -> dict[str, dict[str, float]]:
-    """Aggregate inventory by partner_id and sku using contributor mappings."""
-    if managers is None:
-        managers = get_store_managers(sh)
-    ms = set(managers)
-    if not ms:
-        return {}
+    """Aggregate inventory by partner_id and sku using Agroverse Partners contributor mappings.
 
+    Ledger **Location** must match ``contributor_contact_id``; column **T** (store manager) is not
+    required for venue totals. Store / column **I** / ``store-inventory.json`` still use store
+    managers only via :func:`calculate_sku_inventory`.
+
+    Pass ``ledger_cache`` from :func:`load_ledger_currency_maps` when also computing store totals
+    so each managed ledger is read only once (avoids Sheets API read quota blowups).
+    """
     contributor_to_partners = read_partners_by_contributor(sh)
     if not contributor_to_partners:
         return {}
@@ -326,6 +363,10 @@ def calculate_partner_sku_inventory(
     cur_to_sku = get_currency_to_sku_mapping(sh)
     if not cur_to_sku:
         return {}
+
+    if ledger_cache is None:
+        ledger_cache = load_ledger_currency_maps(gc, sh)
+    main_full, managed_full = ledger_cache
 
     partner_totals: dict[str, dict[str, float]] = {}
 
@@ -335,52 +376,58 @@ def calculate_partner_sku_inventory(
             if not sku:
                 continue
             for manager, qty in by_mgr.items():
-                if manager not in ms:
-                    continue
                 partner_ids = contributor_to_partners.get(manager, [])
+                if not partner_ids:
+                    continue
                 for partner_id in partner_ids:
                     partner_totals.setdefault(partner_id, {})
                     partner_totals[partner_id][sku] = partner_totals[partner_id].get(sku, 0.0) + qty
 
-    accumulate(get_main_ledger_inventory(sh, ms))
-    for url in get_managed_ledger_urls(sh):
-        accumulate(get_managed_ledger_inventory(gc, url, ms))
+    accumulate(main_full)
+    for _url, led in managed_full:
+        accumulate(led)
 
     return partner_totals
 
 
 def read_sku_product_ids(sh: gspread.Spreadsheet) -> list[str]:
-    ws = sh.worksheet(SKUS_SHEET_NAME)
-    last = _last_filled_row_in_col_a(ws)
-    if last < 2:
-        return []
-    col = _gspread_retry(lambda: ws.get_values(f"A2:A{last}"))
-    out: list[str] = []
-    for r in col:
-        if not r:
-            continue
-        pid = r[0].strip() if r[0] else ""
-        if pid:
-            out.append(pid)
-    return out
+    def _read() -> list[str]:
+        ws = sh.worksheet(SKUS_SHEET_NAME)
+        last = _last_filled_row_in_col_a(ws)
+        if last < 2:
+            return []
+        col = ws.get_values(f"A2:A{last}")
+        out: list[str] = []
+        for r in col:
+            if not r:
+                continue
+            pid = r[0].strip() if r[0] else ""
+            if pid:
+                out.append(pid)
+        return out
+
+    return _gspread_retry(_read)  # type: ignore[return-value]
 
 
 def read_current_inventory_column(sh: gspread.Spreadsheet) -> dict[str, float]:
-    ws = sh.worksheet(SKUS_SHEET_NAME)
-    last = _last_filled_row_in_col_a(ws)
-    if last < 2:
-        return {}
-    rows = _gspread_retry(lambda: ws.get_values(f"A2:I{last}"))
-    cur: dict[str, float] = {}
-    for row in rows:
-        if not row:
-            continue
-        pid = row[0].strip() if row[0] else ""
-        if not pid:
-            continue
-        inv = _to_float(row[8]) if len(row) > 8 else 0.0
-        cur[pid] = inv
-    return cur
+    def _read() -> dict[str, float]:
+        ws = sh.worksheet(SKUS_SHEET_NAME)
+        last = _last_filled_row_in_col_a(ws)
+        if last < 2:
+            return {}
+        rows = ws.get_values(f"A2:I{last}")
+        cur: dict[str, float] = {}
+        for row in rows:
+            if not row:
+                continue
+            pid = row[0].strip() if row[0] else ""
+            if not pid:
+                continue
+            inv = _to_float(row[8]) if len(row) > 8 else 0.0
+            cur[pid] = inv
+        return cur
+
+    return _gspread_retry(_read)  # type: ignore[return-value]
 
 
 def main() -> None:
@@ -412,8 +459,11 @@ def main() -> None:
     sh = _gspread_retry(lambda: gc.open_by_key(MAIN_SPREADSHEET_ID))
 
     managers = get_store_managers(sh)
-    sku_totals = calculate_sku_inventory(gc, sh, managers=managers)
-    partner_totals = calculate_partner_sku_inventory(gc, sh, managers=managers)
+    ledger_cache = load_ledger_currency_maps(gc, sh)
+    sku_totals = calculate_sku_inventory(gc, sh, managers=managers, ledger_cache=ledger_cache)
+    partner_totals = calculate_partner_sku_inventory(gc, sh, ledger_cache=ledger_cache)
+    # Many managed-ledger reads can exhaust per-minute read quota; pause before more SKUs sheet calls.
+    time.sleep(70)
     sku_meta = read_sku_metadata(sh)
     product_ids = read_sku_product_ids(sh)
     if not product_ids:
@@ -481,9 +531,13 @@ def main() -> None:
         )
         return
 
-    ws = sh.worksheet(SKUS_SHEET_NAME)
     n = len(updates)
-    ws.update(values=updates, range_name=f"I2:I{1 + n}", value_input_option="USER_ENTERED")
+
+    def _write_column_i() -> None:
+        ws = sh.worksheet(SKUS_SHEET_NAME)
+        ws.update(values=updates, range_name=f"I2:I{1 + n}", value_input_option="USER_ENTERED")
+
+    _gspread_retry(_write_column_i)
 
     args.json_out.parent.mkdir(parents=True, exist_ok=True)
     args.json_out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
