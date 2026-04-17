@@ -70,6 +70,95 @@ HEADER_ALIASES_STATUS = (
     "status",
 )
 
+# Edgar event types that carry zero Beer Hall signal — filter entirely
+_EDGAR_NOISE_TYPES = {
+    "email registered event",
+    "email verification event",
+}
+
+# Edgar event types that ARE signal — parse structured fields from them
+_EDGAR_SIGNAL_TYPES = {
+    "contribution event",
+    "sales event",
+    "dao inventory expense event",
+}
+
+
+def _parse_edgar_event(raw: str) -> dict[str, str] | None:
+    """Parse Edgar's structured event text into a clean dict.
+
+    Edgar embeds structured key-value pairs in the Telegram message like:
+      [CONTRIBUTION EVENT] - Type: USD - Amount: 25 - Description: Grok api - Contributor(s): Gary Teh
+    Returns None if the text is not a recognised Edgar event.
+    """
+    m = re.match(r"\[([A-Z][A-Z\s]+EVENT)\]", raw.strip(), re.IGNORECASE)
+    if not m:
+        return None
+    event_type = m.group(1).strip().lower()
+
+    # Noise events: skip entirely
+    if event_type in _EDGAR_NOISE_TYPES:
+        return {"_noise": "1"}
+
+    # Parse key: value pairs separated by " - "
+    body = raw[m.end():].strip().lstrip("-").strip()
+    fields: dict[str, str] = {"_type": event_type}
+    for part in re.split(r"\s+-\s+", body):
+        kv = part.split(":", 1)
+        if len(kv) == 2:
+            k = kv[0].strip().lower()
+            v = kv[1].strip()
+            fields[k] = v
+    return fields
+
+
+def _edgar_to_bullet(fields: dict[str, str], contributor_col: str) -> str:
+    """Convert parsed Edgar fields into a clean Beer Hall bullet line."""
+    etype = fields.get("_type", "")
+    desc = fields.get("description", "").strip()
+    contrib = (fields.get("contributor(s)") or fields.get("contributors") or contributor_col or "").strip()
+    amount = fields.get("amount", "").strip()
+    unit = fields.get("type", "").strip()
+
+    if "sales event" in etype:
+        item = fields.get("item", "").strip()
+        price = fields.get("sales price", "").strip()
+        sold_by = fields.get("sold by", "").strip()
+        collector = fields.get("cash proceeds collected by", "").strip()
+        parts = []
+        if price:
+            parts.append(f"sold for {price}")
+        if sold_by:
+            parts.append(f"by {sold_by}")
+        if collector and collector != sold_by:
+            parts.append(f"(cash: {collector})")
+        detail = " ".join(parts) or item
+        return f"_Sale:_ {item} — {detail}" if item else f"_Sale:_ {detail}"
+
+    if "dao inventory expense" in etype:
+        member = fields.get("dao member name", contrib).strip()
+        ledger = fields.get("target ledger", "").strip()
+        inv = fields.get("inventory type", desc).strip()
+        return f"_Inventory:_ {inv} logged under {ledger} (by {member})"
+
+    # Contribution event
+    if not desc:
+        return ""
+    # Truncate description sensibly at sentence boundary
+    if len(desc) > 300:
+        cut = desc[:300]
+        last_stop = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+        desc = (cut[: last_stop + 1] if last_stop > 80 else cut[:297] + "…")
+    who = contrib or "Contributor"
+    if unit.lower() == "usd" and amount:
+        return f"_Contribution:_ {desc} — ${amount} USD by {who}"
+    if unit.lower() in ("time (minutes)", "time") and amount:
+        hrs = int(amount) // 60
+        mins = int(amount) % 60
+        time_str = (f"{hrs}h {mins}m" if hrs else f"{mins}m") if amount.isdigit() else f"{amount}min"
+        return f"_Contribution:_ {desc} — {time_str} by {who}"
+    return f"_Contribution:_ {desc} (by {who})"
+
 
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower())
@@ -227,14 +316,26 @@ def main() -> None:
         if dt is None:
             continue
 
-        snippet = contrib.replace("\n", " ").strip()
-        if len(snippet) > 220:
-            snippet = snippet[:217] + "…"
-        who = (name or "").strip() or "Contributor"
-        proj_bit = f" ({proj.strip()})" if proj and proj.strip() and _norm(proj) != "unknown" else ""
-        line = f"- {who}{proj_bit}: {snippet}"
+        # Try to parse as Edgar structured event first
+        edgar = _parse_edgar_event(contrib)
+        if edgar is not None:
+            if edgar.get("_noise"):
+                continue  # Email register/verify — skip entirely
+            bullet = _edgar_to_bullet(edgar, name)
+            if not bullet:
+                continue
+            line = f"- {bullet}"
+        else:
+            # Non-Edgar freeform text — use raw snippet
+            snippet = contrib.replace("\n", " ").strip()
+            if len(snippet) > 300:
+                snippet = snippet[:297] + "…"
+            who = (name or "").strip() or "Contributor"
+            proj_bit = f" ({proj.strip()})" if proj and proj.strip() and _norm(proj) != "unknown" else ""
+            line = f"- {who}{proj_bit}: {snippet}"
+
         if status and _norm(status) not in ("unknown",):
-            line += f" [status: {status.strip()[:80]}]"
+            line += f" [{status.strip()[:40]}]"
         candidates.append((dt, line))
 
     candidates.sort(key=lambda x: (x[0] or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
