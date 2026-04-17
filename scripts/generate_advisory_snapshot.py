@@ -14,11 +14,14 @@ Optional git (opt-in):
 Usage (from ``market_research/``)::
 
   python3 scripts/generate_advisory_snapshot.py
+  python3 scripts/generate_advisory_snapshot.py --since-days 7 --with-sheet-sales
   python3 scripts/generate_advisory_snapshot.py --since-days 7 --git-commit --git-push
 
-No secrets are embedded. Telegram/DApp helpers are **not** included here (use Beer Hall
-preview for sheet-backed evidence); this snapshot is git + context files + Beer Hall
-archives + notes mtime.
+No secrets are embedded in the repo. Telegram/DApp helpers are **not** included by default
+(use Beer Hall preview for those). Optional **`--with-sheet-sales`** (local only) appends
+rollup **`Monthly Statistics`** plus recent **`QR Code Sales`** rows from the canonical
+workbooks documented in **`tokenomics/SCHEMA.md`** (requires `market_research/google_credentials.json`).
+Default output remains git + context files + Beer Hall archives + notes mtime.
 """
 
 from __future__ import annotations
@@ -215,6 +218,235 @@ def _notes_recent(ctx_root: Path, since_ts: float) -> list[str]:
     return sorted(found)
 
 
+# Main ledger + Telegram/Submissions workbooks — see tokenomics/SCHEMA.md
+_MAIN_LEDGER_SPREADSHEET_ID = "1GE7PUq-UT6x2rBN-Q2ksogbWpgyuh2SaxJyG_uEK6PU"
+_TELEGRAM_SUBMISSIONS_SPREADSHEET_ID = "1qbZZhf-_7xzmDTriaJVWj6OZshyQsFkdsAV8-pyzASQ"
+_MONTHLY_STATISTICS_WS = "Monthly Statistics"
+_QR_CODE_SALES_WS = "QR Code Sales"
+_SHEETS_SCOPES = (
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive.readonly",
+)
+
+
+def _norm_header_cell(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+def _header_col_map(header: list[str]) -> dict[str, int]:
+    m: dict[str, int] = {}
+    for j, raw in enumerate(header):
+        k = _norm_header_cell(raw)
+        if k and k not in m:
+            m[k] = j
+    return m
+
+
+def _find_header_col(m: dict[str, int], *want: str) -> int | None:
+    for w in want:
+        ww = _norm_header_cell(w)
+        if ww in m:
+            return m[ww]
+    for w in want:
+        ww = _norm_header_cell(w)
+        for k, j in m.items():
+            if ww == k or ww in k or k in ww:
+                return j
+    return None
+
+
+def _parse_cell_to_date(raw: str) -> dt.date | None:
+    t = (raw or "").strip()
+    if not t:
+        return None
+    if re.fullmatch(r"\d{8}", t):
+        try:
+            return dt.datetime.strptime(t, "%Y%m%d").date()
+        except ValueError:
+            return None
+    for fmt, n in (("%Y-%m-%d", 10), ("%m/%d/%Y", 10)):
+        try:
+            return dt.datetime.strptime(t[:n], fmt).date()
+        except ValueError:
+            continue
+    if len(t) >= 19:
+        try:
+            return dt.datetime.strptime(t[:19], "%Y-%m-%d %H:%M:%S").date()
+        except ValueError:
+            pass
+    if "T" in t:
+        try:
+            return dt.datetime.fromisoformat(t.replace("Z", "+00:00")).date()
+        except ValueError:
+            return None
+    return None
+
+
+def _md_cell(val: object, *, max_len: int = 120) -> str:
+    s = re.sub(r"[\r\n]+", " ", str(val if val is not None else "")).strip()
+    s = s.replace("|", "\\|")
+    if len(s) > max_len:
+        s = s[: max_len - 1] + "…"
+    return s or "—"
+
+
+def _fetch_sheet_sales_markdown(
+    repo_root: Path,
+    since_d: dt.date,
+    *,
+    months_tail: int,
+    qr_row_limit: int,
+    qr_scan_depth: int,
+) -> str:
+    """Build markdown for LLM-oriented sales evidence; never raises (skip text on failure)."""
+    cred_path = repo_root / "google_credentials.json"
+    if not cred_path.is_file():
+        return (
+            "---\n\n## Sheet evidence (sales)\n\n"
+            f"_(Skipped: missing service account file `{cred_path.name}` under `market_research/`.)_\n\n"
+        )
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials as SACredentials
+    except ImportError as e:
+        return (
+            "---\n\n## Sheet evidence (sales)\n\n"
+            f"_(Skipped: import error — install deps from `market_research/requirements.txt`: `{e}`.)_\n\n"
+        )
+
+    parts: list[str] = []
+    parts.append("---\n\n## Sheet evidence (sales)\n\n")
+    parts.append(
+        "_Canonical layouts: `tokenomics/SCHEMA.md` — **Monthly Statistics** on the main ledger; "
+        "**QR Code Sales** on Telegram & Submissions. Figures are copied as-is from Sheets; "
+        "verify before financial decisions._\n\n"
+    )
+
+    try:
+        creds = SACredentials.from_service_account_file(str(cred_path), scopes=_SHEETS_SCOPES)
+        gc = gspread.authorize(creds)
+    except Exception as e:
+        parts.append(f"_(Skipped: could not authorize Google client: `{e}`.)_\n\n")
+        return "".join(parts)
+
+    # --- Monthly Statistics (rollup) ---
+    try:
+        sh_main = gc.open_by_key(_MAIN_LEDGER_SPREADSHEET_ID)
+        ws_ms = sh_main.worksheet(_MONTHLY_STATISTICS_WS)
+        rows_ms = ws_ms.get_all_values()
+    except Exception as e:
+        parts.append(f"### `{_MONTHLY_STATISTICS_WS}` _(read failed: {e})_\n\n")
+        rows_ms = []
+
+    if rows_ms and len(rows_ms) >= 2:
+        hdr = rows_ms[0]
+        cmap = _header_col_map(hdr)
+        i_ym = _find_header_col(cmap, "year-month", "year month")
+        i_vol = _find_header_col(cmap, "monthly sales volume", "monthly sales")
+        i_cum = _find_header_col(cmap, "cumulative sales volume", "cumulative sales")
+        i_upd = _find_header_col(cmap, "last updated", "updated")
+        if i_ym is None or i_vol is None:
+            parts.append(
+                f"### `{_MONTHLY_STATISTICS_WS}`\n\n"
+                f"_(Could not map expected headers; first row: `{_md_cell(', '.join(hdr[:8]), max_len=200)}`.)_\n\n"
+            )
+        else:
+            data = [r for r in rows_ms[1:] if any((c or "").strip() for c in r)]
+            tail = data[-max(1, months_tail) :] if months_tail > 0 else data
+            parts.append(f"### `{_MONTHLY_STATISTICS_WS}` (last **{len(tail)}** non-empty rows)\n\n")
+            parts.append("| Year-Month | Monthly USD | Cumulative USD | Last updated |\n")
+            parts.append("|------------|-------------|------------------|---------------|\n")
+            mx = max(i_ym, i_vol, i_cum or 0, i_upd or 0)
+            for r in tail:
+                while len(r) <= mx:
+                    r.append("")
+                ym = _md_cell(r[i_ym] if i_ym < len(r) else "", max_len=24)
+                vol = _md_cell(r[i_vol] if i_vol < len(r) else "", max_len=24)
+                cum = _md_cell(r[i_cum] if i_cum is not None and i_cum < len(r) else "", max_len=24)
+                upd = _md_cell(r[i_upd] if i_upd is not None and i_upd < len(r) else "", max_len=32)
+                parts.append(f"| {ym} | {vol} | {cum} | {upd} |\n")
+            parts.append("\n")
+
+    # --- QR Code Sales (line-level, window by Sales Date) ---
+    try:
+        sh_q = gc.open_by_key(_TELEGRAM_SUBMISSIONS_SPREADSHEET_ID)
+        ws_qr = sh_q.worksheet(_QR_CODE_SALES_WS)
+        rows_q = ws_qr.get_all_values()
+    except Exception as e:
+        parts.append(f"### `{_QR_CODE_SALES_WS}` _(read failed: {e})_\n\n")
+        return "".join(parts)
+
+    if len(rows_q) < 2:
+        parts.append(f"### `{_QR_CODE_SALES_WS}`\n\n_(No data rows.)_\n\n")
+        return "".join(parts)
+
+    hdr_q = rows_q[0]
+    cmq = _header_col_map(hdr_q)
+    i_sd = _find_header_col(cmq, "sales date", "status date")
+    i_price = _find_header_col(cmq, "sale price", "price")
+    i_cur = _find_header_col(cmq, "currency")
+    i_stat = _find_header_col(cmq, "status")
+    i_qr = _find_header_col(cmq, "qr code value", "qr code")
+    i_rem = _find_header_col(cmq, "remarks", "remark")
+    i_stripe = _find_header_col(cmq, "stripe session id", "stripe session")
+
+    if i_sd is None:
+        parts.append(
+            f"### `{_QR_CODE_SALES_WS}`\n\n"
+            f"_(Could not find Sales Date column; headers: `{_md_cell(', '.join(hdr_q[:14]), max_len=220)}`.)_\n\n"
+        )
+        return "".join(parts)
+
+    need_idx = [i for i in (i_sd, i_price, i_cur, i_stat, i_qr, i_rem, i_stripe) if i is not None]
+    max_i = max(need_idx) if need_idx else i_sd
+    data_q = rows_q[1:]
+    scan = data_q[-max(qr_scan_depth, 1) :] if qr_scan_depth > 0 else data_q
+
+    picked: list[tuple[dt.date, list[str]]] = []
+    for r in reversed(scan):
+        while len(r) <= max_i:
+            r.append("")
+        d = _parse_cell_to_date(r[i_sd] if i_sd < len(r) else "")
+        if d is None or d < since_d:
+            continue
+        picked.append((d, r))
+        if len(picked) >= qr_row_limit:
+            break
+
+    picked.sort(key=lambda t: t[0])
+    parts.append(
+        f"### `{_QR_CODE_SALES_WS}` (up to **{qr_row_limit}** rows; "
+        f"`Sales Date` ≥ `{since_d.isoformat()}`; scanned last **{len(scan)}** data rows)\n\n"
+    )
+    parts.append(
+        "| Sales date | Price | Currency / product | Status | QR (trunc.) | Stripe (suffix) | Remarks (trunc.) |\n"
+        "|-------------|-------|--------------------|--------|-------------|-------------------|--------------------|\n"
+    )
+    if not picked:
+        parts.append(
+            f"| — | — | — | — | — | — | _No rows in scan window (try larger `--sheet-sales-qr-scan` or `--since-days`)._ |\n"
+        )
+    else:
+        for d, r in picked:
+            price = _md_cell(r[i_price] if i_price is not None and i_price < len(r) else "", max_len=16)
+            cur = _md_cell(r[i_cur] if i_cur is not None and i_cur < len(r) else "", max_len=40)
+            stat = _md_cell(r[i_stat] if i_stat is not None and i_stat < len(r) else "", max_len=20)
+            qr_raw = r[i_qr] if i_qr is not None and i_qr < len(r) else ""
+            qr = _md_cell(qr_raw, max_len=28)
+            stripe_raw = (r[i_stripe] if i_stripe is not None and i_stripe < len(r) else "").strip()
+            stripe_sfx = _md_cell(stripe_raw[-12:] if len(stripe_raw) > 12 else stripe_raw, max_len=14)
+            rem = _md_cell(r[i_rem] if i_rem is not None and i_rem < len(r) else "", max_len=72)
+            parts.append(f"| {d.isoformat()} | {price} | {cur} | {stat} | {qr} | {stripe_sfx} | {rem} |\n")
+    parts.append(
+        "\n_Source IDs: main ledger `"
+        + _MAIN_LEDGER_SPREADSHEET_ID
+        + "`, submissions `"
+        + _TELEGRAM_SUBMISSIONS_SPREADSHEET_ID
+        + "`._\n\n"
+    )
+    return "".join(parts)
+
+
 def _pipeline_activity(apps: Path, since_iso: str, until_iso: str) -> list[tuple[str, str, bool]]:
     """(pipeline, mapped_repo, had_activity)."""
     rows: list[tuple[str, str, bool]] = []
@@ -237,6 +469,7 @@ def _build_markdown(
     apps: Path,
     ctx_root: Path,
     eco_repo: Path,
+    sheet_sales_md: str = "",
 ) -> str:
     now = dt.datetime.now(dt.timezone.utc)
     parts: list[str] = []
@@ -303,6 +536,9 @@ def _build_markdown(
                 parts.append(f"  {line}\n")
             parts.append("\n")
 
+    if sheet_sales_md:
+        parts.append(sheet_sales_md)
+
     parts.append("---\n\n## Recent agent notes (`agentic_ai_context/notes/`)\n\n")
     since_ts = dt.datetime.combine(since_d, dt.time.min, tzinfo=dt.timezone.utc).timestamp()
     note_paths = _notes_recent(ctx_root, since_ts)
@@ -323,6 +559,7 @@ def _build_markdown(
         "`advisory/`\n"
     )
     parts.append("- Human / WhatsApp evidence pack: `market_research/scripts/generate_beer_hall_preview.py`\n")
+    parts.append("- Sheet layouts / tabs: `tokenomics/SCHEMA.md`\n")
 
     return "".join(parts)
 
@@ -417,6 +654,32 @@ def main() -> int:
         action="store_true",
         help="After a successful commit, git push origin HEAD (requires --git-commit).",
     )
+    ap.add_argument(
+        "--with-sheet-sales",
+        action="store_true",
+        help=(
+            "Append **Monthly Statistics** + recent **QR Code Sales** tables from Google Sheets "
+            "(needs market_research/google_credentials.json; see tokenomics/SCHEMA.md)."
+        ),
+    )
+    ap.add_argument(
+        "--sheet-sales-months",
+        type=int,
+        default=14,
+        help="With --with-sheet-sales: trailing non-empty rows to show from Monthly Statistics (default 14).",
+    )
+    ap.add_argument(
+        "--sheet-sales-qr-rows",
+        type=int,
+        default=25,
+        help="With --with-sheet-sales: max QR Code Sales rows in the look-back window (default 25).",
+    )
+    ap.add_argument(
+        "--sheet-sales-qr-scan",
+        type=int,
+        default=600,
+        help="With --with-sheet-sales: scan the last N data rows from the bottom of QR Code Sales (default 600).",
+    )
     args = ap.parse_args()
 
     if args.git_push and not args.git_commit:
@@ -431,6 +694,16 @@ def main() -> int:
     since_iso = f"{since_d.isoformat()} 00:00:00"
     until_iso = f"{(today + dt.timedelta(days=1)).isoformat()} 00:00:00"
 
+    sheet_sales_md = ""
+    if args.with_sheet_sales:
+        sheet_sales_md = _fetch_sheet_sales_markdown(
+            _REPO,
+            since_d,
+            months_tail=max(1, args.sheet_sales_months),
+            qr_row_limit=max(1, args.sheet_sales_qr_rows),
+            qr_scan_depth=max(50, args.sheet_sales_qr_scan),
+        )
+
     text = _build_markdown(
         since_days=args.since_days,
         since_d=since_d,
@@ -439,6 +712,7 @@ def main() -> int:
         apps=apps,
         ctx_root=ctx_root,
         eco_repo=eco_repo,
+        sheet_sales_md=sheet_sales_md,
     )
 
     snap_path_ctx = ctx_root / "ADVISORY_SNAPSHOT.md"
@@ -462,7 +736,8 @@ def main() -> int:
         "**Read `BASE.md` first** — stable DAO orientation, ledger map, and canonical URLs. "
         "Then open `index.json` and the latest dated file under `snapshots/`.\n\n"
         "Daily evidence digests are generated by "
-        "`market_research/scripts/generate_advisory_snapshot.py` (git + `CONTEXT_UPDATES` + Beer Hall excerpts).\n\n"
+        "`market_research/scripts/generate_advisory_snapshot.py` "
+        "(git + `CONTEXT_UPDATES` + Beer Hall excerpts; optional `--with-sheet-sales`).\n\n"
         "- `BASE.md` — slow-changing strategic context (not regenerated by the snapshot script).\n"
         "- `snapshots/YYYY-MM-DD.md` — one file per UTC day (last write wins if re-run same day).\n"
         "- `index.json` — schema v2+: `base_markdown`, `read_order`, `canonical_context_urls`, `snapshots`.\n"
