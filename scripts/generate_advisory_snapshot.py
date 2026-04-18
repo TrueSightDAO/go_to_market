@@ -236,6 +236,207 @@ def _beer_hall_excerpts(ecosystem_repo: Path, n: int = 3) -> list[dict[str, str]
 
 _OPERATOR_BLOCK_PLACEHOLDER_RE = re.compile(r"<!--\s*TODO", re.IGNORECASE)
 
+_GROWTH_GOALS_FILENAME = "GROWTH_GOALS.json"
+
+_US_STATES = {
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+    "maine", "maryland", "massachusetts", "michigan", "minnesota",
+    "mississippi", "missouri", "montana", "nebraska", "nevada",
+    "new hampshire", "new jersey", "new mexico", "new york",
+    "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+    "pennsylvania", "rhode island", "south carolina", "south dakota",
+    "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+    "west virginia", "wisconsin", "wyoming", "district of columbia",
+    "usa", "united states", "u.s.", "u.s.a.",
+}
+
+_US_STATE_ABBR = {
+    "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "id",
+    "il", "in", "ia", "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms",
+    "mo", "mt", "ne", "nv", "nh", "nj", "nm", "ny", "nc", "nd", "oh", "ok",
+    "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv",
+    "wi", "wy", "dc",
+}
+
+
+def _us_region_match(location: object) -> bool:
+    """Last comma-separated token is a US state name or 2-letter code, or the
+    whole string explicitly names the USA. Designed for `Agroverse Partners.location`
+    values like ``Los Angeles, California`` (US) vs ``Bahia, Brazil`` (non-US).
+    """
+    s = str(location or "").strip()
+    if not s:
+        return False
+    s_low = s.lower()
+    for marker in ("usa", "united states", "u.s.a.", "u.s."):
+        if s_low == marker or s_low.endswith(", " + marker):
+            return True
+    parts = [p.strip().lower() for p in s.split(",") if p.strip()]
+    if not parts:
+        return False
+    last = parts[-1]
+    if last in _US_STATES:
+        return True
+    if len(last) == 2 and last in _US_STATE_ABBR:
+        return True
+    return False
+
+
+def _coerce_number(raw: object) -> float | None:
+    """Parse a sheet cell as a number, tolerating ``$``, ``,`` and whitespace."""
+    if raw is None:
+        return None
+    s = str(raw).strip().replace("$", "").replace(",", "").strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _load_growth_goals(ctx_root: Path) -> list[dict] | None:
+    """Load ``GROWTH_GOALS.json`` from agentic_ai_context. Returns None on any failure."""
+    path = ctx_root / _GROWTH_GOALS_FILENAME
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    goals = data.get("goals") if isinstance(data, dict) else None
+    if not isinstance(goals, list):
+        return None
+    return goals
+
+
+def _fetch_goal_actual(gc, goal: dict) -> tuple[float | None, str]:
+    """Query the configured sheet source. Returns (actual, note). actual is None on failure."""
+    src = goal.get("source") or {}
+    sheet_id = (src.get("sheet_id") or "").strip()
+    tab = (src.get("tab") or "").strip()
+    column_name = (src.get("column") or "").strip()
+    aggregation = (src.get("aggregation") or "").strip()
+    if not (sheet_id and tab and column_name and aggregation):
+        return None, "missing source fields"
+    try:
+        ws = gc.open_by_key(sheet_id).worksheet(tab)
+        rows = ws.get_all_values()
+    except Exception as e:
+        return None, f"read failed: {e}"
+    if not rows or len(rows) < 2:
+        return None, "sheet empty"
+    hdr = rows[0]
+    cmap = _header_col_map(hdr)
+    ci = cmap.get(_norm_header_cell(column_name))
+    if ci is None:
+        return None, f"column {column_name!r} not in header"
+    data = rows[1:]
+    filt = goal.get("filter") or None
+    if filt:
+        fcol = (filt.get("column") or "").strip()
+        predicate = (filt.get("predicate") or "").strip()
+        fci = cmap.get(_norm_header_cell(fcol)) if fcol else None
+        if fci is None:
+            return None, f"filter column {fcol!r} not in header"
+        if predicate == "us_region":
+            data = [r for r in data if fci < len(r) and _us_region_match(r[fci])]
+        else:
+            return None, f"unsupported predicate: {predicate!r}"
+    values = [r[ci] if ci < len(r) else "" for r in data]
+    if aggregation == "count_nonempty":
+        return float(sum(1 for v in values if (v or "").strip())), "count of non-empty rows"
+    if aggregation == "last_nonempty":
+        for v in reversed(values):
+            n = _coerce_number(v)
+            if n is not None:
+                return n, "last numeric non-empty row"
+        return None, "no numeric non-empty rows"
+    if aggregation == "sum":
+        nums = [n for n in (_coerce_number(v) for v in values) if n is not None]
+        return float(sum(nums)), f"sum of {len(nums)} numeric rows"
+    return None, f"unsupported aggregation: {aggregation!r}"
+
+
+def _fmt_goal_number(v: float | None, unit: str) -> str:
+    if v is None:
+        return "—"
+    u = unit.lower().strip()
+    if u in ("usd", "$"):
+        return f"${v:,.0f}"
+    if float(v).is_integer():
+        return f"{int(v):,}"
+    return f"{v:,.2f}"
+
+
+def _render_goal_progress_block(ctx_root: Path, cred_path: Path) -> str:
+    """Render ``## Growth goals`` with live sheet numbers and pace signal."""
+    parts: list[str] = ["---\n\n## Growth goals (year / quarter)\n\n"]
+    goals = _load_growth_goals(ctx_root)
+    if not goals:
+        parts.append(
+            f"_Not yet configured. Add `{_GROWTH_GOALS_FILENAME}` at `{ctx_root}` "
+            "with a `{\"goals\": [...]}` object to surface progress here._\n\n"
+        )
+        return "".join(parts)
+
+    gc = None
+    auth_note = ""
+    if cred_path.is_file():
+        try:
+            import gspread
+            from google.oauth2.service_account import Credentials as SACredentials
+            creds = SACredentials.from_service_account_file(str(cred_path), scopes=_SHEETS_SCOPES)
+            gc = gspread.authorize(creds)
+        except Exception as e:
+            auth_note = f" (live fetch skipped: `{e}`)"
+    else:
+        auth_note = f" (live fetch skipped: missing `{cred_path.name}`)"
+
+    today = dt.datetime.now(dt.timezone.utc).date()
+    parts.append("| Goal | Target | Actual | % | Deadline | Days left | Pace |\n")
+    parts.append("|------|--------|--------|---|----------|-----------|------|\n")
+    for g in goals:
+        name = str(g.get("name") or "—")
+        target = _coerce_number(g.get("target"))
+        unit = str(g.get("unit") or "").strip()
+        deadline = _parse_cell_to_date(str(g.get("deadline") or ""))
+        actual, _ = (None, "")
+        if gc is not None:
+            actual, _ = _fetch_goal_actual(gc, g)
+        pct_str = "—"
+        if target and actual is not None:
+            pct_str = f"{(actual / target) * 100:.0f}%"
+        days_left_str = "—"
+        pace_str = "—"
+        if deadline is not None:
+            days_left = (deadline - today).days
+            days_left_str = str(days_left)
+            if actual is not None and target:
+                period_start = deadline.replace(month=1, day=1)
+                total_days = max(1, (deadline - period_start).days)
+                elapsed = max(0, min(total_days, (today - period_start).days))
+                elapsed_pct = elapsed / total_days
+                goal_pct = actual / target
+                if goal_pct >= elapsed_pct + 0.05:
+                    pace_str = "**ahead**"
+                elif goal_pct <= elapsed_pct - 0.05:
+                    pace_str = "**behind**"
+                else:
+                    pace_str = "on track"
+        parts.append(
+            f"| {name} | {_fmt_goal_number(target, unit)} "
+            f"| {_fmt_goal_number(actual, unit)} | {pct_str} "
+            f"| `{deadline.isoformat() if deadline else '—'}` | {days_left_str} | {pace_str} |\n"
+        )
+    parts.append("\n")
+    if auth_note:
+        parts.append(f"_Notes:{auth_note}_\n\n")
+    return "".join(parts)
+
+
 
 def _read_operator_block(path: Path, heading: str, purpose: str) -> str:
     """Render an operator-curated markdown file as a snapshot section.
@@ -824,11 +1025,8 @@ def _build_markdown(
 
     # Operator-curated strategic frame. Placed before evidence so the LLM reads
     # goals / constraints / metrics *first*, then interprets the activity below.
-    parts.append(_read_operator_block(
-        ctx_root / "GROWTH_GOALS.md",
-        "## Growth goals (quarter)",
-        "1–3 measurable targets for the current quarter.",
-    ))
+    # Growth goals are auto-computed against live sheet data (GROWTH_GOALS.json).
+    parts.append(_render_goal_progress_block(ctx_root, _REPO / "google_credentials.json"))
     parts.append(_read_operator_block(
         ctx_root / "CONSTRAINTS.md",
         "## Constraints / risks this week",
