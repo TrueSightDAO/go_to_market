@@ -56,6 +56,8 @@ REPOS: list[tuple[str, str]] = [
     ("proposals", "proposals"),
     ("agroverse-inventory", "agroverse-inventory"),
     ("agroverse_shop", "agroverse_shop_beta"),
+    ("iching_oracle", "oracle"),
+    ("Cypher-Defense", "Cypher-Defense"),
 ]
 
 

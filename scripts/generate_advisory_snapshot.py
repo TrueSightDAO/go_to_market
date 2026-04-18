@@ -3,38 +3,69 @@
 Compile **ADVISORY_SNAPSHOT.md** (LLM-oriented DAO state) from real workspace sources.
 
 Writes:
-  - ``../agentic_ai_context/ADVISORY_SNAPSHOT.md`` (working copy for Cursor)
-  - ``../ecosystem_change_logs/advisory/snapshots/<UTC-date>.md`` (dated archive)
-  - ``../ecosystem_change_logs/advisory/index.json`` (manifest for raw-GitHub navigation)
+  - ``../agentic_ai_context/ADVISORY_SNAPSHOT.md`` (Cursor mirror; raw GitHub after push:
+    ``https://raw.githubusercontent.com/TrueSightDAO/agentic_ai_context/main/ADVISORY_SNAPSHOT.md``)
+  - ``../ecosystem_change_logs/advisory/snapshots/<UTC-date>.md`` (**canonical** dated digest
+    for ``advisory/index.json`` / ``ADVISORY_MOBILE_START.md``; raw GitHub after push under
+    ``TrueSightDAO/ecosystem_change_logs``)
+  - ``../ecosystem_change_logs/advisory/index.json`` (manifest — includes **absolute raw-GitHub URLs**
+    so fetchers do not have to guess ``main`` paths)
 
-Optional git (opt-in):
+Optional git (opt-in — **required** for GitHub to match disk unless using API publish):
   --git-commit   commit only the generated paths in each repo (fails if nothing staged)
   --git-push     push ``origin`` default branch after commit (both repos)
+  --git-publish  shorthand for ``--git-commit --git-push`` (publish to GitHub ``origin``)
+  --github-api-publish  update ``TrueSightDAO/agentic_ai_context`` + ``TrueSightDAO/ecosystem_change_logs``
+    via **GitHub Contents API** (``PUT /repos/.../contents/...``) — no ``git push`` in those clones.
+    Token: env ``TRUESIGHT_DAO_ORACLE_ADVISORY_PAT``, ``GITHUB_TOKEN``, or ``GH_TOKEN`` (needs **contents:write**).
+    Mutually exclusive with ``--git-commit`` / ``--git-push`` / ``--git-publish``.
 
 Usage (from ``market_research/``)::
 
   python3 scripts/generate_advisory_snapshot.py
   python3 scripts/generate_advisory_snapshot.py --since-days 7 --with-sheet-sales
-  python3 scripts/generate_advisory_snapshot.py --since-days 7 --git-commit --git-push
+  python3 scripts/generate_advisory_snapshot.py --since-days 7 --with-rem
+  python3 scripts/generate_advisory_snapshot.py --since-days 7 --git-publish
+  python3 scripts/generate_advisory_snapshot.py --since-days 7 --github-api-publish
 
 No secrets are embedded in the repo. Telegram/DApp helpers are **not** included by default
 (use Beer Hall preview for those). Optional **`--with-sheet-sales`** (local only) appends
 rollup **`Monthly Statistics`** plus recent **`QR Code Sales`** rows from the canonical
 workbooks documented in **`tokenomics/SCHEMA.md`** (requires `market_research/google_credentials.json`).
+
+Optional **`--with-rem`** (macOS only) runs the **`rem`** CLI against Reminders.app and appends
+**open** reminders as JSON-backed tables plus short **suggestion seeds** for the oracle
+advisor (use ``rem list --incomplete -o json``; global flag ``-o`` / ``--output``, not ``--json``).
+
+Optional **`--reminders-json PATH`** (CI / Linux) loads a JSON array (``rem list -o json`` shape). **Done**
+rows are **dropped** so advisors only see actionable items — still prefer exporting with
+``rem list --incomplete -o json`` or ``scripts/export_advisory_reminders_json.sh``.
+Mutually exclusive with **`--with-rem`**.
+
 Default output remains git + context files + Beer Hall archives + notes mtime.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
+
+# Raw ``main`` URLs LLMs and ``ADVISORY_MOBILE_START.md`` resolve after ``git push``.
+_RAW_ECO_BASE = "https://raw.githubusercontent.com/TrueSightDAO/ecosystem_change_logs/main"
+_RAW_CTX_BASE = "https://raw.githubusercontent.com/TrueSightDAO/agentic_ai_context/main"
 
 # Same curated table as ``generate_beer_hall_preview.py`` (local dir, GitHub slug).
 REPOS: list[tuple[str, str]] = [
@@ -48,7 +79,8 @@ REPOS: list[tuple[str, str]] = [
     ("proposals", "proposals"),
     ("agroverse-inventory", "agroverse-inventory"),
     ("agroverse_shop", "agroverse_shop_beta"),
-    ("iching_oracle", "iching_oracle"),
+    ("iching_oracle", "oracle"),
+    ("Cypher-Defense", "Cypher-Defense"),
 ]
 
 # Heuristic: CONTEXT_UPDATES lines mentioning these names (case-insensitive).
@@ -447,6 +479,275 @@ def _fetch_sheet_sales_markdown(
     return "".join(parts)
 
 
+def _rem_parse_due_date(raw: object) -> dt.date | None:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    try:
+        return dt.datetime.fromisoformat(s.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def _rem_filter_list(rows: list[dict[str, object]], list_name: str | None) -> list[dict[str, object]]:
+    if not list_name or not list_name.strip():
+        return rows
+    want = list_name.strip().lower()
+    return [r for r in rows if str(r.get("list_name") or "").strip().lower() == want]
+
+
+def _rem_item_is_done(item: dict[str, object]) -> bool:
+    """Treat a reminder row as **done** so it is excluded from LLM action-item lists."""
+    c = item.get("completed")
+    if c is True or c == 1:
+        return True
+    if isinstance(c, str) and c.strip().lower() in ("true", "1", "yes"):
+        return True
+    st = str(item.get("status") or "").strip().lower()
+    if st in ("done", "completed", "complete", "cancelled", "canceled"):
+        return True
+    return False
+
+
+def _rem_rows_open_for_advisor(data: object) -> list[dict[str, object]]:
+    """Keep only **open** reminders (not done) for advisor prioritization — safe even if JSON mixed done/open."""
+    rows_raw: list[dict[str, object]] = []
+    if not isinstance(data, list):
+        return rows_raw
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        if _rem_item_is_done(item):
+            continue
+        rows_raw.append(item)
+    return rows_raw
+
+
+def _rem_render_section(
+    rows_raw: list[dict[str, object]],
+    *,
+    limit: int,
+    list_name: str | None,
+    heading: str,
+    intro: str,
+) -> str:
+    today = dt.datetime.now(dt.timezone.utc).date()
+
+    def _sort_key(d: dict[str, object]) -> tuple:
+        due = _rem_parse_due_date(d.get("due_date"))
+        overdue = 0 if (due is not None and due < today) else 1
+        flagged = 0 if d.get("flagged") is True else 1
+        due_sort = due if due is not None else dt.date(9999, 12, 31)
+        return (overdue, flagged, due_sort, str(d.get("name") or "").lower())
+
+    rows = list(rows_raw)
+    rows.sort(key=_sort_key)
+    cap = max(1, limit)
+    picked = rows[:cap]
+
+    parts: list[str] = []
+    parts.append(f"---\n\n{heading}\n\n")
+    parts.append(intro)
+    if list_name:
+        parts.append(f"\n_Filtered to list:_ `{_md_cell(list_name, max_len=64)}`\n\n")
+    else:
+        parts.append("\n")
+
+    if not picked:
+        parts.append("_No open (not done) reminders in this source._\n\n")
+        return "".join(parts)
+
+    parts.append(f"_Showing **{len(picked)}** of **{len(rows)}** open reminders (cap `--rem-limit`)._\n\n")
+    parts.append("| Title | List | Due (date) | Flagged | Notes (trunc.) |\n")
+    parts.append("|-------|------|------------|---------|------------------|\n")
+    for d in picked:
+        title = _md_cell(d.get("name"), max_len=72)
+        lst = _md_cell(d.get("list_name"), max_len=20)
+        due_d = _rem_parse_due_date(d.get("due_date"))
+        due_s = due_d.isoformat() if due_d else "—"
+        flg = "**yes**" if d.get("flagged") is True else "—"
+        body = d.get("body")
+        notes = _md_cell(body if body is not None else "", max_len=96)
+        parts.append(f"| {title} | {lst} | `{due_s}` | {flg} | {notes} |\n")
+
+    parts.append("\n### Suggestion seeds (titles only)\n\n")
+    for d in picked[: min(24, len(picked))]:
+        t = re.sub(r"[\r\n]+", " ", str(d.get("name") or "")).strip()
+        if t:
+            parts.append(f"- {t}\n")
+    parts.append("\n")
+
+    if len(rows) > cap:
+        parts.append(f"_… **{len(rows) - cap}** more open reminders not shown (raise `--rem-limit`)._\n\n")
+
+    return "".join(parts)
+
+
+def _rem_collect_open_rows(
+    *,
+    list_name: str | None,
+    reminders_json: Path | None,
+) -> list[dict[str, object]] | None:
+    """Return open (not-done) reminders as a filtered list, or None on any failure.
+
+    Used to both feed the markdown section and write reminders/current.json to
+    ecosystem_change_logs so the iching_oracle GAS backend can fetch them directly.
+    """
+    if reminders_json is not None:
+        try:
+            raw = reminders_json.read_text(encoding="utf-8", errors="replace")
+            data = json.loads(raw.strip() or "[]")
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(data, list):
+            return None
+        return _rem_filter_list(_rem_rows_open_for_advisor(data), list_name)
+
+    rem_bin = shutil.which("rem")
+    if not rem_bin:
+        return None
+    cmd: list[str] = [rem_bin, "list", "--incomplete", "-o", "json"]
+    if list_name:
+        cmd.extend(["-l", list_name])
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        out = (p.stdout or "") + (p.stderr or "")
+        if p.returncode != 0:
+            return None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    try:
+        data = json.loads(out.strip() or "[]")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, list):
+        return None
+    return _rem_filter_list(_rem_rows_open_for_advisor(data), list_name)
+
+
+def _write_reminders_json(eco_repo: Path, rows: list[dict[str, object]], date_str: str) -> None:
+    """Write open reminders to ecosystem_change_logs/reminders/current.json + dated archive.
+
+    The stable URL ``reminders/current.json`` is fetched by the iching_oracle GAS backend
+    so Grok has the operator's current open intentions as context for every hexagram reading.
+    Dated archives allow historical review. Only open (not-done) rows are written.
+    """
+    rem_dir = eco_repo / "reminders"
+    rem_dir.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {
+        "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "date": date_str,
+        "source": "rem list --incomplete -o json (macOS Reminders via rem CLI)",
+        "count": len(rows),
+        "reminders": rows,
+    }
+    content = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+    (rem_dir / "current.json").write_text(content, encoding="utf-8")
+    (rem_dir / f"{date_str}.json").write_text(content, encoding="utf-8")
+    print(
+        f"Written: {rem_dir / 'current.json'}\nWritten: {rem_dir / f'{date_str}.json'}",
+        file=sys.stderr,
+    )
+
+
+def _rem_outstanding_markdown(
+    *,
+    limit: int,
+    list_name: str | None,
+    reminders_json: Path | None,
+) -> str:
+    """Open reminders only (never **done**): macOS ``rem`` CLI, or JSON (``rem list -o json`` shape).
+
+    Rows are filtered with ``_rem_rows_open_for_advisor`` so mixed exports still omit completed items.
+    """
+    if reminders_json is not None:
+        try:
+            raw = reminders_json.read_text(encoding="utf-8", errors="replace")
+            data = json.loads(raw.strip() or "[]")
+        except (OSError, json.JSONDecodeError) as e:
+            return (
+                "---\n\n## Open reminders (cached JSON)\n\n"
+                f"_(Skipped: could not read `{reminders_json}`: `{e}`.)_\n\n"
+            )
+        if not isinstance(data, list):
+            return (
+                "---\n\n## Open reminders (cached JSON)\n\n"
+                f"_(Skipped: expected a JSON array in `{reminders_json}`, got `{type(data).__name__}`.)_\n\n"
+            )
+        rows_raw = _rem_filter_list(_rem_rows_open_for_advisor(data), list_name)
+        src = f"`{reminders_json}`"
+        return _rem_render_section(
+            rows_raw,
+            limit=limit,
+            list_name=list_name,
+            heading="## Open reminders (cached JSON — action items)",
+            intro=(
+                f"_Open (not done) items loaded from {src}; export with `rem list --incomplete -o json` or "
+                "`scripts/export_advisory_reminders_json.sh` so **done** rows are never written. "
+                "Refresh from a Mac when you want CI to mirror actionable tasks. "
+                "When the user asks for **oracle response options**, propose **1–3** concrete next steps that honestly "
+                "connect the hexagram reading to these open items where it fits; do **not** invent due dates or "
+                "claim items are done._"
+            ),
+        )
+
+    rem_bin = shutil.which("rem")
+    if not rem_bin:
+        return (
+            "---\n\n## Open reminders (macOS `rem`)\n\n"
+            "_(Skipped: `rem` not on `PATH` — install from https://rem.sidv.dev/ .)_\n\n"
+        )
+
+    cmd: list[str] = [rem_bin, "list", "--incomplete", "-o", "json"]
+    if list_name:
+        cmd.extend(["-l", list_name])
+
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        out = (p.stdout or "") + (p.stderr or "")
+        if p.returncode != 0:
+            return (
+                "---\n\n## Open reminders (macOS `rem`)\n\n"
+                f"_(Skipped: `{' '.join(cmd)}` exited {p.returncode}: `{_md_cell(out, max_len=240)}`.)_\n\n"
+            )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return (
+            "---\n\n## Open reminders (macOS `rem`)\n\n"
+            f"_(Skipped: could not run `rem`: `{e}`.)_\n\n"
+        )
+
+    try:
+        data = json.loads(out.strip() or "[]")
+    except json.JSONDecodeError as e:
+        return (
+            "---\n\n## Open reminders (macOS `rem`)\n\n"
+            f"_(Skipped: JSON parse error from `rem list`: `{e}`.)_\n\n"
+        )
+
+    if not isinstance(data, list):
+        return (
+            "---\n\n## Open reminders (macOS `rem`)\n\n"
+            f"_(Skipped: expected JSON array from `rem list`, got `{type(data).__name__}`.)_\n\n"
+        )
+
+    rows_raw = _rem_filter_list(_rem_rows_open_for_advisor(data), list_name)
+
+    return _rem_render_section(
+        rows_raw,
+        limit=limit,
+        list_name=list_name,
+        heading="## Open reminders (macOS `rem` — action items)",
+        intro=(
+            "_Open (not done) items from Reminders.app (`rem list --incomplete -o json`). "
+            "When the user asks for **oracle response options**, propose **1–3** concrete next steps "
+            "that honestly connect the hexagram reading to these **actionable** items where it fits; "
+            "do **not** invent due dates or claim items are done._"
+        ),
+    )
+
+
 def _pipeline_activity(apps: Path, since_iso: str, until_iso: str) -> list[tuple[str, str, bool]]:
     """(pipeline, mapped_repo, had_activity)."""
     rows: list[tuple[str, str, bool]] = []
@@ -470,6 +771,7 @@ def _build_markdown(
     ctx_root: Path,
     eco_repo: Path,
     sheet_sales_md: str = "",
+    rem_md: str = "",
 ) -> str:
     now = dt.datetime.now(dt.timezone.utc)
     parts: list[str] = []
@@ -539,6 +841,9 @@ def _build_markdown(
     if sheet_sales_md:
         parts.append(sheet_sales_md)
 
+    if rem_md:
+        parts.append(rem_md)
+
     parts.append("---\n\n## Recent agent notes (`agentic_ai_context/notes/`)\n\n")
     since_ts = dt.datetime.combine(since_d, dt.time.min, tzinfo=dt.timezone.utc).timestamp()
     note_paths = _notes_recent(ctx_root, since_ts)
@@ -565,15 +870,16 @@ def _build_markdown(
 
 
 def _canonical_context_urls() -> list[str]:
-    """Stable raw-GitHub URLs for LLM retrieval (agentic_ai_context main)."""
-    base = "https://raw.githubusercontent.com/TrueSightDAO/agentic_ai_context/main"
+    """Stable raw-GitHub URLs for LLM retrieval (agentic_ai_context ``main``)."""
     return [
-        f"{base}/WORKSPACE_CONTEXT.md",
-        f"{base}/PROJECT_INDEX.md",
-        f"{base}/OPENCLAW_WHATSAPP.md",
-        f"{base}/GOVERNANCE_SOURCES.md",
-        f"{base}/LEDGER_CONVERSION_AND_REPACKAGING.md",
-        f"{base}/CONTEXT_UPDATES.md",
+        f"{_RAW_CTX_BASE}/WORKSPACE_CONTEXT.md",
+        f"{_RAW_CTX_BASE}/PROJECT_INDEX.md",
+        f"{_RAW_CTX_BASE}/OPENCLAW_WHATSAPP.md",
+        f"{_RAW_CTX_BASE}/GOVERNANCE_SOURCES.md",
+        f"{_RAW_CTX_BASE}/LEDGER_CONVERSION_AND_REPACKAGING.md",
+        f"{_RAW_CTX_BASE}/CONTEXT_UPDATES.md",
+        f"{_RAW_CTX_BASE}/ADVISORY_SNAPSHOT.md",
+        f"{_RAW_ECO_BASE}/reminders/current.json",
     ]
 
 
@@ -596,8 +902,11 @@ def _write_index_json(advisory_dir: Path, date_str: str, summary: str) -> None:
             }
         )
     read_order = ["advisory/BASE.md", "advisory/index.json"]
+    latest_rel: str | None = None
     if entries:
-        read_order.append(str(entries[0]["markdown"]))
+        latest_rel = str(entries[0]["markdown"])
+        read_order.append(latest_rel)
+    latest_raw = f"{_RAW_ECO_BASE}/{latest_rel}" if latest_rel else ""
     doc: dict[str, object] = {
         "schema_version": 2,
         "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -605,6 +914,13 @@ def _write_index_json(advisory_dir: Path, date_str: str, summary: str) -> None:
         "base_markdown": "advisory/BASE.md",
         "read_order": read_order,
         "canonical_context_urls": _canonical_context_urls(),
+        "raw_github": {
+            "ecosystem_change_logs_tree": "https://github.com/TrueSightDAO/ecosystem_change_logs/tree/main/advisory",
+            "ecosystem_change_logs_raw_base": _RAW_ECO_BASE,
+            "agentic_ai_context_raw_base": _RAW_CTX_BASE,
+            "latest_advisory_snapshot_raw_url": latest_raw,
+            "advisory_snapshot_cursor_mirror_raw_url": f"{_RAW_CTX_BASE}/ADVISORY_SNAPSHOT.md",
+        },
         "snapshots": entries,
     }
     (advisory_dir / "index.json").write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -636,6 +952,167 @@ def _git_push_repo(repo: Path) -> None:
     print(f"Pushed {repo}", file=sys.stderr)
 
 
+_GH_API_VERSION = "2022-11-28"
+
+
+def _github_token_from_env() -> str:
+    for key in ("TRUESIGHT_DAO_ORACLE_ADVISORY_PAT", "GITHUB_TOKEN", "GH_TOKEN"):
+        v = (os.environ.get(key) or "").strip()
+        if v:
+            return v
+    raise SystemExit(
+        "GitHub Contents API publish requires a token in env "
+        "`TRUESIGHT_DAO_ORACLE_ADVISORY_PAT`, `GITHUB_TOKEN`, or `GH_TOKEN`."
+    )
+
+
+def _github_request_json(
+    method: str,
+    url: str,
+    *,
+    token: str,
+    data: dict[str, object] | None = None,
+) -> object:
+    body_bytes = None if data is None else json.dumps(data).encode("utf-8")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": _GH_API_VERSION,
+        "User-Agent": "generate_advisory_snapshot.py",
+    }
+    if body_bytes is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw.strip() else {}
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace")
+        raise SystemExit(f"GitHub API HTTP {e.code} for {url}: {err_body[:2000]}") from e
+
+
+def _github_repo_default_branch(owner: str, repo: str, token: str) -> str:
+    info = _github_request_json("GET", f"https://api.github.com/repos/{owner}/{repo}", token=token)
+    if isinstance(info, dict):
+        br = str(info.get("default_branch") or "").strip()
+        if br:
+            return br
+    return "main"
+
+
+def _github_contents_sha(owner: str, repo: str, path: str, branch: str, token: str) -> str | None:
+    enc = urllib.parse.quote(path, safe="/")
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{enc}?ref={urllib.parse.quote(branch)}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": _GH_API_VERSION,
+        "User-Agent": "generate_advisory_snapshot.py",
+    }
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            cur = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        err_body = e.read().decode("utf-8", errors="replace")
+        raise SystemExit(f"GitHub API HTTP {e.code} for {url}: {err_body[:2000]}") from e
+    if isinstance(cur, dict) and cur.get("type") == "file" and isinstance(cur.get("sha"), str):
+        return str(cur["sha"])
+    return None
+
+
+def _github_put_text_file(
+    owner: str,
+    repo: str,
+    path: str,
+    *,
+    branch: str,
+    token: str,
+    content: str,
+    message: str,
+) -> None:
+    sha = _github_contents_sha(owner, repo, path, branch, token)
+    enc = urllib.parse.quote(path, safe="/")
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{enc}"
+    payload: dict[str, object] = {
+        "message": message,
+        "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+        "branch": branch,
+    }
+    if sha:
+        payload["sha"] = sha
+    _github_request_json("PUT", url, token=token, data=payload)
+    print(f"GitHub API updated {owner}/{repo}:{path} @ {branch}", file=sys.stderr)
+
+
+def _github_api_publish_advisory(
+    *,
+    owner: str,
+    ctx_repo: str,
+    eco_repo: str,
+    branch_ctx: str,
+    branch_eco: str,
+    token: str,
+    date_str: str,
+    snap_path_ctx: Path,
+    snap_file: Path,
+    index_path: Path,
+    readme_path: Path,
+    beer_preview: Path | None,
+) -> None:
+    """Push generated advisory artifacts via GitHub Contents API (one commit per file on GitHub)."""
+    _github_put_text_file(
+        owner,
+        ctx_repo,
+        "ADVISORY_SNAPSHOT.md",
+        branch=branch_ctx,
+        token=token,
+        content=snap_path_ctx.read_text(encoding="utf-8", errors="strict"),
+        message=f"chore(advisory): refresh ADVISORY_SNAPSHOT ({date_str} UTC)",
+    )
+    if beer_preview is not None and beer_preview.is_file():
+        _github_put_text_file(
+            owner,
+            ctx_repo,
+            "previews/beer_hall_preview_latest.md",
+            branch=branch_ctx,
+            token=token,
+            content=beer_preview.read_text(encoding="utf-8", errors="strict"),
+            message=f"chore(previews): refresh Beer Hall preview ({date_str} UTC)",
+        )
+    _github_put_text_file(
+        owner,
+        eco_repo,
+        f"advisory/snapshots/{date_str}.md",
+        branch=branch_eco,
+        token=token,
+        content=snap_file.read_text(encoding="utf-8", errors="strict"),
+        message=f"chore(advisory): snapshot {date_str} UTC",
+    )
+    _github_put_text_file(
+        owner,
+        eco_repo,
+        "advisory/index.json",
+        branch=branch_eco,
+        token=token,
+        content=index_path.read_text(encoding="utf-8", errors="strict"),
+        message=f"chore(advisory): refresh index.json ({date_str} UTC)",
+    )
+    if readme_path.is_file():
+        _github_put_text_file(
+            owner,
+            eco_repo,
+            "advisory/README.md",
+            branch=branch_eco,
+            token=token,
+            content=readme_path.read_text(encoding="utf-8", errors="strict"),
+            message=f"chore(advisory): refresh README ({date_str} UTC)",
+        )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--since-days", type=int, default=7, help="Calendar-day look-back (default 7).")
@@ -653,6 +1130,33 @@ def main() -> int:
         "--git-push",
         action="store_true",
         help="After a successful commit, git push origin HEAD (requires --git-commit).",
+    )
+    ap.add_argument(
+        "--git-publish",
+        action="store_true",
+        help="Shorthand for --git-commit --git-push (publish generated files to GitHub origin).",
+    )
+    ap.add_argument(
+        "--github-api-publish",
+        action="store_true",
+        help=(
+            "Publish generated files via GitHub **Contents API** (no git commit/push in clones). "
+            "Token: env TRUESIGHT_DAO_ORACLE_ADVISORY_PAT, GITHUB_TOKEN, or GH_TOKEN (contents:write on both repos)."
+        ),
+    )
+    ap.add_argument(
+        "--github-api-owner",
+        type=str,
+        default="TrueSightDAO",
+        help="With --github-api-publish: GitHub org or user (default TrueSightDAO).",
+    )
+    ap.add_argument(
+        "--github-api-branch",
+        type=str,
+        default="",
+        help=(
+            "With --github-api-publish: branch to update in both repos (default: each repo's GitHub default_branch)."
+        ),
     )
     ap.add_argument(
         "--with-sheet-sales",
@@ -680,10 +1184,50 @@ def main() -> int:
         default=600,
         help="With --with-sheet-sales: scan the last N data rows from the bottom of QR Code Sales (default 600).",
     )
+    ap.add_argument(
+        "--with-rem",
+        action="store_true",
+        help=(
+            "Append **open** (not done) macOS Reminders via `rem list --incomplete -o json` "
+            "(plus server-side drop of any done-shaped rows). macOS + `rem` on PATH only. "
+            "**Warning:** titles/notes are personal — avoid `--git-commit` into a public repo if sensitive."
+        ),
+    )
+    ap.add_argument(
+        "--rem-limit",
+        type=int,
+        default=60,
+        help="With --with-rem: max reminders to include in the snapshot tables (default 60).",
+    )
+    ap.add_argument(
+        "--rem-list",
+        type=str,
+        default="",
+        help="With --with-rem: optional Reminders list name passed to `rem list -l` (default: all lists).",
+    )
+    ap.add_argument(
+        "--reminders-json",
+        type=str,
+        default="",
+        help=(
+            "Append **open** reminders from JSON (`rem list -o json` shape); **done** rows are ignored. "
+            "For GitHub Actions / Linux; mutually exclusive with --with-rem."
+        ),
+    )
     args = ap.parse_args()
+
+    if args.git_publish:
+        args.git_commit = True
+        args.git_push = True
+
+    if args.github_api_publish and (args.git_commit or args.git_push or args.git_publish):
+        ap.error("use either --github-api-publish or git-based flags (--git-commit/--git-push/--git-publish), not both")
 
     if args.git_push and not args.git_commit:
         ap.error("--git-push requires --git-commit")
+
+    if args.with_rem and (args.reminders_json or "").strip():
+        ap.error("use either --with-rem or --reminders-json, not both")
 
     apps = _parent_apps()
     ctx_root = apps / "agentic_ai_context"
@@ -704,6 +1248,31 @@ def main() -> int:
             qr_scan_depth=max(50, args.sheet_sales_qr_scan),
         )
 
+    rem_md = ""
+    open_rem_rows: list[dict[str, object]] | None = None
+    rj = (args.reminders_json or "").strip()
+    if rj:
+        _rj_path = Path(rj).expanduser().resolve()
+        open_rem_rows = _rem_collect_open_rows(
+            list_name=(args.rem_list.strip() or None),
+            reminders_json=_rj_path,
+        )
+        rem_md = _rem_outstanding_markdown(
+            limit=max(1, args.rem_limit),
+            list_name=(args.rem_list.strip() or None),
+            reminders_json=_rj_path,
+        )
+    elif args.with_rem:
+        open_rem_rows = _rem_collect_open_rows(
+            list_name=(args.rem_list.strip() or None),
+            reminders_json=None,
+        )
+        rem_md = _rem_outstanding_markdown(
+            limit=max(1, args.rem_limit),
+            list_name=(args.rem_list.strip() or None),
+            reminders_json=None,
+        )
+
     text = _build_markdown(
         since_days=args.since_days,
         since_d=since_d,
@@ -713,6 +1282,7 @@ def main() -> int:
         ctx_root=ctx_root,
         eco_repo=eco_repo,
         sheet_sales_md=sheet_sales_md,
+        rem_md=rem_md,
     )
 
     snap_path_ctx = ctx_root / "ADVISORY_SNAPSHOT.md"
@@ -730,6 +1300,9 @@ def main() -> int:
     summary = one[:220] + ("…" if len(one) > 220 else "")
     _write_index_json(advisory_dir, date_str, summary)
 
+    if open_rem_rows is not None:
+        _write_reminders_json(eco_repo, open_rem_rows, date_str)
+
     readme = advisory_dir / "README.md"
     readme_body = (
         "# Advisory corpus (LLMs)\n\n"
@@ -737,28 +1310,78 @@ def main() -> int:
         "Then open `index.json` and the latest dated file under `snapshots/`.\n\n"
         "Daily evidence digests are generated by "
         "`market_research/scripts/generate_advisory_snapshot.py` "
-        "(git + `CONTEXT_UPDATES` + Beer Hall excerpts; optional `--with-sheet-sales`).\n\n"
+        "(git + `CONTEXT_UPDATES` + Beer Hall excerpts; optional `--with-sheet-sales`, `--with-rem`, `--reminders-json`).\n\n"
         "- `BASE.md` — slow-changing strategic context (not regenerated by the snapshot script).\n"
         "- `snapshots/YYYY-MM-DD.md` — one file per UTC day (last write wins if re-run same day).\n"
-        "- `index.json` — schema v2+: `base_markdown`, `read_order`, `canonical_context_urls`, `snapshots`.\n"
+        "- `index.json` — schema v2+: `base_markdown`, `read_order`, `canonical_context_urls`, `raw_github`, `snapshots`.\n"
         "- Browse: https://github.com/TrueSightDAO/ecosystem_change_logs/tree/main/advisory\n"
     )
     if not readme.is_file() or readme.read_text(encoding="utf-8") != readme_body:
         readme.write_text(readme_body, encoding="utf-8")
 
     print(f"Written: {snap_path_ctx}\nWritten: {snap_file}\nWritten: {advisory_dir / 'index.json'}\n", file=sys.stderr, flush=True)
+    print(
+        "LLM raw targets (GitHub default branch after publish):",
+        f"{_RAW_ECO_BASE}/advisory/snapshots/{date_str}.md",
+        f"{_RAW_CTX_BASE}/ADVISORY_SNAPSHOT.md",
+        sep="\n  ",
+        file=sys.stderr,
+        flush=True,
+    )
+    print("", file=sys.stderr, flush=True)
     if not args.no_stdout:
         print(text, end="", flush=True)
 
-    if args.git_commit:
+    if args.github_api_publish:
+        token = _github_token_from_env()
+        owner = (args.github_api_owner or "TrueSightDAO").strip()
+        br_opt = (args.github_api_branch or "").strip()
+        branch_ctx = br_opt or _github_repo_default_branch(owner, "agentic_ai_context", token)
+        branch_eco = br_opt or _github_repo_default_branch(owner, "ecosystem_change_logs", token)
+        beer_preview_path = ctx_root / "previews" / "beer_hall_preview_latest.md"
+        beer_opt: Path | None = beer_preview_path if beer_preview_path.is_file() else None
+        _github_api_publish_advisory(
+            owner=owner,
+            ctx_repo="agentic_ai_context",
+            eco_repo="ecosystem_change_logs",
+            branch_ctx=branch_ctx,
+            branch_eco=branch_eco,
+            token=token,
+            date_str=date_str,
+            snap_path_ctx=snap_path_ctx,
+            snap_file=snap_file,
+            index_path=advisory_dir / "index.json",
+            readme_path=readme,
+            beer_preview=beer_opt,
+        )
+        if open_rem_rows is not None:
+            rem_content = (eco_repo / "reminders" / "current.json").read_text(encoding="utf-8")
+            _github_put_text_file(
+                owner, "ecosystem_change_logs", "reminders/current.json",
+                branch=branch_eco, token=token, content=rem_content,
+                message=f"chore(reminders): sync open reminders ({date_str} UTC)",
+            )
+            _github_put_text_file(
+                owner, "ecosystem_change_logs", f"reminders/{date_str}.json",
+                branch=branch_eco, token=token, content=rem_content,
+                message=f"chore(reminders): archive {date_str} UTC",
+            )
+        print("Published advisory artifacts via GitHub Contents API.", file=sys.stderr, flush=True)
+    elif args.git_commit:
         msg_ctx = f"chore(advisory): refresh ADVISORY_SNAPSHOT ({date_str} UTC)"
-        _git_commit_paths(ctx_root, ["ADVISORY_SNAPSHOT.md"], msg_ctx)
+        ctx_paths = ["ADVISORY_SNAPSHOT.md"]
+        beer_preview = ctx_root / "previews" / "beer_hall_preview_latest.md"
+        if beer_preview.is_file():
+            ctx_paths.append("previews/beer_hall_preview_latest.md")
+        _git_commit_paths(ctx_root, ctx_paths, msg_ctx)
         eco_paths = [
             "advisory/BASE.md",
             f"advisory/snapshots/{date_str}.md",
             "advisory/index.json",
             "advisory/README.md",
         ]
+        if open_rem_rows is not None:
+            eco_paths += [f"reminders/current.json", f"reminders/{date_str}.json"]
         _git_commit_paths(eco_repo, eco_paths, f"chore(advisory): snapshot {date_str} UTC")
         if args.git_push:
             _git_push_repo(ctx_root)
