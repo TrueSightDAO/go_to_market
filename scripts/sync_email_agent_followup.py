@@ -66,6 +66,11 @@ SHEETS_SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+REVIEW_LABEL_FOLLOWUP = "AI/Follow-up"
+REVIEW_LABEL_WARMUP = "AI/Warm-up"
+SENT_LABEL_FOLLOWUP = "AI/Sent Follow-up"
+SENT_LABEL_WARMUP = "AI/Sent Warm-up"
+
 LOG_HEADERS = [
     "gmail_message_id",
     "synced_at_utc",
@@ -78,6 +83,23 @@ LOG_HEADERS = [
     "body_plain",
     "sync_source",
 ]
+
+
+def _get_or_create_label_id(service, name: str, label_map: dict[str, str]) -> str:
+    """Return Gmail label id for name, creating it if absent. Updates label_map in place."""
+    if name in label_map:
+        return label_map[name]
+    body = {"name": name, "labelListVisibility": "labelShow", "messageListVisibility": "show"}
+    created = service.users().labels().create(userId="me", body=body).execute()
+    lid = str(created["id"])
+    label_map[name] = lid
+    print(f"  Created Gmail label: {name!r}")
+    return lid
+
+
+def build_label_id_map(service) -> dict[str, str]:
+    resp = service.users().labels().list(userId="me").execute()
+    return {l["name"]: l["id"] for l in resp.get("labels", [])}
 
 
 def normalize_email(raw: str) -> str | None:
@@ -342,6 +364,7 @@ def fetch_sent_for_address(service, to_addr: str, max_results: int = 100) -> lis
                     "sent_at": date_h,
                     "snippet": snippet.replace("\n", " ")[:500],
                     "to_email": to_addr.lower(),
+                    "label_ids": full.get("labelIds") or [],
                 }
             )
             if len(out) >= max_results:
@@ -445,6 +468,8 @@ def main() -> None:
 
     synced_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     new_rows: list[list[str]] = []
+    # Track label_ids per new message for the review→sent label swap below.
+    new_msg_label_ids: dict[str, list[str]] = {}
 
     for addr in distinct_emails:
         msgs = fetch_sent_for_address(service, addr, max_results=args.per_address_cap)
@@ -471,6 +496,7 @@ def main() -> None:
                     "gmail_sent_sync",
                 ]
             )
+            new_msg_label_ids[mid] = m.get("label_ids") or []
             known_ids.add(mid)
 
     print(f"New messages to append: {len(new_rows)}")
@@ -484,6 +510,36 @@ def main() -> None:
     if new_rows:
         log_ws.append_rows(new_rows, value_input_option="USER_ENTERED")
         print(f"Appended {len(new_rows)} rows to '{LOG_WS}'.")
+
+    # Ensure all 4 AI labels exist in Gmail, then swap review → sent labels.
+    # Gmail carries draft labels onto the sent message automatically, so once
+    # we detect a sent message still wearing a review label we swap it out so
+    # the review queue (AI/Follow-up, AI/Warm-up) only shows unsent drafts.
+    label_map = build_label_id_map(service)
+    for name in [REVIEW_LABEL_FOLLOWUP, REVIEW_LABEL_WARMUP,
+                 SENT_LABEL_FOLLOWUP, SENT_LABEL_WARMUP]:
+        _get_or_create_label_id(service, name, label_map)
+
+    review_to_sent = {
+        REVIEW_LABEL_FOLLOWUP: SENT_LABEL_FOLLOWUP,
+        REVIEW_LABEL_WARMUP: SENT_LABEL_WARMUP,
+    }
+    swapped = 0
+    for mid, label_ids in new_msg_label_ids.items():
+        for review_label, sent_label in review_to_sent.items():
+            review_id = label_map.get(review_label)
+            if not review_id or review_id not in label_ids:
+                continue
+            sent_id = label_map[sent_label]
+            service.users().messages().modify(
+                userId="me",
+                id=mid,
+                body={"addLabelIds": [sent_id], "removeLabelIds": [review_id]},
+            ).execute()
+            print(f"  Label swap: {mid[:16]}… {review_label!r} → {sent_label!r}")
+            swapped += 1
+    if swapped:
+        print(f"Label swaps completed: {swapped}")
 
 
 if __name__ == "__main__":

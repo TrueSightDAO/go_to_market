@@ -91,7 +91,7 @@ DEFAULT_MIN_DAYS_SINCE_SENT = 7
 EXPECTED_MAILBOX = "garyjob@agroverse.shop"
 HIT_STATUS_TARGET = "Manager Follow-up"
 PROTOCOL_VERSION = "PARTNER_OUTREACH_PROTOCOL v0.1"
-DEFAULT_GMAIL_LABEL = "Email Agent suggestions"
+DEFAULT_GMAIL_LABEL = "AI/Follow-up"
 BODY_PREVIEW_MAX = 500
 
 GROK_ENDPOINT = "https://api.x.ai/v1/chat/completions"
