@@ -234,6 +234,45 @@ def _beer_hall_excerpts(ecosystem_repo: Path, n: int = 3) -> list[dict[str, str]
     return out
 
 
+_OPERATOR_BLOCK_PLACEHOLDER_RE = re.compile(r"<!--\s*TODO", re.IGNORECASE)
+
+
+def _read_operator_block(path: Path, heading: str, purpose: str) -> str:
+    """Render an operator-curated markdown file as a snapshot section.
+
+    These are strategic inputs (goals, constraints, metrics) that cannot be
+    derived from git or sheets. If the file is missing or only contains a TODO
+    placeholder, we still emit a visible block with a prompt so the operator
+    sees exactly where to edit. The LLM advisor reads the same block.
+    """
+    parts = [f"---\n\n{heading}\n\n"]
+    rel = path.name
+    if not path.is_file():
+        parts.append(f"_Not yet created. Add `{rel}` at `{path}` to surface this here._\n")
+        parts.append(f"_Purpose: {purpose}_\n\n")
+        return "".join(parts)
+    try:
+        body = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        parts.append(f"_Could not read `{rel}`._\n\n")
+        return "".join(parts)
+    stripped_body = body.strip()
+    only_placeholder = (not stripped_body) or _OPERATOR_BLOCK_PLACEHOLDER_RE.search(stripped_body) and not any(
+        line.strip() and not line.lstrip().startswith("<!--") and not line.lstrip().startswith("_") and not line.startswith("#")
+        for line in stripped_body.splitlines()
+    )
+    if only_placeholder:
+        parts.append(f"_`{rel}` exists but is empty / placeholder. Edit it at `{path}`._\n")
+        parts.append(f"_Purpose: {purpose}_\n\n")
+        return "".join(parts)
+    # Strip a leading top-level heading if the operator file uses one — the
+    # advisory snapshot already provides the heading for this section.
+    rendered = re.sub(r"\A# [^\n]*\n+", "", stripped_body, count=1)
+    parts.append(rendered.rstrip())
+    parts.append("\n\n")
+    return "".join(parts)
+
+
 def _notes_recent(ctx_root: Path, since_ts: float) -> list[str]:
     notes = ctx_root / "notes"
     if not notes.is_dir():
@@ -782,6 +821,24 @@ def _build_markdown(
     parts.append(f"- Generated (UTC): `{now.strftime('%Y-%m-%dT%H:%M:%SZ')}`\n")
     parts.append(f"- Look-back: **{since_days}** calendar days (`{since_d.isoformat()}` → today UTC)\n")
     parts.append(f"- Curated clone set: **{len(REPOS)}** repos (same table as Beer Hall preview)\n\n")
+
+    # Operator-curated strategic frame. Placed before evidence so the LLM reads
+    # goals / constraints / metrics *first*, then interprets the activity below.
+    parts.append(_read_operator_block(
+        ctx_root / "GROWTH_GOALS.md",
+        "## Growth goals (quarter)",
+        "1–3 measurable targets for the current quarter.",
+    ))
+    parts.append(_read_operator_block(
+        ctx_root / "CONSTRAINTS.md",
+        "## Constraints / risks this week",
+        "Current bottlenecks (capital, inventory, fulfilment, capacity, distribution).",
+    ))
+    parts.append(_read_operator_block(
+        ctx_root / "METRICS_WEEKLY.md",
+        "## Operator metrics (manual, 7-day)",
+        "Numbers that cannot be auto-derived from sheets. Complements --with-sheet-sales.",
+    ))
 
     parts.append("---\n\n## CONTEXT_UPDATES (append-only, heuristic highlights)\n\n")
     cu = ctx_root / "CONTEXT_UPDATES.md"
