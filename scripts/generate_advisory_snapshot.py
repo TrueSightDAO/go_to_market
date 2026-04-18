@@ -334,15 +334,20 @@ def _fetch_goal_actual(gc, goal: dict) -> tuple[float | None, str]:
     if ci is None:
         return None, f"column {column_name!r} not in header"
     data = rows[1:]
-    filt = goal.get("filter") or None
+    filt = src.get("filter") or None
     if filt:
         fcol = (filt.get("column") or "").strip()
         predicate = (filt.get("predicate") or "").strip()
+        value = str(filt.get("value") or "").strip()
         fci = cmap.get(_norm_header_cell(fcol)) if fcol else None
         if fci is None:
             return None, f"filter column {fcol!r} not in header"
         if predicate == "us_region":
             data = [r for r in data if fci < len(r) and _us_region_match(r[fci])]
+        elif predicate == "starts_with":
+            if not value:
+                return None, "filter predicate 'starts_with' requires a value"
+            data = [r for r in data if fci < len(r) and str(r[fci] or "").strip().startswith(value)]
         else:
             return None, f"unsupported predicate: {predicate!r}"
     values = [r[ci] if ci < len(r) else "" for r in data]
