@@ -259,12 +259,16 @@ def main() -> int:
     parts.append(_dapp_remarks_block(args.telegram_hours, include_automation=args.dapp_include_automation))
 
     parts.append(
-        "\n---\n\n## Operator checklist before a real Beer Hall send\n\n"
-        "1. Edit **Message 1** / **Message 2** above into WhatsApp-safe text.\n"
-        "2. Send via **`openclaw message send`** twice (pause between), target **The Beer Hall** "
-        "JID from **`OPENCLAW_WHATSAPP.md`**.\n"
-        "3. **`python3 scripts/append_openclaw_beer_hall_log.py`** same session (**§ Closed loop**).\n"
-        "4. On CLI **gateway timeout**, **verify** delivery before retrying.\n"
+        "\n---\n\n## Operator checklist for this Beer Hall digest\n\n"
+        "WhatsApp posting via OpenClaw has been retired. This digest is now an archive-only\n"
+        "artifact: it goes to the static feed (`beer_hall/entries/`) and feeds Grok context\n"
+        "via the advisory snapshot, but is **not** broadcast to The Beer Hall WhatsApp group.\n\n"
+        "1. Edit **Message 1** / **Message 2** above into plain-language digest text.\n"
+        "2. Archive to `ecosystem_change_logs/beer_hall/entries/` via\n"
+        "   `ecosystem_change_logs/scripts/archive_beer_hall_changelog.py`.\n"
+        "3. Refresh advisory snapshot so Grok sees it:\n"
+        "   `python3 scripts/generate_advisory_snapshot.py --git-publish`\n"
+        "   (add `--with-rem` when running end-of-day locally).\n"
     )
 
     text = "".join(parts)
