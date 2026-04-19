@@ -1023,6 +1023,16 @@ def _build_markdown(
     parts.append("# ADVISORY_SNAPSHOT\n\n")
     parts.append("Machine-oriented digest of **recent evidence** for LLM advisors. ")
     parts.append("Git lines are **proxies** for shipped work, not verified outcomes.\n\n")
+
+    # North star: purpose + mission. Placed FIRST so every LLM reading the
+    # snapshot sees the guiding frame before any goals, metrics, or evidence.
+    # Advisors should trace every suggestion back to this.
+    parts.append(_read_operator_block(
+        ctx_root / "PURPOSE_AND_MISSION.md",
+        "## Purpose & Mission (north star)",
+        "The guiding star: why we exist and the measurable mission every suggestion should serve.",
+    ))
+
     parts.append("---\n\n## Meta\n\n")
     parts.append(f"- Generated (UTC): `{now.strftime('%Y-%m-%dT%H:%M:%SZ')}`\n")
     parts.append(f"- Look-back: **{since_days}** calendar days (`{since_d.isoformat()}` → today UTC)\n")
