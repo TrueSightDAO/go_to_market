@@ -71,7 +71,7 @@ Style rules:
 4. Every GitHub URL must be under `https://github.com/TrueSightDAO/...`. No personal or KrakeIO repos.
 5. Group Community (Telegram) signals under a separate "Community" heading inside Message 2 if present — contributor attributions, contested decisions, field notes.
 6. Keep Message 1 ~8–12 bullets. Keep Message 2 focused on meaningful work items (not every single PR) with 1–2 URLs per bullet max.
-7. The opener line is required: "OpenClaw × Cursor digest — retired from WhatsApp posting; archive-only for oracle / feed context (not a manual post from Gary)"
+7. Do **not** add a "retired from WhatsApp" opener or any automation-status preamble. The archive-only framing is documented once in `WORKSPACE_CONTEXT.md` and does not need to be repeated in every digest. Start Message 1 directly with the first bullet.
 
 Output format — return **only** these three sections, in order, with the exact markers shown:
 
