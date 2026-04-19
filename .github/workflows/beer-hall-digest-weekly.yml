@@ -1,0 +1,209 @@
+# Weekly Beer Hall digest — generates the preview, drafts Message 1 + Message 2 via
+# Claude, archives to TrueSightDAO/ecosystem_change_logs, refreshes the advisory snapshot,
+# and opens PRs on ecosystem_change_logs + agentic_ai_context for human review.
+#
+# NOTE: WhatsApp send via OpenClaw has been retired. This workflow does NOT post to WhatsApp.
+#
+# Required repository secrets (go_to_market / market_research clone):
+#   ANTHROPIC_API_KEY           — Anthropic API key for Claude (Sonnet 4.6 by default).
+#   GOOGLE_CREDENTIALS_JSON     — service account JSON (Sheets read — for telegram/DApp evidence blocks).
+#   ORACLE_ADVISORY_PUSH_TOKEN  — fine-grained PAT with Contents: Read+Write AND
+#                                 Pull requests: Read+Write on
+#                                 TrueSightDAO/ecosystem_change_logs and
+#                                 TrueSightDAO/agentic_ai_context.
+#
+# PRs are opened — NOT auto-merged — so you can review before the archive lands.
+
+name: Beer Hall digest (weekly)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Sundays 02:00 UTC (Saturday evening PT). Weekly cadence per operator decision.
+    - cron: "0 2 * * 0"
+
+concurrency:
+  group: beer-hall-digest-weekly
+  cancel-in-progress: false
+
+jobs:
+  draft-and-archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATE_UTC: ""
+
+    steps:
+      - name: Checkout market_research
+        uses: actions/checkout@v4
+        with:
+          path: repos/market_research
+
+      # --- sibling DAO repos for git-log evidence (read-only; shallow) ---
+
+      - name: Checkout truesight_me_beta
+        uses: actions/checkout@v4
+        with: { repository: TrueSightDAO/truesight_me_beta, path: repos/truesight_me, fetch-depth: 100 }
+      - name: Checkout tokenomics
+        uses: actions/checkout@v4
+        with: { repository: TrueSightDAO/tokenomics, path: repos/tokenomics, fetch-depth: 100 }
+      - name: Checkout dapp
+        uses: actions/checkout@v4
+        with: { repository: TrueSightDAO/dapp, path: repos/dapp, fetch-depth: 100 }
+      - name: Checkout TrueChain
+        uses: actions/checkout@v4
+        with: { repository: TrueSightDAO/TrueChain, path: repos/TrueChain, fetch-depth: 100 }
+      - name: Checkout qr_codes
+        uses: actions/checkout@v4
+        with: { repository: TrueSightDAO/qr_codes, path: repos/qr_codes, fetch-depth: 100 }
+      - name: Checkout proposals
+        uses: actions/checkout@v4
+        with: { repository: TrueSightDAO/proposals, path: repos/proposals, fetch-depth: 100 }
+      - name: Checkout agroverse-inventory
+        uses: actions/checkout@v4
+        with: { repository: TrueSightDAO/agroverse-inventory, path: repos/agroverse-inventory, fetch-depth: 100 }
+      - name: Checkout agroverse_shop_beta
+        uses: actions/checkout@v4
+        with: { repository: TrueSightDAO/agroverse_shop_beta, path: repos/agroverse_shop, fetch-depth: 100 }
+      - name: Checkout oracle (iching_oracle)
+        uses: actions/checkout@v4
+        with: { repository: TrueSightDAO/oracle, path: repos/iching_oracle, fetch-depth: 100 }
+      - name: Checkout Cypher-Defense
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/Cypher-Defense
+          path: repos/Cypher-Defense
+          fetch-depth: 100
+          token: ${{ secrets.ORACLE_ADVISORY_PUSH_TOKEN }}
+
+      # --- target repos (writable; need PAT so we can push branches) ---
+
+      - name: Checkout ecosystem_change_logs (target)
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/ecosystem_change_logs
+          path: repos/ecosystem_change_logs
+          fetch-depth: 100
+          token: ${{ secrets.ORACLE_ADVISORY_PUSH_TOKEN }}
+
+      - name: Checkout agentic_ai_context (target — advisory mirror)
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/agentic_ai_context
+          path: repos/agentic_ai_context
+          fetch-depth: 100
+          token: ${{ secrets.ORACLE_ADVISORY_PUSH_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "anthropic>=0.34" "gspread>=5.12" "google-auth>=2.23"
+
+      - name: Write Google credentials (for telegram/DApp evidence helpers)
+        run: |
+          echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > repos/market_research/google_credentials.json
+
+      - name: Compute UTC date
+        run: echo "DATE_UTC=$(date -u +%Y-%m-%d)" >> $GITHUB_ENV
+
+      - name: Generate Beer Hall preview
+        working-directory: repos/market_research
+        run: |
+          python3 scripts/generate_beer_hall_preview.py --no-stdout --output /tmp/beer_hall_preview.md
+          ls -la /tmp/beer_hall_preview.md
+
+      - name: Draft Message 1 + Message 2 via Claude
+        working-directory: repos/market_research
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python3 scripts/draft_beer_hall_digest.py \
+            --preview /tmp/beer_hall_preview.md \
+            --out-msg1 /tmp/msg1.txt \
+            --out-msg2 /tmp/msg2.txt \
+            --out-slug /tmp/slug.txt
+          echo "--- Drafted slug: $(cat /tmp/slug.txt) ---"
+          echo "--- Message 1 (first 40 lines) ---"
+          head -40 /tmp/msg1.txt || true
+          echo "--- Message 2 (first 40 lines) ---"
+          head -40 /tmp/msg2.txt || true
+
+      - name: Archive digest to ecosystem_change_logs (local commit on feature branch)
+        working-directory: repos/ecosystem_change_logs
+        run: |
+          SLUG=$(cat /tmp/slug.txt | tr -d '\n' | tr -c 'a-z0-9-' '-' | sed 's/--*/-/g; s/^-//; s/-$//')
+          BRANCH="auto/beer-hall-${DATE_UTC}-${SLUG}"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git checkout -b "$BRANCH"
+          python3 scripts/archive_beer_hall_changelog.py \
+            --slug "$SLUG" \
+            --tldr-file /tmp/msg1.txt \
+            --message2-file /tmp/msg2.txt \
+            --notes "Drafted automatically by .github/workflows/beer-hall-digest-weekly.yml"
+          echo "BEERHALL_BRANCH=$BRANCH" >> $GITHUB_ENV
+          echo "SLUG=$SLUG" >> $GITHUB_ENV
+
+      - name: Refresh advisory snapshot (commits to both target clones on their branches)
+        working-directory: repos/market_research
+        run: |
+          # Ensure the agentic_ai_context target is also on a feature branch so ADVISORY_SNAPSHOT.md
+          # commits land on a branch we can push and PR.
+          (cd ../agentic_ai_context && \
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com" && \
+            git config user.name "github-actions[bot]" && \
+            git checkout -b "auto/advisory-refresh-${DATE_UTC}")
+          python3 scripts/generate_advisory_snapshot.py --git-commit
+
+      - name: Push ecosystem_change_logs branch
+        working-directory: repos/ecosystem_change_logs
+        env:
+          TARGET_TOKEN: ${{ secrets.ORACLE_ADVISORY_PUSH_TOKEN }}
+        run: |
+          git remote set-url origin "https://x-access-token:${TARGET_TOKEN}@github.com/TrueSightDAO/ecosystem_change_logs.git"
+          git push -u origin "$BEERHALL_BRANCH"
+
+      - name: Push agentic_ai_context branch
+        working-directory: repos/agentic_ai_context
+        env:
+          TARGET_TOKEN: ${{ secrets.ORACLE_ADVISORY_PUSH_TOKEN }}
+        run: |
+          git remote set-url origin "https://x-access-token:${TARGET_TOKEN}@github.com/TrueSightDAO/agentic_ai_context.git"
+          git push -u origin "auto/advisory-refresh-${DATE_UTC}"
+
+      - name: Open PR on ecosystem_change_logs
+        working-directory: repos/ecosystem_change_logs
+        env:
+          GH_TOKEN: ${{ secrets.ORACLE_ADVISORY_PUSH_TOKEN }}
+        run: |
+          gh pr create \
+            --repo TrueSightDAO/ecosystem_change_logs \
+            --head "$BEERHALL_BRANCH" \
+            --base main \
+            --title "Beer Hall ${DATE_UTC}: ${SLUG}" \
+            --body "Auto-drafted by \`.github/workflows/beer-hall-digest-weekly.yml\` on market_research. Human review required before merge.
+
+          WhatsApp send is retired — this is an archive-only digest that feeds the static Beer Hall feed and the advisory snapshot (oracle.truesight.me Grok context).
+
+          Companion PR on \`agentic_ai_context\` refreshes the ADVISORY_SNAPSHOT mirror.
+
+          🤖 Generated with [Claude Sonnet 4.6](https://www.anthropic.com/)"
+
+      - name: Open PR on agentic_ai_context
+        working-directory: repos/agentic_ai_context
+        env:
+          GH_TOKEN: ${{ secrets.ORACLE_ADVISORY_PUSH_TOKEN }}
+        run: |
+          gh pr create \
+            --repo TrueSightDAO/agentic_ai_context \
+            --head "auto/advisory-refresh-${DATE_UTC}" \
+            --base main \
+            --title "chore(advisory): refresh ADVISORY_SNAPSHOT (${DATE_UTC})" \
+            --body "Companion to TrueSightDAO/ecosystem_change_logs Beer Hall PR (same date).
+
+          Auto-generated by \`market_research/.github/workflows/beer-hall-digest-weekly.yml\`."
