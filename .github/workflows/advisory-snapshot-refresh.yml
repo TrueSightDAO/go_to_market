@@ -1,0 +1,139 @@
+# Regenerates ADVISORY_SNAPSHOT.md (oracle.truesight.me Grok context) from recent DAO
+# activity. Publishes to both TrueSightDAO/agentic_ai_context and
+# TrueSightDAO/ecosystem_change_logs via the Contents API (no cross-repo git push).
+#
+# Required repository secrets (go_to_market / market_research clone):
+#   ORACLE_ADVISORY_PUSH_TOKEN — fine-grained PAT with **Contents: Read and write** on
+#     TrueSightDAO/agentic_ai_context and TrueSightDAO/ecosystem_change_logs.
+#     (Classic PAT with `repo` scope also works.)
+#
+# Script: scripts/generate_advisory_snapshot.py --github-api-publish
+# (no --with-rem in CI — macOS rem CLI not available on Linux runners)
+#
+# Sibling DAO repos are checked out shallowly so `git log` evidence in the snapshot
+# reflects the last ~7 days of merges per repo.
+
+name: Advisory snapshot refresh
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every 6 hours, offset from top-of-hour to avoid burst collisions with other workflows.
+    - cron: "27 */6 * * *"
+
+concurrency:
+  group: advisory-snapshot-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout market_research
+        uses: actions/checkout@v4
+        with:
+          path: repos/market_research
+
+      # --- sibling DAO repos for git-log evidence (read-only; shallow) ---
+
+      - name: Checkout truesight_me_beta
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/truesight_me_beta
+          path: repos/truesight_me
+          fetch-depth: 100
+
+      - name: Checkout agentic_ai_context
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/agentic_ai_context
+          path: repos/agentic_ai_context
+          fetch-depth: 100
+
+      - name: Checkout tokenomics
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/tokenomics
+          path: repos/tokenomics
+          fetch-depth: 100
+
+      - name: Checkout dapp
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/dapp
+          path: repos/dapp
+          fetch-depth: 100
+
+      - name: Checkout TrueChain
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/TrueChain
+          path: repos/TrueChain
+          fetch-depth: 100
+
+      - name: Checkout qr_codes
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/qr_codes
+          path: repos/qr_codes
+          fetch-depth: 100
+
+      - name: Checkout proposals
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/proposals
+          path: repos/proposals
+          fetch-depth: 100
+
+      - name: Checkout agroverse-inventory
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/agroverse-inventory
+          path: repos/agroverse-inventory
+          fetch-depth: 100
+
+      - name: Checkout agroverse_shop_beta
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/agroverse_shop_beta
+          path: repos/agroverse_shop
+          fetch-depth: 100
+
+      - name: Checkout oracle (iching_oracle)
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/oracle
+          path: repos/iching_oracle
+          fetch-depth: 100
+
+      - name: Checkout Cypher-Defense
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/Cypher-Defense
+          path: repos/Cypher-Defense
+          fetch-depth: 100
+          token: ${{ secrets.ORACLE_ADVISORY_PUSH_TOKEN }}
+
+      - name: Checkout ecosystem_change_logs (for BASE.md + archives + reminders)
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/ecosystem_change_logs
+          path: repos/ecosystem_change_logs
+          fetch-depth: 100
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install --upgrade pip
+
+      - name: Refresh snapshot and publish via GitHub Contents API
+        working-directory: repos/market_research
+        env:
+          TRUESIGHT_DAO_ORACLE_ADVISORY_PAT: ${{ secrets.ORACLE_ADVISORY_PUSH_TOKEN }}
+        run: |
+          python3 scripts/generate_advisory_snapshot.py --github-api-publish
