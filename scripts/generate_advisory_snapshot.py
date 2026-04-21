@@ -1039,18 +1039,16 @@ def _build_markdown(
     parts.append(f"- Curated clone set: **{len(REPOS)}** repos (same table as Beer Hall preview)\n\n")
 
     # Operator-curated strategic frame. Placed before evidence so the LLM reads
-    # goals / constraints / metrics *first*, then interprets the activity below.
-    # Growth goals are auto-computed against live sheet data (GROWTH_GOALS.json).
+    # goals / metrics *first*, then interprets the activity below. Growth goals
+    # are auto-computed against live sheet data (GROWTH_GOALS.json). Pipeline
+    # metrics are auto-synced from the Holistic Hit List Pipeline Dashboard by
+    # tokenomics/google_app_scripts/pipeline_metrics_snapshot.
     parts.append(_render_goal_progress_block(ctx_root, _REPO / "google_credentials.json"))
     parts.append(_read_operator_block(
-        ctx_root / "CONSTRAINTS.md",
-        "## Constraints / risks this week",
-        "Current bottlenecks (capital, inventory, fulfilment, capacity, distribution).",
-    ))
-    parts.append(_read_operator_block(
-        ctx_root / "METRICS_WEEKLY.md",
-        "## Operator metrics (manual, 7-day)",
-        "Numbers that cannot be auto-derived from sheets. Complements --with-sheet-sales.",
+        eco_repo / "metrics" / "weekly.md",
+        "## Operator metrics (pipeline funnel, auto-synced)",
+        "Partner-pipeline counts by status, mirrored from the Holistic Hit List Pipeline Dashboard. "
+        "Refreshed by tokenomics `pipeline_metrics_snapshot` GAS.",
     ))
 
     parts.append("---\n\n## CONTEXT_UPDATES (append-only, heuristic highlights)\n\n")
