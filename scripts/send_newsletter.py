@@ -17,11 +17,14 @@ Inputs:
   --campaign NAME        Free-form campaign tag for the sheet log (e.g. "two_bahia_bars")
   --label LABEL          Gmail label applied to each draft/sent message (e.g. "Newsletter/2 Chocolate Bars")
   --track-opens          Embed a 1x1 tracking pixel pointing at Edgar. Off by default.
-  --edgar-base-url URL   Base for tracking pixel (default https://edgar.truesight.me)
+  --track-clicks         Rewrite outbound links through Edgar so each click is logged
+                         back to the sheet row. Off by default.
+  --edgar-base-url URL   Base for tracking endpoints (default https://edgar.truesight.me)
 
 Sheet log columns (appended to Agroverse News Letter Emails):
   message_uuid, gmail_message_id, campaign, subject, recipient_email,
-  sent_at_utc, status, opened, first_opened_at_utc, last_opened_at_utc, open_count
+  sent_at_utc, status, opened, first_opened_at_utc, last_opened_at_utc, open_count,
+  clicked, first_clicked_at_utc, last_clicked_at_utc, click_count, last_clicked_url
 
 `message_uuid` is our own identifier embedded in the tracking pixel URL; `gmail_message_id`
 is what Gmail assigns when the draft/message is created.
@@ -37,14 +40,14 @@ Usage examples:
       --campaign two_bahia_bars_review \
       --label "Newsletter/2 Chocolate Bars"
 
-  # Full list live send with open tracking
+  # Full list live send with open + click tracking
   python3 scripts/send_newsletter.py \
       --mode send --recipients-from-sheet \
       --subject "Two Bahia farms, two very different chocolates" \
       --body-md newsletter_drafts/2026-04-20_two_bahia_bars.md \
       --campaign two_bahia_bars \
       --label "Newsletter/2 Chocolate Bars" \
-      --track-opens
+      --track-opens --track-clicks
 """
 
 from __future__ import annotations
@@ -93,6 +96,11 @@ EMAIL_LOG_HEADERS = [
     "first_opened_at_utc",
     "last_opened_at_utc",
     "open_count",
+    "clicked",
+    "first_clicked_at_utc",
+    "last_clicked_at_utc",
+    "click_count",
+    "last_clicked_url",
 ]
 
 
@@ -116,9 +124,10 @@ def ensure_emails_worksheet(sh: gspread.Spreadsheet) -> gspread.Worksheet:
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=EMAILS_WS, rows=2000, cols=len(EMAIL_LOG_HEADERS))
     vals = ws.get_all_values()
+    last_col_letter = _col_letter(len(EMAIL_LOG_HEADERS))
     if not vals:
         ws.append_row(EMAIL_LOG_HEADERS, value_input_option="USER_ENTERED")
-        ws.format("A1:K1", {"textFormat": {"bold": True}})
+        ws.format(f"A1:{last_col_letter}1", {"textFormat": {"bold": True}})
         ws.spreadsheet.batch_update({
             "requests": [{
                 "updateSheetProperties": {
@@ -129,7 +138,21 @@ def ensure_emails_worksheet(sh: gspread.Spreadsheet) -> gspread.Worksheet:
         })
     else:
         existing = [h.strip() for h in vals[0]]
-        if existing != EMAIL_LOG_HEADERS:
+        # If the header row is a prefix of the expected headers (older version
+        # of the script), fill in just the missing trailing columns so new
+        # rows have labelled destinations without stomping on anything.
+        if (
+            len(existing) < len(EMAIL_LOG_HEADERS)
+            and existing == EMAIL_LOG_HEADERS[: len(existing)]
+        ):
+            start = _col_letter(len(existing) + 1)
+            end = last_col_letter
+            missing = EMAIL_LOG_HEADERS[len(existing):]
+            ws.update(
+                f"{start}1:{end}1", [missing], value_input_option="USER_ENTERED"
+            )
+            ws.format(f"{start}1:{end}1", {"textFormat": {"bold": True}})
+        elif existing != EMAIL_LOG_HEADERS:
             # Don't auto-overwrite — surface mismatch so the operator notices.
             sys.stderr.write(
                 f"WARNING: {EMAILS_WS!r} row 1 doesn't match expected headers.\n"
@@ -138,6 +161,16 @@ def ensure_emails_worksheet(sh: gspread.Spreadsheet) -> gspread.Worksheet:
                 f"  Appending rows anyway; fix headers manually if needed.\n"
             )
     return ws
+
+
+def _col_letter(idx_1based: int) -> str:
+    """A,B,...,Z,AA,AB,... for spreadsheet column indexes."""
+    s = ""
+    n = idx_1based
+    while n > 0:
+        n, r = divmod(n - 1, 26)
+        s = chr(ord("A") + r) + s
+    return s
 
 
 def load_recipients_from_sheet(sh: gspread.Spreadsheet) -> list[str]:
@@ -196,11 +229,16 @@ def markdown_to_plain(md: str) -> str:
     return out.strip() + "\n"
 
 
-def markdown_to_html(md: str) -> str:
+def markdown_to_html(md: str, link_transform=None) -> str:
     # Simple, explicit HTML rendering — avoids pulling in a markdown dep.
+    # `link_transform(url) -> url` rewrites the href of each markdown link;
+    # None leaves links untouched.
     lines = md.splitlines()
     html_lines: list[str] = []
     in_para: list[str] = []
+
+    def rewrite(url: str) -> str:
+        return link_transform(url) if link_transform else url
 
     def flush_para():
         if in_para:
@@ -214,7 +252,9 @@ def markdown_to_html(md: str) -> str:
         if not line.strip():
             flush_para()
             continue
-        converted = _MD_LINK_RE.sub(lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>', line)
+        converted = _MD_LINK_RE.sub(
+            lambda m: f'<a href="{rewrite(m.group(2))}">{m.group(1)}</a>', line
+        )
         converted = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", converted)
         converted = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", converted)
         in_para.append(converted)
@@ -243,6 +283,25 @@ def build_tracking_pixel_html(message_uuid: str, recipient: str, edgar_base: str
     return (
         f'<img src="{url}" alt="" width="1" height="1" '
         f'style="display:block;border:0;width:1px;height:1px;" />'
+    )
+
+
+def _b64url(s: str) -> str:
+    return base64.urlsafe_b64encode(s.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def build_tracked_link(
+    original_url: str, message_uuid: str, recipient: str, edgar_base: str
+) -> str:
+    # Only wrap http(s) links. mailto:, tel:, anchors, etc. stay untouched —
+    # Edgar's click endpoint refuses to redirect to anything else anyway.
+    if not original_url or not original_url.lower().startswith(("http://", "https://")):
+        return original_url
+    r = _b64url(recipient)
+    to = _b64url(original_url)
+    return (
+        f"{edgar_base.rstrip('/')}/newsletter/click"
+        f"?mid={message_uuid}&r={r}&to={to}"
     )
 
 
@@ -282,6 +341,7 @@ def main() -> None:
         help=f"Load CONFIRMED subscribers from {SUBSCRIBERS_WS!r}",
     )
     p.add_argument("--track-opens", action="store_true")
+    p.add_argument("--track-clicks", action="store_true")
     p.add_argument("--edgar-base-url", default=DEFAULT_EDGAR_BASE)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--expected-mailbox", default=EXPECTED_MAILBOX)
@@ -306,7 +366,10 @@ def main() -> None:
         sys.exit(1)
 
     plain_body = markdown_to_plain(body_md)
-    base_html = markdown_to_html(body_md)
+    # If click tracking is on, link rewriting happens per-recipient so the
+    # tracking URL can embed that recipient's message_uuid; skip the shared
+    # base_html path in that case.
+    base_html = None if args.track_clicks else markdown_to_html(body_md)
 
     gcreds = load_gmail_user_credentials(_GMAIL_TOKEN, GMAIL_SCOPES)
     gsvc = build("gmail", "v1", credentials=gcreds, cache_discovery=False)
@@ -351,6 +414,7 @@ def main() -> None:
     print(f"Campaign:    {args.campaign}")
     print(f"Label:       {args.label or '(none)'}")
     print(f"Track opens: {args.track_opens}")
+    print(f"Track clicks: {args.track_clicks}")
     print(f"Recipients:  {len(recipients)}")
     for r in recipients[:10]:
         print(f"  - {r}")
@@ -369,7 +433,15 @@ def main() -> None:
 
     for recipient in recipients:
         mid_uuid = str(uuid.uuid4())
-        html_body = base_html
+        if args.track_clicks:
+            html_body = markdown_to_html(
+                body_md,
+                link_transform=lambda u: build_tracked_link(
+                    u, mid_uuid, recipient, args.edgar_base_url
+                ),
+            )
+        else:
+            html_body = base_html
         if args.track_opens:
             html_body = html_body + build_tracking_pixel_html(
                 mid_uuid, recipient, args.edgar_base_url
@@ -405,6 +477,11 @@ def main() -> None:
             "",
             "",
             "0",
+            "FALSE",
+            "",
+            "",
+            "0",
+            "",
         ])
         n_done += 1
 
@@ -414,7 +491,8 @@ def main() -> None:
 
     print(
         f"EMAIL_RESULT mode={args.mode} count={n_done} campaign={args.campaign!r} "
-        f"tracking={'on' if args.track_opens else 'off'} label={args.label!r}"
+        f"opens={'on' if args.track_opens else 'off'} "
+        f"clicks={'on' if args.track_clicks else 'off'} label={args.label!r}"
     )
 
 
