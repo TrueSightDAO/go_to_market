@@ -145,6 +145,17 @@ jobs:
             --tldr-file /tmp/msg1.txt \
             --message2-file /tmp/msg2.txt \
             --notes "Drafted automatically by .github/workflows/beer-hall-digest-daily.yml"
+          # archive_beer_hall_changelog.py only WRITES files — we still need to commit them
+          # before the advisory-snapshot --git-commit step (which only stages advisory paths).
+          # Without this, beer_hall/entries/ + regenerated beer_hall/feed/ would never reach
+          # the PR, and truesight.me's ecosystem-change-log-feed.js would keep serving stale
+          # data from raw.githubusercontent.com.
+          git add beer_hall/entries/ beer_hall/feed/
+          if git diff --staged --quiet; then
+            echo "archive_beer_hall_changelog.py produced no staged changes — unexpected. Aborting."
+            exit 1
+          fi
+          git commit -m "chore(beer-hall): archive ${DATE_UTC} digest (${SLUG}) [skip ci]"
           echo "BEERHALL_BRANCH=$BRANCH" >> $GITHUB_ENV
           echo "SLUG=$SLUG" >> $GITHUB_ENV
 
