@@ -9,8 +9,10 @@ Parallel to ``suggest_manager_followup_drafts.py`` but:
 - **Does not** change manager-follow-up behavior (separate script).
 
 Same cadence rules as manager follow-up: pending_review + open draft blocks; min days since
-last **Email Agent Follow Up** row per ``to_email``. Run ``sync_email_agent_followup.py`` first
-so the log includes sends for **Bulk Info Requested** rows (sync script includes that status).
+last **Email Agent Follow Up** row per ``to_email``, **except** after a **discarded** pending draft
+(Gmail draft removed / reconcile), which bypasses the min-days gate like manager follow-up.
+Run ``sync_email_agent_followup.py`` first so the log includes sends for **Bulk Info Requested** rows
+(sync script includes that status).
 
 Usage:
   cd market_research
@@ -23,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -34,6 +37,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import suggest_manager_followup_drafts as sm
+from email_agent_tracking import plain_text_to_html_with_open_pixel
 
 BULK_STATUS = "Bulk Info Requested"
 BULK_PROTOCOL_VERSION = "BULK_INFO_PDF v0.1"
@@ -93,6 +97,11 @@ def main() -> None:
         help=f"Min days since last logged send in {sm.LOG_WS!r} (default {sm.DEFAULT_MIN_DAYS_SINCE_SENT}).",
     )
     parser.add_argument("--skip-label", action="store_true")
+    parser.add_argument(
+        "--track-opens",
+        action="store_true",
+        help="Multipart HTML + 1×1 open pixel (tid=suggestion_id); see suggest_manager_followup_drafts --track-opens.",
+    )
     parser.add_argument("--expected-mailbox", default=sm.EXPECTED_MAILBOX)
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument(
@@ -140,7 +149,7 @@ def main() -> None:
         )
 
     last_sent = sm.last_sent_utctime_per_to_email(log_ws)
-    pending_to, n_reconciled = sm.pending_review_emails_after_gmail_reconcile(
+    pending_to, n_reconciled, freshly_discarded = sm.pending_review_emails_after_gmail_reconcile(
         gsvc, sugg_ws, dry_run=args.dry_run, verbose=args.verbose
     )
     if n_reconciled:
@@ -148,6 +157,7 @@ def main() -> None:
             f"Reconciled {n_reconciled} row(s) in {sm.SUGGESTIONS_WS!r}: "
             "pending_review → discarded (Gmail draft was deleted or missing)."
         )
+    latest_discard_utc = sm.latest_discarded_utc_per_to_email(sugg_ws)
     now = datetime.now(timezone.utc)
 
     targets = sm.load_hit_list_targets(hit_ws, hit_status=BULK_STATUS)
@@ -181,13 +191,24 @@ def main() -> None:
         if prev is not None:
             d = sm.days_since_utc(prev, now)
             if d < args.min_days_since_sent:
-                skipped_cadence += 1
+                if not sm.cadence_bypass_after_discarded_draft(
+                    em,
+                    last_sent_dt=prev,
+                    freshly_discarded_emails=freshly_discarded,
+                    latest_discard_utc_per_email=latest_discard_utc,
+                ):
+                    skipped_cadence += 1
+                    if args.verbose:
+                        print(
+                            f"  skip {em}: last logged send {d:.1f}d ago "
+                            f"(need >= {args.min_days_since_sent}d; sent_at={prev.date().isoformat()})"
+                        )
+                    continue
                 if args.verbose:
                     print(
-                        f"  skip {em}: last logged send {d:.1f}d ago "
-                        f"(need >= {args.min_days_since_sent}d; sent_at={prev.date().isoformat()})"
+                        f"  allow {em}: cadence bypass (discarded draft after last logged send "
+                        f"at {prev.date().isoformat()})"
                     )
-                continue
         candidates.append(em)
 
     def sort_key(email: str) -> tuple:
@@ -241,11 +262,18 @@ def main() -> None:
         subj = draft_subject_bulk(shop)
         body = draft_body_bulk(shop, snippets)
 
+        sug_id = str(uuid.uuid4())
+        tracking_base = (os.environ.get("EMAIL_AGENT_TRACKING_BASE_URL") or "https://edgar.truesight.me").strip()
+        html_body = None
+        if args.track_opens and tracking_base:
+            html_body = plain_text_to_html_with_open_pixel(body, tracking_base, sug_id)
+
         raw = sm.build_message_raw(
             me,
             to_addr,
             subj,
             body,
+            html_body=html_body,
             attachment_path=pdf_path,
             attachment_filename=args.attachment_filename,
         )
@@ -272,7 +300,6 @@ def main() -> None:
             except Exception as e:
                 sys.stderr.write(f"Warning: could not apply label to draft message {msg_id}: {e}\n")
 
-        sug_id = str(uuid.uuid4())
         preview = body.replace("\n", " ")[: sm.BODY_PREVIEW_MAX]
         notes = (
             f"Bulk info PDF draft; file={pdf_path.name}; cadence min_days={args.min_days_since_sent}; "

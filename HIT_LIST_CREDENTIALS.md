@@ -163,7 +163,13 @@ If the tab is missing, `scripts/sync_email_agent_followup.py` creates it and wri
 | `subject` | Message subject from Gmail. |
 | `sent_at` | `Date` header from Gmail (as returned by the API). |
 | `snippet` | Short preview text. |
+| `body_plain` | Best-effort plain body (for draft / Grok context). |
+| `status` | Outbound **kind** for this Gmail **Sent** row: `warmup` · `bulk` · `follow_up` · `unknown` — inferred from Gmail labels (`AI/Sent Warm-up`, `AI/Sent Follow-up`, …) plus **Email Agent Drafts** `protocol_version` when labels are ambiguous (e.g. bulk vs manager share the same follow-up sent label). |
 | `sync_source` | e.g. `gmail_sent_sync`. |
+| `Open` | **Column L** — count (or flag) of **tracked opens** for this sent message; new rows default to **`0`**. Intended to be incremented by **Edgar** (or another HTTPS endpoint) when a draft/sent body includes a 1×1 pixel whose URL carries the same **`suggestion_id`** as **Email Agent Drafts** (see `scripts/email_agent_tracking.py` and `--track-opens` on draft scripts). |
+| `Click through` | **Column M** — **click-through** count (or similar); new rows default to **`0`**. Same integration story as **Open**; link rewriting like `send_newsletter.py`’s `/newsletter/click` is not wired into partner drafts yet. |
+
+**Why not only GAS `doGet` for the pixel?** A standalone Apps Script web app *can* log hits and call `SpreadsheetApp`, but: (1) every image load spins a cold execution and burns quotas; (2) the web app must be **Anyone**-accessible without user OAuth, so the URL must carry an **unguessable token** (`tid` = `suggestion_id`) and the script must validate it; (3) at **draft** time there is no **`gmail_message_id`** yet, so the first writes are usually keyed by **`suggestion_id`**, then a small job can copy counts onto the **Follow Up** row after `sync_email_agent_followup.py` matches the sent message. **Edgar** (Rails) is a better fit if you already run tracking pixels for the newsletter: one service account, shared logging, same pattern as `GET …/newsletter/open.gif`.
 
 ### Run sync (after Gmail OAuth + service account sheet share)
 
@@ -172,9 +178,10 @@ cd market_research
 source venv/bin/activate
 python3 scripts/sync_email_agent_followup.py --dry-run    # preview
 python3 scripts/sync_email_agent_followup.py            # append new rows
+python3 scripts/sync_email_agent_followup.py --backfill-status --backfill-only  # classify existing rows
 ```
 
-Options: `--limit N` (max distinct addresses), `--per-address-cap` (max messages per address, default 200).
+Options: `--limit N` (max distinct addresses), `--per-address-cap` (max messages per address, default 200). **`--backfill-status`** fills or refreshes the **`status`** column using Gmail metadata + **Email Agent Drafts** history; add **`--force-backfill-status`** to overwrite non-empty cells.
 
 **Auth:** Sheets = **service account** (`google_credentials.json`). Gmail = **user OAuth** (`credentials/gmail/`). Future “draft + send + update Status” flows can extend this script or call the same libraries.
 
@@ -190,11 +197,11 @@ Safe to run multiple times. If Google returns an error about an existing banded 
 
 ---
 
-## Email Agent Suggestions tab (draft queue + registry)
+## Email Agent Drafts tab (draft queue + registry)
 
 **Purpose:** One row per **proposed follow-up** while the human reviews in **Gmail**. The canonical editable message lives as a **Gmail draft**; this tab is the **audit / queue** (join to Hit List via `store_key` / `hit_list_row`). Pairs with **Email Agent Follow Up**, which logs **sent** mail after you hit Send.
 
-**Sheet:** Same spreadsheet — tab name **`Email Agent Suggestions`**.
+**Sheet:** Same spreadsheet — tab name **`Email Agent Drafts`**.
 
 **Gmail (optional but recommended):** Apply user label **`Email Agent suggestions`** to drafts the automation creates so they are easy to filter in the Gmail UI (create the label once manually, or use `users.labels.create` in a future script). The tab also stores the label name in column `gmail_label` for documentation.
 
@@ -219,18 +226,40 @@ python3 scripts/format_email_agent_suggestions_sheet.py
 | `gmail_draft_id` | Gmail **Draft** id from `drafts.create` / API. |
 | `subject` | Draft subject (mirror of Gmail). |
 | `body_preview` | First ~500 characters of body for quick scan in Sheets. |
-| `status` | `pending_review` · `sent` · `discarded` · `superseded` (conventions; adjust as needed). |
+| `status` | Draft lifecycle on this tab — **not** the same field as **Email Agent Follow Up → `status`**. Typical values: **`pending_review`** (Gmail draft exists; **not yet sent**), **`discarded`** (draft removed / reconciled as abandoned — **not sent**), **`sent`** (optional manual convention if you mark a row after sending), **`superseded`** (replaced by a newer draft row). Cadence scripts (`suggest_*_drafts.py`) reconcile missing drafts to **`discarded`**. |
 | `gmail_label` | e.g. `Email Agent suggestions`. |
 | `protocol_version` | e.g. `PARTNER_OUTREACH_PROTOCOL v0.1`. |
 | `notes` | Free text — why this touch, thread summary, etc. |
 
-**Workflow:** Automation (or you) creates a Gmail draft → append a row here → you **edit/send** from Gmail → run `sync_email_agent_followup.py` so **Email Agent Follow Up** captures the sent message → set `status` to `sent` on this row (manual or future script).
+**Warm-up emails actually sent (Hit List column AU — e.g. “Warm-up email sent”):** Count rows on **`Email Agent Follow Up`** where **`status` = `warmup`** (each row is already a Gmail **Sent** message). That excludes draft-registry **`pending_review`** / **`discarded`** rows on **Email Agent Drafts**, which are **not** sends.
+
+**Follow-up emails actually sent (Hit List column AV — e.g. “Follow-up emails sent”):** Same join, but **`status` = `follow_up`** on **Email Agent Follow Up** (manager-style follow-ups and other non–warm-up sends classified by the sync script).
+
+```excel
+=IF($AD2<>"", COUNTIFS('Email Agent Follow Up'!$C:$C, $AD2, 'Email Agent Follow Up'!$J:$J, "warmup"), IF($K2<>"", COUNTIFS('Email Agent Follow Up'!$E:$E, LOWER($K2), 'Email Agent Follow Up'!$J:$J, "warmup"), 0))
+```
+
+```excel
+=IF($AD2<>"", COUNTIFS('Email Agent Follow Up'!$C:$C, $AD2, 'Email Agent Follow Up'!$J:$J, "follow_up"), IF($K2<>"", COUNTIFS('Email Agent Follow Up'!$E:$E, LOWER($K2), 'Email Agent Follow Up'!$J:$J, "follow_up"), 0))
+```
+
+- **$AD** = Hit List **Store Key**; **$K** = **Email** (fallback when Store Key is blank).  
+- **Follow Up columns:** `C` = `store_key`, `E` = `to_email`, `J` = **`status`** (warmup|bulk|follow_up|unknown).
+
+Re-apply **AU and AV** formulas down the sheet after large imports:
+
+```bash
+cd market_research
+python3 scripts/set_hit_list_warmup_touches_formula.py
+```
+
+**Workflow:** Automation (or you) creates a Gmail draft → append a row on **Email Agent Drafts** with `status=pending_review` → you **edit/send** from Gmail → run `sync_email_agent_followup.py` so **Email Agent Follow Up** captures the **Sent** message (with **`status`** = warmup/bulk/follow_up/unknown). Optionally set the draft row’s **`status`** to `sent` or `discarded` for your own queue hygiene; cadence scripts may set **`discarded`** when the Gmail draft disappears.
 
 ### Create drafts from Hit List (`garyjob@agroverse.shop`)
 
 Script: **`scripts/suggest_manager_followup_drafts.py`** — loads **Manager Follow-up** + **Email**, skips recipients that already have **`pending_review`** (and an open Gmail draft), builds a **Gmail draft** (optional **Grok** + DApp Remarks context), applies label **`Email Agent suggestions`**, appends a row here.
 
-**Warm up prospect (first touch + PDF):** **`scripts/suggest_warmup_prospect_drafts.py`** — **Status** **`AI: Warm up prospect`** + **Email**; same cadence (**7** days default since last logged send in **Email Agent Follow Up**), **`Email Agent Suggestions`** queue, and optional **`--use-grok`** (same xAI API as manager follow-up). Attaches **`retail_price_list/agroverse_wholesale_price_list_2026.pdf`**. Style reference: **`templates/warmup_outreach_reference.md`**. Before drafting, promotes **AI: Warm up prospect → AI: Prospect replied** when Gmail shows an **inbound** from the prospect **after** your latest logged **sent** to that address. CI: **`manager-followup-drafts.yml`** runs this step after manager drafts. Flags: **`--reply-promotion-only`**, **`--skip-reply-promotion`**.
+**Warm up prospect (first touch + PDF):** **`scripts/suggest_warmup_prospect_drafts.py`** — **Status** **`AI: Warm up prospect`** + **Email**; same cadence (**7** days default since last logged send in **Email Agent Follow Up**), **`Email Agent Drafts`** queue, and optional **`--use-grok`** (same xAI API as manager follow-up). Attaches **`retail_price_list/agroverse_wholesale_price_list_2026.pdf`**. Style reference: **`templates/warmup_outreach_reference.md`**. Before drafting, promotes **AI: Warm up prospect → AI: Prospect replied** when Gmail shows an **inbound** from the prospect **after** your latest logged **sent** to that address. CI: **`manager-followup-drafts.yml`** runs this step after manager drafts. Flags: **`--reply-promotion-only`**, **`--skip-reply-promotion`**.
 
 OAuth must include **`https://www.googleapis.com/auth/gmail.modify`**. If your `token.json` was created with older scopes, delete it and run `python3 scripts/gmail_oauth_authorize.py` again (add scope on Google Cloud consent screen first).
 
@@ -242,7 +271,7 @@ python3 scripts/suggest_manager_followup_drafts.py --max-drafts 1
 
 Options: `--skip-label`, `--expected-mailbox other@domain` (default `garyjob@agroverse.shop`).
 
-**Cadence / anti-spam:** Only one **pending** draft per **`to_email`** (see **Email Agent Suggestions** `status=pending_review`). The next draft is allowed only after **`min-days-since-sent`** (default **7**) since the latest **`sent_at`** for that address in **Email Agent Follow Up**. Recipients with no follow-up log row are eligible immediately. Use `--verbose` to print per-address skips. When you **Send** from Gmail, run `sync_email_agent_followup.py`, then set the suggestion row to `sent` (or `discarded`); the next scheduled run can draft again once cadence passes.
+**Cadence / anti-spam:** Only one **pending** draft per **`to_email`** (see **Email Agent Drafts** `status=pending_review`). The next draft is allowed only after **`min-days-since-sent`** (default **7**) since the latest **`sent_at`** for that address in **Email Agent Follow Up**. Recipients with no follow-up log row are eligible immediately. Use `--verbose` to print per-address skips. When you **Send** from Gmail, run `sync_email_agent_followup.py`, then set the suggestion row to `sent` (or `discarded`); the next scheduled run can draft again once cadence passes.
 
 **`Bulk Info Requested`:** **`scripts/suggest_bulk_info_drafts.py`** — wholesale-focused template + same PDF attachment; same cadence rules.
 

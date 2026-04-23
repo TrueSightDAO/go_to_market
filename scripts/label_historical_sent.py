@@ -4,7 +4,7 @@ One-off: apply AI/Sent Follow-up or AI/Sent Warm-up to historical sent messages
 (messages that went out before the review→sent label-swap was in place).
 
 Matching strategy (per row in Email Agent Follow Up):
-  1. Find all Email Agent Suggestions rows with the same to_email.
+  1. Find all Email Agent Drafts rows with the same to_email.
   2. If all suggestions for that email are one type → apply that type.
   3. If mixed, pick the suggestion with the latest created_at_utc BEFORE the
      sent_at of the follow-up row (closest prior suggestion).

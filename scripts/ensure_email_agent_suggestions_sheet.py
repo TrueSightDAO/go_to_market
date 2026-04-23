@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create the Hit List tab "Email Agent Suggestions" with a standard header row if missing.
+Create the Hit List tab "Email Agent Drafts" with a standard header row if missing.
 
 Use this registry alongside Gmail API drafts.create: each suggestion row tracks store context,
 gmail_draft_id, and status. Optional Gmail user label: "Email Agent suggestions" (see HIT_LIST_CREDENTIALS.md).
@@ -22,7 +22,8 @@ from google.oauth2.service_account import Credentials as SACredentials
 _REPO = Path(__file__).resolve().parent.parent
 _SA_CREDS = _REPO / "google_credentials.json"
 SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
-SUGGESTIONS_WS = "Email Agent Suggestions"
+SUGGESTIONS_WS = "Email Agent Drafts"
+LEGACY_SUGGESTIONS_WS = "Email Agent Suggestions"
 
 SHEETS_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -63,11 +64,17 @@ def main() -> None:
     try:
         ws = sh.worksheet(SUGGESTIONS_WS)
     except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=SUGGESTIONS_WS, rows=2000, cols=len(SUGGESTIONS_HEADERS))
-        ws.append_row(SUGGESTIONS_HEADERS, value_input_option="USER_ENTERED")
-        print(f"Created {SUGGESTIONS_WS!r} with header row ({len(SUGGESTIONS_HEADERS)} columns).")
-        print(f"Optional Gmail label for drafts: {DEFAULT_GMAIL_LABEL!r}")
-        return
+        try:
+            legacy = sh.worksheet(LEGACY_SUGGESTIONS_WS)
+            legacy.update_title(SUGGESTIONS_WS)
+            print(f"Renamed worksheet {LEGACY_SUGGESTIONS_WS!r} -> {SUGGESTIONS_WS!r}.")
+            ws = sh.worksheet(SUGGESTIONS_WS)
+        except gspread.WorksheetNotFound:
+            ws = sh.add_worksheet(title=SUGGESTIONS_WS, rows=2000, cols=len(SUGGESTIONS_HEADERS))
+            ws.append_row(SUGGESTIONS_HEADERS, value_input_option="USER_ENTERED")
+            print(f"Created {SUGGESTIONS_WS!r} with header row ({len(SUGGESTIONS_HEADERS)} columns).")
+            print(f"Optional Gmail label for drafts: {DEFAULT_GMAIL_LABEL!r}")
+            return
 
     vals = ws.get_all_values()
     if not vals:

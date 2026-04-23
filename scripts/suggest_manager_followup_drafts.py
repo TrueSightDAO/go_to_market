@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
 Create Gmail **drafts** for Hit List rows with Status = Manager Follow-up and Email set,
-append a row to **Email Agent Suggestions**, and apply label **Email Agent suggestions**.
+append a row to **Email Agent Drafts**, and apply label **Email Agent suggestions**.
 
 **Cadence (anti-spam):**
-- At most **one pending draft per recipient** (`to_email`): we block while **Email Agent Suggestions**
+- At most **one pending draft per recipient** (`to_email`): we block while **Email Agent Drafts**
   has `status=pending_review` **and** a matching **open Gmail draft** (by `gmail_draft_id`, or by scanning
   draft **To:** headers if the id cell is empty). If you **delete the draft in Gmail**, the next run
-  discards that row (unless `--dry-run`) so a new draft can be created when cadence allows.
-- Next draft only after **Email Agent Follow Up** shows a prior **sent** to that address older than
+  discards that row (unless `--dry-run`) so a new draft can be created. **Discarding a draft bypasses**
+  the min-days-since-sent gate until the next logged send: if reconcile marks a row discarded (or the
+  sheet already records a ``[UTC] discarded:`` note **after** your latest **Email Agent Follow Up**
+  ``sent_at`` for that address), you get another draft on the same or next run without waiting the
+  full cadence (so you can iterate after changing prompts or templates).
+- Otherwise, next draft only after **Email Agent Follow Up** shows a prior **sent** to that address older than
   `--min-days-since-sent` (default **7** calendar days). Recipients with **no** log row are eligible
   immediately (treat as “no recorded send yet” for cadence).
 - **Source of truth for “last sent”:** the latest `sent_at` in **Email Agent Follow Up** for that
@@ -73,16 +77,21 @@ from google.oauth2.service_account import Credentials as SACredentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from email_agent_tracking import plain_text_to_html_with_open_pixel
 from gmail_plain_body import extract_plain_body_from_payload
 from gmail_user_credentials import load_gmail_user_credentials
 
 _REPO = Path(__file__).resolve().parent.parent
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
 _SA_CREDS = _REPO / "google_credentials.json"
 _GMAIL_TOKEN = _REPO / "credentials" / "gmail" / "token.json"
 
 SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
 HIT_LIST_WS = "Hit List"
-SUGGESTIONS_WS = "Email Agent Suggestions"
+SUGGESTIONS_WS = "Email Agent Drafts"
 LOG_WS = "Email Agent Follow Up"
 DAPP_REMARKS_WS = "DApp Remarks"
 
@@ -522,6 +531,73 @@ def last_sent_utctime_per_to_email(log_ws: gspread.Worksheet | None) -> dict[str
     return best
 
 
+# Reconcile appends notes like ``[2026-04-23T12:00:00Z] discarded: ...`` — used to bypass cadence
+# when the user removed the Gmail draft (iterate before min-days since last *sent*).
+_DISCARD_NOTE_TS_RE = re.compile(
+    r"\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\]\s*discarded:",
+    re.IGNORECASE,
+)
+
+
+def parse_latest_discard_utc_from_notes(notes: str) -> datetime | None:
+    """Latest UTC timestamp from any ``[...Z] discarded:`` segment in *notes*."""
+    best: datetime | None = None
+    for m in _DISCARD_NOTE_TS_RE.finditer(notes or ""):
+        ts = m.group(1)
+        try:
+            dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if best is None or dt > best:
+            best = dt
+    return best
+
+
+def latest_discarded_utc_per_to_email(ws: gspread.Worksheet) -> dict[str, datetime]:
+    """Per ``to_email``, max parsed discard time from ``discarded`` rows' ``notes``."""
+    values = ws.get_all_values()
+    if len(values) < 2:
+        return {}
+    hdr = header_map(values[0])
+    em_i = hdr.get("to_email")
+    st_i = hdr.get("status")
+    notes_i = hdr.get("notes")
+    if em_i is None or st_i is None:
+        return {}
+    best: dict[str, datetime] = {}
+    for row in values[1:]:
+        if cell(row, st_i).lower() != "discarded":
+            continue
+        em = normalize_email(cell(row, em_i))
+        if not em:
+            continue
+        notes = cell(row, notes_i) if notes_i is not None else ""
+        dt = parse_latest_discard_utc_from_notes(notes)
+        if dt is None:
+            continue
+        prev = best.get(em)
+        if prev is None or dt > prev:
+            best[em] = dt
+    return best
+
+
+def cadence_bypass_after_discarded_draft(
+    em: str,
+    *,
+    last_sent_dt: datetime | None,
+    freshly_discarded_emails: set[str],
+    latest_discard_utc_per_email: dict[str, datetime],
+) -> bool:
+    """True if min-days-since-sent should not block *em* (user discarded the pending Gmail draft)."""
+    if em in freshly_discarded_emails:
+        return True
+    disc = latest_discard_utc_per_email.get(em)
+    if disc is None or last_sent_dt is None:
+        return False
+    ls = last_sent_dt.astimezone(timezone.utc)
+    return disc > ls
+
+
 def _draft_resource_is_trashed(draft_resource: dict) -> bool:
     """True if the draft's message is in Gmail Trash (API still returns 200; we treat like deleted)."""
     msg = draft_resource.get("message") or {}
@@ -606,21 +682,25 @@ def pending_review_emails_after_gmail_reconcile(
     *,
     dry_run: bool,
     verbose: bool,
-) -> tuple[set[str], int]:
+) -> tuple[set[str], int, set[str]]:
     """Recipients still blocked by a real pending draft.
 
     Discards ``pending_review`` rows whose Gmail draft is gone, then **re-fetches** the sheet and
     re-scans so the same run does not keep blocking addresses that were only waiting on a stale row
     (e.g. iChakras after deleting the draft).
+
+    Returns ``(pending_emails, n_rows_marked_discarded, freshly_discarded_emails)``. The third set
+    is every ``to_email`` from a stale ``pending_review`` row in this invocation (including dry-run),
+    so callers can bypass min-days cadence for those addresses in the same run.
     """
     values = ws.get_all_values()
     if len(values) < 2:
-        return set(), 0
+        return set(), 0, set()
     hdr = header_map(values[0])
     st_i = hdr.get("status")
     notes_i = hdr.get("notes")
     if st_i is None or hdr.get("to_email") is None:
-        return set(), 0
+        return set(), 0, set()
 
     status_col = st_i + 1
     notes_col = (notes_i + 1) if notes_i is not None else None
@@ -628,15 +708,20 @@ def pending_review_emails_after_gmail_reconcile(
     total_updated = 0
     pending_emails: set[str] = set()
     stale: list[tuple[int, str, str]] = []
+    freshly_discarded_emails: set[str] = set()
 
     for _ in range(4):
         pending_emails, stale = _scan_pending_review_rows(
             service, values, verbose=verbose, dry_run=dry_run
         )
         if not stale:
-            return pending_emails, total_updated
+            return pending_emails, total_updated, freshly_discarded_emails
+        for _, em_stale, _ in stale:
+            ne = normalize_email(em_stale)
+            if ne:
+                freshly_discarded_emails.add(ne)
         if dry_run:
-            return pending_emails, 0
+            return pending_emails, 0, freshly_discarded_emails
 
         now_tag = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         for sheet_row, _em, draft_id in stale:
@@ -659,7 +744,7 @@ def pending_review_emails_after_gmail_reconcile(
 
         values = ws.get_all_values()
 
-    return pending_emails, total_updated
+    return pending_emails, total_updated, freshly_discarded_emails
 
 
 def days_since_utc(last: datetime, now: datetime) -> float:
@@ -911,12 +996,44 @@ def ensure_user_label_id(service, label_name: str) -> str:
     return str(created["id"])
 
 
-def build_message_raw(sender: str, to: str, subject: str, body: str) -> dict:
+def build_message_raw(
+    sender: str,
+    to: str,
+    subject: str,
+    body: str,
+    *,
+    html_body: str | None = None,
+    attachment_path: Path | None = None,
+    attachment_filename: str | None = None,
+) -> dict:
+    """Build Gmail ``raw`` RFC822. Optional **html_body** for ``multipart/alternative``; optional PDF."""
     msg = EmailMessage()
     msg["From"] = sender
     msg["To"] = to
     msg["Subject"] = subject
-    msg.set_content(body, charset="utf-8")
+
+    if attachment_path is not None:
+        if not attachment_path.is_file():
+            raise FileNotFoundError(f"Attachment not found: {attachment_path}")
+        data = attachment_path.read_bytes()
+        fn = attachment_filename or attachment_path.name
+        if html_body:
+            inner = EmailMessage()
+            inner.set_content(body, charset="utf-8")
+            inner.add_alternative(html_body, subtype="html")
+            msg.make_mixed()
+            msg.attach(inner)
+            msg.add_attachment(data, maintype="application", subtype="pdf", filename=fn)
+        else:
+            msg.make_mixed()
+            msg.set_content(body, charset="utf-8")
+            msg.add_attachment(data, maintype="application", subtype="pdf", filename=fn)
+    elif html_body:
+        msg.set_content(body, charset="utf-8")
+        msg.add_alternative(html_body, subtype="html")
+    else:
+        msg.set_content(body, charset="utf-8")
+
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
     return {"raw": raw}
 
@@ -970,6 +1087,15 @@ def main() -> None:
         help=f"Min days since last logged send in {LOG_WS!r} before drafting again (default {DEFAULT_MIN_DAYS_SINCE_SENT}).",
     )
     parser.add_argument("--skip-label", action="store_true", help="Do not create/apply Gmail label.")
+    parser.add_argument(
+        "--track-opens",
+        action="store_true",
+        help=(
+            "Add an HTML alternative with a 1×1 open pixel (tid=suggestion_id). "
+            "Set EMAIL_AGENT_TRACKING_BASE_URL (default https://edgar.truesight.me); "
+            "Edgar must implement GET /email_agent/open.gif — see email_agent_tracking.py."
+        ),
+    )
     parser.add_argument(
         "--expected-mailbox",
         default=EXPECTED_MAILBOX,
@@ -1038,7 +1164,7 @@ def main() -> None:
             f"Note: worksheet {DAPP_REMARKS_WS!r} not found — Grok context will omit DApp visit remarks."
         )
     last_sent = last_sent_utctime_per_to_email(log_ws)
-    pending_to, n_reconciled = pending_review_emails_after_gmail_reconcile(
+    pending_to, n_reconciled, freshly_discarded = pending_review_emails_after_gmail_reconcile(
         gsvc, sugg_ws, dry_run=args.dry_run, verbose=args.verbose
     )
     if n_reconciled:
@@ -1046,6 +1172,7 @@ def main() -> None:
             f"Reconciled {n_reconciled} row(s) in {SUGGESTIONS_WS!r}: "
             "pending_review → discarded (Gmail draft was deleted or missing)."
         )
+    latest_discard_utc = latest_discarded_utc_per_to_email(sugg_ws)
     now = datetime.now(timezone.utc)
 
     targets = load_hit_list_targets(hit_ws)
@@ -1079,13 +1206,24 @@ def main() -> None:
         if prev is not None:
             d = days_since_utc(prev, now)
             if d < args.min_days_since_sent:
-                skipped_cadence += 1
+                if not cadence_bypass_after_discarded_draft(
+                    em,
+                    last_sent_dt=prev,
+                    freshly_discarded_emails=freshly_discarded,
+                    latest_discard_utc_per_email=latest_discard_utc,
+                ):
+                    skipped_cadence += 1
+                    if args.verbose:
+                        print(
+                            f"  skip {em}: last logged send {d:.1f}d ago "
+                            f"(need >= {args.min_days_since_sent}d; sent_at={prev.date().isoformat()})"
+                        )
+                    continue
                 if args.verbose:
                     print(
-                        f"  skip {em}: last logged send {d:.1f}d ago "
-                        f"(need >= {args.min_days_since_sent}d; sent_at={prev.date().isoformat()})"
+                        f"  allow {em}: cadence bypass (discarded draft after last logged send "
+                        f"at {prev.date().isoformat()})"
                     )
-                continue
         candidates.append(em)
 
     def sort_key(email: str) -> tuple:
@@ -1185,7 +1323,13 @@ def main() -> None:
             subj = draft_subject(shop)
             body = draft_body_template(shop, snippets)
 
-        raw = build_message_raw(me, to_addr, subj, body)
+        sug_id = str(uuid.uuid4())
+        tracking_base = (os.environ.get("EMAIL_AGENT_TRACKING_BASE_URL") or "https://edgar.truesight.me").strip()
+        html_body = None
+        if args.track_opens and tracking_base:
+            html_body = plain_text_to_html_with_open_pixel(body, tracking_base, sug_id)
+
+        raw = build_message_raw(me, to_addr, subj, body, html_body=html_body)
 
         if args.dry_run:
             print(f"\n--- dry-run draft #{n_made + 1} → {to_addr} ({shop}) ---")
@@ -1211,7 +1355,6 @@ def main() -> None:
             except Exception as e:
                 sys.stderr.write(f"Warning: could not apply label to draft message {msg_id}: {e}\n")
 
-        sug_id = str(uuid.uuid4())
         preview = body.replace("\n", " ")[:BODY_PREVIEW_MAX]
         notes = (
             f"Auto draft ({source}); cadence min_days={args.min_days_since_sent}; "

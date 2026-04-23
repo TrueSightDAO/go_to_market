@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Readable layout for "Email Agent Suggestions":
+Readable layout for "Email Agent Drafts":
 - Freeze header, green header row, column widths, wrap on body_preview / notes
 - Filter + banded rows (removes old banding first)
 
@@ -21,7 +21,7 @@ from sheets_banding import delete_banded_ranges_for_sheet
 _REPO = Path(__file__).resolve().parent.parent
 _SA_CREDS = _REPO / "google_credentials.json"
 SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
-WS_TITLE = "Email Agent Suggestions"
+WS_TITLE = "Email Agent Drafts"
 NUM_COLS = 13
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]

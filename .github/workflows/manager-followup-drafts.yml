@@ -5,7 +5,7 @@
 # Cadence: suggest_manager_followup_drafts + suggest_warmup_prospect_drafts use the latest sent_at
 # in "Email Agent Follow Up" per recipient (filled by sync_email_agent_followup from Gmail sent mail).
 # A draft is created only if that send is at least min_days_since_sent ago (default 7) and there is
-# no pending_review row in Email Agent Suggestions. Warmup also promotes AI: Warm up prospect →
+# no pending_review row in Email Agent Drafts. Warmup also promotes AI: Warm up prospect →
 # AI: Prospect replied when Gmail shows inbound from the prospect after the last logged send.
 # Most runs may create zero drafts if no one is "due."
 #
