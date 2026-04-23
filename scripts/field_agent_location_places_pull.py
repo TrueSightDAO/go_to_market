@@ -7,6 +7,8 @@ Process **Recent Field Agent Location** rows (Status=pending) for the holistic w
   mark this row **ignored because already pulled** and **do not** call Google Places Nearby.
 - Otherwise run **Places Nearby Search** around the agent lat/lng, enrich with Place Details,
   dedupe against the live **Hit List**, append new **Research** rows, set Status **pulled**.
+  After appends, writes **AU** / **AV** COUNTIFS formulas (same as ``set_hit_list_warmup_touches_formula.py``)
+  so warm-up / follow-up **sent** counts resolve from **Email Agent Follow Up**.
 
 Also appends an audit row to **DApp Remarks** (Processed=Yes) summarizing each agent row handled.
 
@@ -49,6 +51,7 @@ from hit_list_dapp_remarks_sheet import (  # noqa: E402
     _parse_row_from_append_response,
     gspread_retry,
 )
+from set_hit_list_warmup_touches_formula import write_au_av_for_hit_list_rows  # noqa: E402
 
 SPREADSHEET_ID = dl.SPREADSHEET_ID
 HIT_LIST_NAME = dl.HIT_LIST_WS
@@ -478,6 +481,9 @@ def main() -> None:
             if ur:
                 append_updated_ranges.append(str(ur))
             hit_lr = _parse_row_from_append_response(ar_dict)
+            if hit_lr is None:
+                nv = gspread_retry(hit_ws.get_all_values)
+                hit_lr = len(nv) if nv else None
             if hit_lr is not None:
                 appended_hit_rows.append(hit_lr)
             appended += 1
@@ -488,6 +494,17 @@ def main() -> None:
             if na:
                 name_addr.add(na)
             time.sleep(0.06)
+
+        if appended_hit_rows:
+            try:
+                n_au_av = write_au_av_for_hit_list_rows(hit_ws, appended_hit_rows)
+                summary_lines.append(
+                    f"Hit List AU/AV formulas applied to **{n_au_av}** new row(s) (warm-up / follow-up send counts)."
+                )
+            except Exception as exc:
+                warn = f"AU/AV formula write failed ({exc}) — run `python3 scripts/set_hit_list_warmup_touches_formula.py` once."
+                summary_lines.append(warn)
+                print(f"Row {row_num}: warning: {warn}", flush=True)
 
         set_recent_status(recent_ws, row_num, col_idx["Status"] + 1, STATUS_PULLED)
         summary_lines.append(f"Places raw results: {len(raw)}")

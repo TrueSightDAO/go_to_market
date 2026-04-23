@@ -3,8 +3,9 @@
 Gmail **drafts** for Hit List rows with Status = **AI: Warm up prospect** and Email set.
 
 - Cadence: same as manager follow-up — at most one **pending_review** suggestion per recipient
-  while the Gmail draft exists; next draft only after **Email Agent Follow Up** shows a prior
-  **sent** at least ``--min-days-since-sent`` ago (default **7**). Run **sync_email_agent_followup.py** first.
+  while the Gmail draft exists; next draft after **Email Agent Follow Up** shows a prior **sent** at least
+  ``--min-days-since-sent`` ago (default **7**), **unless** a pending draft was **discarded** (Gmail draft
+  deleted / reconcile), in which case the next draft is allowed immediately. Run **sync_email_agent_followup.py** first.
 - **Attachment:** ``retail_price_list/agroverse_wholesale_price_list_2026.pdf`` on each draft.
 - **Grok** (optional ``--use-grok``): first-touch intro; no in-person visit assumption; flexible consignment or bulk;
   lead with Amazon rainforest restoration (tree per bag, QR traceability); style reference in
@@ -27,6 +28,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import re
 import sys
 import uuid
@@ -40,9 +42,14 @@ import requests
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+_REPO = Path(__file__).resolve().parent.parent
+_SCRIPTS = _REPO / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
 import suggest_manager_followup_drafts as smf
 
-_REPO = Path(__file__).resolve().parent.parent
+from email_agent_tracking import plain_text_to_html_with_open_pixel
 _WARMUP_REF = _REPO / "templates" / "warmup_outreach_reference.md"
 _DEFAULT_PDF = _REPO / "retail_price_list" / "agroverse_wholesale_price_list_2026.pdf"
 
@@ -344,6 +351,8 @@ def build_message_raw_with_pdf(
     subject: str,
     body: str,
     pdf_path: Path,
+    *,
+    html_body: str | None = None,
 ) -> dict[str, str]:
     if not pdf_path.is_file():
         raise FileNotFoundError(f"Wholesale PDF not found: {pdf_path}")
@@ -352,13 +361,21 @@ def build_message_raw_with_pdf(
     msg["From"] = sender
     msg["To"] = to
     msg["Subject"] = subject
-    msg.set_content(body, charset="utf-8")
-    msg.add_attachment(
-        data,
-        maintype="application",
-        subtype="pdf",
-        filename=pdf_path.name,
-    )
+    if html_body:
+        inner = EmailMessage()
+        inner.set_content(body, charset="utf-8")
+        inner.add_alternative(html_body, subtype="html")
+        msg.make_mixed()
+        msg.attach(inner)
+        msg.add_attachment(data, maintype="application", subtype="pdf", filename=pdf_path.name)
+    else:
+        msg.set_content(body, charset="utf-8")
+        msg.add_attachment(
+            data,
+            maintype="application",
+            subtype="pdf",
+            filename=pdf_path.name,
+        )
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
     return {"raw": raw}
 
@@ -405,6 +422,11 @@ def main() -> None:
     )
     p.add_argument("--reply-promotion-only", action="store_true", help="Only promote Warm up → Prospect replied.")
     p.add_argument("--skip-reply-promotion", action="store_true")
+    p.add_argument(
+        "--track-opens",
+        action="store_true",
+        help="Multipart HTML + 1×1 open pixel (tid=suggestion_id); see suggest_manager_followup_drafts --track-opens.",
+    )
     args = p.parse_args()
 
     if args.max_drafts < 0:
@@ -448,13 +470,14 @@ def main() -> None:
 
     log_tab_present = log_ws is not None
     last_sent = smf.last_sent_utctime_per_to_email(log_ws)
-    pending_to, n_reconciled = smf.pending_review_emails_after_gmail_reconcile(
+    pending_to, n_reconciled, freshly_discarded = smf.pending_review_emails_after_gmail_reconcile(
         gsvc, sugg_ws, dry_run=args.dry_run, verbose=args.verbose
     )
     if n_reconciled:
         print(
             f"Reconciled {n_reconciled} row(s) in {SUGGESTIONS_WS!r}: pending_review → discarded."
         )
+    latest_discard_utc = smf.latest_discarded_utc_per_to_email(sugg_ws)
     now = datetime.now(timezone.utc)
 
     targets = load_warmup_targets(hit_ws)
@@ -483,10 +506,21 @@ def main() -> None:
         if prev is not None:
             d = smf.days_since_utc(prev, now)
             if d < args.min_days_since_sent:
-                skipped_cadence += 1
+                if not smf.cadence_bypass_after_discarded_draft(
+                    em,
+                    last_sent_dt=prev,
+                    freshly_discarded_emails=freshly_discarded,
+                    latest_discard_utc_per_email=latest_discard_utc,
+                ):
+                    skipped_cadence += 1
+                    if args.verbose:
+                        print(f"  skip {em}: last send {d:.1f}d ago (need {args.min_days_since_sent})")
+                    continue
                 if args.verbose:
-                    print(f"  skip {em}: last send {d:.1f}d ago (need {args.min_days_since_sent})")
-                continue
+                    print(
+                        f"  allow {em}: cadence bypass (discarded draft after last logged send "
+                        f"at {prev.date().isoformat()})"
+                    )
         candidates.append(em)
 
     def sort_key(email: str) -> tuple:
@@ -575,8 +609,16 @@ def main() -> None:
             subj = warmup_subject_template(shop)
             body = warmup_body_template(shop)
 
+        sug_id = str(uuid.uuid4())
+        tracking_base = (os.environ.get("EMAIL_AGENT_TRACKING_BASE_URL") or "https://edgar.truesight.me").strip()
+        html_body = None
+        if args.track_opens and tracking_base:
+            html_body = plain_text_to_html_with_open_pixel(body, tracking_base, sug_id)
+
         try:
-            raw = build_message_raw_with_pdf(me, to_addr, subj, body, args.pdf_path)
+            raw = build_message_raw_with_pdf(
+                me, to_addr, subj, body, args.pdf_path, html_body=html_body
+            )
         except FileNotFoundError as e:
             sys.stderr.write(f"{e}\n")
             sys.exit(1)
@@ -605,7 +647,6 @@ def main() -> None:
             except Exception as e:
                 sys.stderr.write(f"Warning: label on draft message {msg_id}: {e}\n")
 
-        sug_id = str(uuid.uuid4())
         preview = body.replace("\n", " ")[:BODY_PREVIEW_MAX]
         notes = (
             f"kind=warmup_intro; attachment={args.pdf_path.name}; source={source}; "

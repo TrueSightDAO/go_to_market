@@ -128,6 +128,53 @@ const HIT_LIST_OPENING_HOUR_HEADERS = [
 const GOOGLE_LISTING_HEADER = 'Google listing';
 
 /**
+ * Hit List columns **AU** / **AV** (1-based A=1 …), same layout as
+ * ``market_research/scripts/set_hit_list_warmup_touches_formula.py``.
+ */
+const HIT_LIST_COL_AU = 47;
+const HIT_LIST_COL_AV = 48;
+
+/**
+ * COUNTIFS against **Email Agent Follow Up** (``C`` = ``store_key``, ``E`` = ``to_email``, ``J`` = ``status``).
+ * @param {number} row Hit List data row (1-based, matches Sheets).
+ * @param {string} status ``warmup`` or ``follow_up`` (from ``sync_email_agent_followup.py``).
+ * @return {string}
+ */
+function hitListSentTouchCountFormula_(row, status) {
+  return (
+    '=IF($AD' +
+      row +
+      '<>"", COUNTIFS(\'Email Agent Follow Up\'!$C:$C, $AD' +
+      row +
+      ', \'Email Agent Follow Up\'!$J:$J, "' +
+      status +
+      '"), IF($K' +
+      row +
+      '<>"", COUNTIFS(\'Email Agent Follow Up\'!$E:$E, LOWER($K' +
+      row +
+      '), \'Email Agent Follow Up\'!$J:$J, "' +
+      status +
+      '"), 0))'
+  );
+}
+
+/**
+ * Writes AU (warm-up sends) and AV (follow-up sends) for one Hit List row.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {number} rowNum 1-based sheet row
+ */
+function applyHitListAuAvFormulasToRow_(sheet, rowNum) {
+  sheet
+    .getRange(rowNum, HIT_LIST_COL_AU, rowNum, HIT_LIST_COL_AV)
+    .setFormulas([
+      [
+        hitListSentTouchCountFormula_(rowNum, 'warmup'),
+        hitListSentTouchCountFormula_(rowNum, 'follow_up'),
+      ],
+    ]);
+}
+
+/**
  * Sheets often returns times as Date (1899-12-30 wall clock) or as a day-fraction number.
  * Open-now parsing expects "HH:mm" text; this normalizes before parseHmToMinutes_.
  * @param {*} raw Cell value from getValues()
@@ -1068,6 +1115,7 @@ function addNewStore(storeData) {
   }
 
   sheet.appendRow(row);
+  applyHitListAuAvFormulasToRow_(sheet, sheet.getLastRow());
 
   const submissionId = logDappSubmission_(spreadsheet, storeData.shopName, storeData.status, storeData.remarks, submittedBy, true);
   return {

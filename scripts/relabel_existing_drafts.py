@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 One-off script: relabel existing Gmail drafts from "Email Agent suggestions"
-to "AI/Follow-up" or "AI/Warm-up" based on the Email Agent Suggestions sheet.
+to "AI/Follow-up" or "AI/Warm-up" based on the Email Agent Drafts sheet.
 
 Matching logic:
   - protocol_version contains "warmup_intro" → AI/Warm-up
