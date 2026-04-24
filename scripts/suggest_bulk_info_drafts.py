@@ -37,7 +37,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import suggest_manager_followup_drafts as sm
-from email_agent_tracking import plain_text_to_html_with_open_pixel
+from email_agent_tracking import plain_text_to_html_for_email_agent
 
 BULK_STATUS = "Bulk Info Requested"
 BULK_PROTOCOL_VERSION = "BULK_INFO_PDF v0.1"
@@ -101,6 +101,11 @@ def main() -> None:
         "--track-opens",
         action="store_true",
         help="Multipart HTML + 1×1 open pixel (tid=suggestion_id); see suggest_manager_followup_drafts --track-opens.",
+    )
+    parser.add_argument(
+        "--track-clicks",
+        action="store_true",
+        help="Rewrite http(s) URLs in the HTML part via Edgar /email_agent/click; see suggest_manager_followup_drafts.",
     )
     parser.add_argument("--expected-mailbox", default=sm.EXPECTED_MAILBOX)
     parser.add_argument("--verbose", action="store_true")
@@ -265,8 +270,20 @@ def main() -> None:
         sug_id = str(uuid.uuid4())
         tracking_base = (os.environ.get("EMAIL_AGENT_TRACKING_BASE_URL") or "https://edgar.truesight.me").strip()
         html_body = None
-        if args.track_opens and tracking_base:
-            html_body = plain_text_to_html_with_open_pixel(body, tracking_base, sug_id)
+        if args.track_opens or args.track_clicks:
+            if not tracking_base:
+                sys.stderr.write(
+                    "EMAIL_AGENT_TRACKING_BASE_URL is empty; cannot use --track-opens/--track-clicks.\n"
+                )
+                sys.exit(2)
+            html_body = plain_text_to_html_for_email_agent(
+                body,
+                tracking_base,
+                sug_id,
+                to_addr,
+                track_opens=args.track_opens,
+                track_clicks=args.track_clicks,
+            )
 
         raw = sm.build_message_raw(
             me,
@@ -319,6 +336,8 @@ def main() -> None:
             sm.DEFAULT_GMAIL_LABEL if not args.skip_label else "",
             BULK_PROTOCOL_VERSION,
             notes,
+            "0",
+            "0",
         ]
         created_rows.append(row)
         n_made += 1

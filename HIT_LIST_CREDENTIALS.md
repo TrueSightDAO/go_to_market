@@ -259,7 +259,7 @@ python3 scripts/format_email_agent_suggestions_sheet.py
 | `protocol_version` | e.g. `PARTNER_OUTREACH_PROTOCOL v0.1`. |
 | `notes` | Free text — why this touch, thread summary, etc. |
 | `Open` | Tracked **open** count for this suggestion while it is still a draft (default **`0`**). Edgar (or similar) should increment using pixel `tid=<suggestion_id>` **before** the **Email Agent Follow Up** row exists; values are **ported** to Follow Up **column L** when sync matches this draft to a Gmail **Sent** row. |
-| `Click through` | Same pattern as **Open** for future click redirectors (default **`0`**); ported to Follow Up **column M** on sync. |
+| `Click through` | Same pattern as **Open** for click redirectors when drafts use **`--track-clicks`** (default **`0`**); ported to Follow Up **column M** on sync. |
 
 **Warm-up emails actually sent (Hit List column AU — e.g. “Warm-up email sent”):** Count rows on **`Email Agent Follow Up`** where **`status` = `warmup`** (each row is already a Gmail **Sent** message). That excludes draft-registry **`pending_review`** / **`discarded`** rows on **Email Agent Drafts**, which are **not** sends.
 
@@ -300,6 +300,8 @@ python3 scripts/suggest_manager_followup_drafts.py --max-drafts 1
 ```
 
 Options: `--skip-label`, `--expected-mailbox other@domain` (default `garyjob@agroverse.shop`).
+
+**Open / click tracking (Python draft scripts only):** Pass **`--track-opens`** to add a multipart **HTML** part with a 1×1 pixel to **`GET /email_agent/open.gif?tid=<suggestion_id>`** (default host **`EMAIL_AGENT_TRACKING_BASE_URL`** = `https://edgar.truesight.me`). Pass **`--track-clicks`** to rewrite **`http(s):`** URLs in that HTML part through **`GET /email_agent/click?tid=…&r=…&to=…`** (recipient and destination are base64url, same pattern as newsletter). Plain-text part is unchanged. **Edgar** must implement those routes and increment **Email Agent Drafts** columns **Open** / **Click through**; **`sync_email_agent_followup.py`** ports them to **Email Agent Follow Up** when it matches a sent message to a draft. Apps Script **`EmailAgentDrafts.gs`** does not inject pixels or wrapped links yet.
 
 **Cadence / anti-spam:** Only one **pending** draft per **`to_email`** (see **Email Agent Drafts** `status=pending_review`). The next draft is allowed only after **`min-days-since-sent`** (default **7**) since the latest **`sent_at`** for that address in **Email Agent Follow Up**. Recipients with no follow-up log row are eligible immediately. Use `--verbose` to print per-address skips. When you **Send** from Gmail, run `sync_email_agent_followup.py`, then set the suggestion row to `sent` (or `discarded`); the next scheduled run can draft again once cadence passes.
 
