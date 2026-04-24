@@ -22,7 +22,7 @@ _REPO = Path(__file__).resolve().parent.parent
 _SA_CREDS = _REPO / "google_credentials.json"
 SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
 WS_TITLE = "Email Agent Drafts"
-NUM_COLS = 13
+NUM_COLS = 15
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -43,6 +43,8 @@ _COL_WIDTHS = [
     160,
     110,
     200,
+    72,
+    88,
 ]
 
 

@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import gspread
+from gspread.utils import rowcol_to_a1
 from google.oauth2.service_account import Credentials as SACredentials
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -44,10 +45,62 @@ SUGGESTIONS_HEADERS = [
     "gmail_label",
     "protocol_version",
     "notes",
+    "Open",
+    "Click through",
 ]
+
+# Before engagement columns (matches prior script revision).
+SUGGESTIONS_HEADERS_LEGACY = SUGGESTIONS_HEADERS[:-2]
 
 # Canonical label name to apply via Gmail API when creating drafts (future script).
 DEFAULT_GMAIL_LABEL = "Email Agent suggestions"
+
+
+def header_map(header_row: list[str]) -> dict[str, int]:
+    return {str(c or "").strip(): i for i, c in enumerate(header_row) if str(c or "").strip()}
+
+
+def migrate_drafts_add_open_click(ws: gspread.Worksheet, header_row: list[str]) -> bool:
+    """Append **Open** and **Click through** at end of row 1 if missing; fill ``0`` for existing rows."""
+    hm = header_map(header_row)
+    if hm.get("Open") is not None and hm.get("Click through") is not None:
+        return False
+
+    # Append at the end of the row (sheet grid may be exactly full — use appendDimension).
+    col_count_before = len(header_row)
+    ws.spreadsheet.batch_update(
+        {
+            "requests": [
+                {
+                    "appendDimension": {
+                        "sheetId": ws.id,
+                        "dimension": "COLUMNS",
+                        "length": 2,
+                    }
+                }
+            ]
+        }
+    )
+    c_open = col_count_before + 1
+    c_click = col_count_before + 2
+    ws.update_cell(1, c_open, "Open")
+    ws.update_cell(1, c_click, "Click through")
+
+    vals = ws.get_all_values()
+    nrows = max(0, len(vals) - 1)
+    if nrows:
+        zeros = [["0", "0"]] * nrows
+        ws.update(
+            range_name=f"{rowcol_to_a1(2, c_open)}:{rowcol_to_a1(1 + nrows, c_click)}",
+            values=zeros,
+            value_input_option="USER_ENTERED",
+        )
+
+    print(
+        "Migrated Email Agent Drafts: appended columns 'Open' and 'Click through' "
+        f"(1-based columns {c_open}–{c_click}); filled 0 for {nrows} data row(s)."
+    )
+    return True
 
 
 def get_client():
@@ -87,9 +140,15 @@ def main() -> None:
         print(f"{SUGGESTIONS_WS!r} already has the expected header row.")
         return
 
+    if first == SUGGESTIONS_HEADERS_LEGACY:
+        migrate_drafts_add_open_click(ws, vals[0])
+        print(f"{SUGGESTIONS_WS!r} migrated to include Open / Click through.")
+        return
+
     sys.stderr.write(
         f"{SUGGESTIONS_WS!r} row 1 does not match expected headers.\n"
-        f"Expected: {SUGGESTIONS_HEADERS}\n"
+        f"Expected (new): {SUGGESTIONS_HEADERS}\n"
+        f"Or legacy (13 cols): {SUGGESTIONS_HEADERS_LEGACY}\n"
         f"Found:    {first}\n"
         "Fix manually or rename the tab if this is a different sheet.\n"
     )

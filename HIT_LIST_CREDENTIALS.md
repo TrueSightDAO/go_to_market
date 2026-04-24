@@ -48,6 +48,33 @@ python3 scripts/field_agent_location_places_pull.py --limit 10
 
 Cross-links: **`agentic_ai_context/DAPP_PAGE_CONVENTIONS.md`** §14 (*Field agent location*), **`tokenomics/SCHEMA.md`** §4.
 
+## Pipeline Dashboard — sub-pipeline (touch histogram) columns **F:M**
+
+**Tab:** [**Pipeline Dashboard**](https://docs.google.com/spreadsheets/d/1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc/edit?gid=1606881029#gid=1606881029) (`gid=1606881029`).
+
+The bar chart (`pipeline_dashboard_chart_colors.py`) reads **D:E** only, so **E** stays the single **total stores** bar per status. **F through M** (8 columns by default) add a **histogram** of logged sends on that touch axis (same joins as Hit List **AU** / **AV**):
+
+| Columns | Meaning |
+|---------|--------|
+| **F** | **0** sends (blank or `0`) |
+| **G–L** | Exactly **1 … 6** sends |
+| **M** | **7+** sends (`>=7`) |
+
+- **AI: Warm up prospect** — histogram uses **AU** (warm-up sends from **Email Agent Follow Up**).
+- **Manager Follow-up**, **Bulk Info Requested**, **AI: Prospect replied** — when those labels appear in column **D**, histogram uses **AV** (follow-up sends).
+
+Bucket counts are configurable in **`scripts/pipeline_dashboard_touch_columns.py`** (`MAX_EXACT`, `TAIL_MIN`).
+
+Refresh / apply formulas:
+
+```bash
+cd market_research
+python3 scripts/pipeline_dashboard_touch_columns.py --dry-run
+python3 scripts/pipeline_dashboard_touch_columns.py
+```
+
+Row **1** sets the header labels (e.g. `0 sends`, `1 send`, `2 sends`, …, `7+ sends`). The GAS `sync_pipeline_metrics` job still reads **C:E** for `weekly.json`; it does **not** sum **F:M**, so operator funnel totals stay unchanged.
+
 ---
 
 ## Research queue — Google Places + Grok photo review
@@ -166,10 +193,11 @@ If the tab is missing, `scripts/sync_email_agent_followup.py` creates it and wri
 | `body_plain` | Best-effort plain body (for draft / Grok context). |
 | `status` | Outbound **kind** for this Gmail **Sent** row: `warmup` · `bulk` · `follow_up` · `unknown` — inferred from Gmail labels (`AI/Sent Warm-up`, `AI/Sent Follow-up`, …) plus **Email Agent Drafts** `protocol_version` when labels are ambiguous (e.g. bulk vs manager share the same follow-up sent label). |
 | `sync_source` | e.g. `gmail_sent_sync`. |
-| `Open` | **Column L** — count (or flag) of **tracked opens** for this sent message; new rows default to **`0`**. Intended to be incremented by **Edgar** (or another HTTPS endpoint) when a draft/sent body includes a 1×1 pixel whose URL carries the same **`suggestion_id`** as **Email Agent Drafts** (see `scripts/email_agent_tracking.py` and `--track-opens` on draft scripts). |
-| `Click through` | **Column M** — **click-through** count (or similar); new rows default to **`0`**. Same integration story as **Open**; link rewriting like `send_newsletter.py`’s `/newsletter/click` is not wired into partner drafts yet. |
+| `Open` | **Column L** — count (or flag) of **tracked opens** for this sent message. On append, **`sync_email_agent_followup.py`** seeds this from the matched **Email Agent Drafts** row’s **Open** (often `0`). Edgar (or similar) can increment **Drafts** while the recipient opens mail **before** the Follow Up row exists; sync then copies the draft value here. |
+| `Click through` | **Column M** — click-through count; same story as **Open** (seeded from **Email Agent Drafts → Click through** on append). |
+| `suggestion_id` | **Column N** — same UUID as **Email Agent Drafts → `suggestion_id`** for the matched draft (matches tracking pixel `tid=`). Empty string when sync cannot match a draft row. |
 
-**Why not only GAS `doGet` for the pixel?** A standalone Apps Script web app *can* log hits and call `SpreadsheetApp`, but: (1) every image load spins a cold execution and burns quotas; (2) the web app must be **Anyone**-accessible without user OAuth, so the URL must carry an **unguessable token** (`tid` = `suggestion_id`) and the script must validate it; (3) at **draft** time there is no **`gmail_message_id`** yet, so the first writes are usually keyed by **`suggestion_id`**, then a small job can copy counts onto the **Follow Up** row after `sync_email_agent_followup.py` matches the sent message. **Edgar** (Rails) is a better fit if you already run tracking pixels for the newsletter: one service account, shared logging, same pattern as `GET …/newsletter/open.gif`.
+**Why not only GAS `doGet` for the pixel?** A standalone Apps Script web app *can* log hits and call `SpreadsheetApp`, but: (1) every image load spins a cold execution and burns quotas; (2) the web app must be **Anyone**-accessible without user OAuth, so the URL must carry an **unguessable token** (`tid` = `suggestion_id`) and the script must validate it; (3) at **draft** time there is no **`gmail_message_id`** yet, so the first engagement writes should target **Email Agent Drafts** (`Open` / `Click through`); when **`sync_email_agent_followup.py`** appends the **Follow Up** row, it ports **`suggestion_id`** and those counters onto the sent log. **Edgar** (Rails) is a better fit if you already run tracking pixels for the newsletter: one service account, shared logging, same pattern as `GET …/newsletter/open.gif`.
 
 ### Run sync (after Gmail OAuth + service account sheet share)
 
@@ -230,6 +258,8 @@ python3 scripts/format_email_agent_suggestions_sheet.py
 | `gmail_label` | e.g. `Email Agent suggestions`. |
 | `protocol_version` | e.g. `PARTNER_OUTREACH_PROTOCOL v0.1`. |
 | `notes` | Free text — why this touch, thread summary, etc. |
+| `Open` | Tracked **open** count for this suggestion while it is still a draft (default **`0`**). Edgar (or similar) should increment using pixel `tid=<suggestion_id>` **before** the **Email Agent Follow Up** row exists; values are **ported** to Follow Up **column L** when sync matches this draft to a Gmail **Sent** row. |
+| `Click through` | Same pattern as **Open** for future click redirectors (default **`0`**); ported to Follow Up **column M** on sync. |
 
 **Warm-up emails actually sent (Hit List column AU — e.g. “Warm-up email sent”):** Count rows on **`Email Agent Follow Up`** where **`status` = `warmup`** (each row is already a Gmail **Sent** message). That excludes draft-registry **`pending_review`** / **`discarded`** rows on **Email Agent Drafts**, which are **not** sends.
 
