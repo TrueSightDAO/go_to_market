@@ -9,8 +9,9 @@ first **application/pdf** attachment when the draft already had one (bytes re-fe
 Plain body is taken from the existing draft (``text/plain`` preferred, else HTML stripped).
 
 Rows whose ``gmail_draft_id`` points at a Gmail message **without** the ``DRAFT`` label (for example
-already **SENT** but the sheet still says ``pending_review``) are **skipped** with a log line — fix
-the sheet after ``sync_email_agent_followup.py``.
+already **SENT** but the sheet still says ``pending_review``) are **skipped** with a log line — run
+``scripts/reconcile_email_agent_drafts_stale_sent.py`` to set those rows to ``sent`` (and append an
+audit note), then re-run this script if you still want tracking MIME on any remaining open drafts.
 
 Usage:
   cd market_research
