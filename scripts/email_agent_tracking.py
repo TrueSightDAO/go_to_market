@@ -1,8 +1,9 @@
 """
 Optional open / click tracking for Email Agent Gmail drafts.
 
-Embeds a 1×1 image pointing at **Edgar** (or another HTTPS host) so an endpoint can
-record opens. The URL carries ``tid=<suggestion_id>`` (same UUID written to **Email Agent Drafts**).
+Embeds a visible Agroverse-branded logo image pointing at **Edgar** (or another
+HTTPS host) so an endpoint can record opens. The URL carries
+``tid=<suggestion_id>`` (same UUID written to **Email Agent Drafts**).
 
 **Email Agent Drafts** has **Open** / **Click through** (defaults ``0``). Edgar should increment
 those when the pixel or click redirect fires before the **Email Agent Follow Up** row exists.
@@ -12,7 +13,8 @@ matched draft row when appending a Follow Up row (see ``HIT_LIST_CREDENTIALS.md`
 Environment / CLI
 -------------------
 - ``EMAIL_AGENT_TRACKING_BASE_URL`` — default ``https://edgar.truesight.me`` (no trailing slash required).
-- Draft scripts: ``--track-opens`` for multipart HTML + open pixel; ``--track-clicks`` rewrites
+- Draft scripts: ``--track-opens`` for multipart HTML + visible open-logo footer;
+  ``--track-clicks`` rewrites
   ``http(s):`` URLs in the **HTML** half through ``GET /email_agent/click?tid=…&r=…&to=…`` (same idea
   as ``send_newsletter.py`` / ``newsletter/click``). Plain part is unchanged.
 
@@ -37,8 +39,12 @@ def build_open_pixel_html(base_url: str, suggestion_id: str) -> str:
     tid = urllib.parse.quote((suggestion_id or "").strip(), safe="")
     url = f"{base_url.rstrip('/')}/email_agent/open.gif?tid={tid}"
     return (
-        f'<img src="{url}" alt="" width="1" height="1" '
-        'style="display:block;border:0;width:1px;height:1px;" />'
+        '<div style="margin-top:18px;padding-top:10px;border-top:1px solid #eee;">'
+        '<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;'
+        'font-size:12px;color:#666;margin-bottom:6px;">Agroverse</div>'
+        f'<img src="{url}" alt="Agroverse logo" width="140" '
+        'style="display:block;border:0;width:140px;height:auto;" />'
+        '</div>'
     )
 
 
@@ -111,7 +117,7 @@ def plain_text_to_html_for_email_agent(
 
 
 def plain_text_to_html_with_open_pixel(plain: str, base_url: str, suggestion_id: str) -> str:
-    """Wrap plain text as HTML and append the tracking pixel (multipart/alternative HTML half)."""
+    """Wrap plain text as HTML and append the open-logo footer."""
     out = plain_text_to_html_for_email_agent(
         plain,
         base_url,
