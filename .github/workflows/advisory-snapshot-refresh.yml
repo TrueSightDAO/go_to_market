@@ -131,7 +131,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install Python dependencies
-        run: pip install --upgrade pip
+        run: |
+          pip install --upgrade pip
+          pip install gspread
 
       - name: Write Google service account credentials
         working-directory: repos/market_research
