@@ -4,10 +4,10 @@ Optional open tracking for Email Agent Gmail drafts.
 Embeds a 1×1 image pointing at **Edgar** (or another HTTPS host) so a future endpoint can
 record opens. The URL carries ``tid=<suggestion_id>`` (same UUID written to **Email Agent Drafts**).
 
-**Follow Up sheet** columns **Open** / **Click through** (see ``sync_email_agent_followup.py``) are
-intended to be updated by that endpoint (or a small relay) once a matching **sent** row exists.
-At draft time there is no ``gmail_message_id`` yet, so the pixel cannot target column L/M directly
-until Edgar correlates ``tid`` → ``gmail_message_id`` after ``sync_email_agent_followup.py`` runs.
+**Email Agent Drafts** now has **Open** / **Click through** (defaults ``0``). Edgar (or similar)
+should increment **those** when the pixel fires and the **Email Agent Follow Up** row does not
+exist yet. When ``sync_email_agent_followup.py`` appends a **Follow Up** row, it copies
+``suggestion_id``, **Open**, and **Click through** from the matched draft row (see ``HIT_LIST_CREDENTIALS.md``).
 
 Environment / CLI
 -------------------

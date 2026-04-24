@@ -88,11 +88,25 @@ LOG_HEADERS = [
     # Pipeline kind for this outbound (Gmail Sent row). Not the same as Email Agent Drafts status.
     "status",
     "sync_source",
-    # Engagement (defaults 0 on append). Intended to be updated by Edgar (or similar) when a
-    # tracking pixel / redirect fires — see scripts/email_agent_tracking.py and HIT_LIST_CREDENTIALS.md.
+    # Engagement (defaults 0 on append). Pre-filled from **Email Agent Drafts** when sync matches a
+    # draft row (Edgar may increment Drafts before the Follow Up row exists). See email_agent_tracking.py.
     "Open",
     "Click through",
+    # Same UUID as Email Agent Drafts `suggestion_id` for the matched draft (pixel `tid`).
+    "suggestion_id",
 ]
+
+
+def parse_nonneg_int(raw: str, default: int = 0) -> int:
+    """Parse a non-negative integer from a sheet cell (Open / Click through)."""
+    s = (raw or "").strip()
+    if not s:
+        return default
+    try:
+        n = int(float(s.replace(",", "")))
+        return max(0, n)
+    except (TypeError, ValueError):
+        return default
 
 
 def touch_kind_from_protocol(proto: str) -> str:
@@ -130,7 +144,7 @@ def parse_sent_at_header(raw: str) -> datetime | None:
 
 
 def load_suggestions_touch_kinds(sa) -> dict[str, list[dict]]:
-    """{to_email: [{created, subject, kind}]} where kind is warmup|bulk|follow_up."""
+    """{to_email: [draft row dicts]} each with created, subject, kind, suggestion_id, open, click."""
     sh = sa.open_by_key(SPREADSHEET_ID)
     try:
         ws = sh.worksheet(SUGGESTIONS_WS)
@@ -144,6 +158,9 @@ def load_suggestions_touch_kinds(sa) -> dict[str, list[dict]]:
     subj_i = hdr.get("subject")
     proto_i = hdr.get("protocol_version")
     created_i = hdr.get("created_at_utc")
+    sug_i = hdr.get("suggestion_id")
+    open_i = hdr.get("Open")
+    click_i = hdr.get("Click through")
     if em_i is None:
         return {}
     out: dict[str, list[dict]] = {}
@@ -154,11 +171,15 @@ def load_suggestions_touch_kinds(sa) -> dict[str, list[dict]]:
         proto = cell(row, proto_i) if proto_i is not None else ""
         subject = cell(row, subj_i) if subj_i is not None else ""
         created = parse_sent_at_header(cell(row, created_i)) if created_i is not None else None
+        sid = (cell(row, sug_i) if sug_i is not None else "").strip()
         out.setdefault(em, []).append(
             {
+                "suggestion_id": sid,
                 "created": created,
                 "subject": subject,
                 "kind": touch_kind_from_protocol(proto),
+                "open": parse_nonneg_int(cell(row, open_i) if open_i is not None else "", 0),
+                "click": parse_nonneg_int(cell(row, click_i) if click_i is not None else "", 0),
             }
         )
     for em in out:
@@ -166,23 +187,40 @@ def load_suggestions_touch_kinds(sa) -> dict[str, list[dict]]:
     return out
 
 
-def pick_touch_kind_from_suggestions(
+def pick_suggestion_row_for_sent(
     suggestions: list[dict], sent_at: datetime | None, subject: str
-) -> str | None:
+) -> dict | None:
+    """Pick the Email Agent Drafts row that best matches a Gmail Sent row (same heuristics as status)."""
     if not suggestions:
         return None
     kinds = {s["kind"] for s in suggestions}
     if len(kinds) == 1:
-        return kinds.pop()
+        # Same outbound kind for all drafts — still pick the row closest to this Sent (subject / time).
+        if sent_at is not None:
+            prior = [s for s in suggestions if s.get("created") and s["created"] <= sent_at]
+            if prior:
+                return prior[-1]
+        subj = (subject or "").strip()
+        for s in suggestions:
+            if (s.get("subject") or "").strip() == subj:
+                return s
+        return suggestions[-1]
     if sent_at is not None:
-        prior = [s for s in suggestions if s["created"] and s["created"] <= sent_at]
+        prior = [s for s in suggestions if s.get("created") and s["created"] <= sent_at]
         if prior:
-            return prior[-1]["kind"]
+            return prior[-1]
     subj = (subject or "").strip()
     for s in suggestions:
-        if s["subject"].strip() == subj:
-            return s["kind"]
-    return suggestions[-1]["kind"]
+        if (s.get("subject") or "").strip() == subj:
+            return s
+    return suggestions[-1]
+
+
+def pick_touch_kind_from_suggestions(
+    suggestions: list[dict], sent_at: datetime | None, subject: str
+) -> str | None:
+    row = pick_suggestion_row_for_sent(suggestions, sent_at, subject)
+    return row["kind"] if row else None
 
 
 def label_names_for_ids(label_ids: list[str], id_to_name: dict[str, str]) -> set[str]:
@@ -315,7 +353,36 @@ def ensure_log_worksheet(sh):
         vals = ws.get_all_values()
         hdr = vals[0] if vals else []
         migrate_followup_log_add_open_click(ws, hdr)
+        vals = ws.get_all_values()
+        hdr = vals[0] if vals else []
+        migrate_followup_log_add_suggestion_id(ws, hdr)
     return ws
+
+
+def migrate_followup_log_add_suggestion_id(ws: gspread.Worksheet, header_row: list[str]) -> bool:
+    """Append **suggestion_id** at end of row 1 if missing (column after Click through)."""
+    hm = header_map(header_row)
+    if hm.get("suggestion_id") is not None:
+        return False
+
+    col_count_before = len(header_row)
+    ws.spreadsheet.batch_update(
+        {
+            "requests": [
+                {
+                    "appendDimension": {
+                        "sheetId": ws.id,
+                        "dimension": "COLUMNS",
+                        "length": 1,
+                    }
+                }
+            ]
+        }
+    )
+    c_sid = col_count_before + 1
+    ws.update_cell(1, c_sid, "suggestion_id")
+    print(f"Migrated sheet: appended column 'suggestion_id' (1-based column {c_sid}).")
+    return True
 
 
 def migrate_followup_log_add_open_click(ws: gspread.Worksheet, header_row: list[str]) -> bool:
@@ -324,33 +391,27 @@ def migrate_followup_log_add_open_click(ws: gspread.Worksheet, header_row: list[
     if hm.get("Open") is not None and hm.get("Click through") is not None:
         return False
 
-    last_used = 0
-    for i, cell in enumerate(header_row):
-        if str(cell or "").strip():
-            last_used = i + 1
-    insert_at = last_used  # 0-based column index to insert before (append at end)
-
+    col_count_before = len(header_row)
     ws.spreadsheet.batch_update(
         {
             "requests": [
                 {
-                    "insertDimension": {
-                        "range": {
-                            "sheetId": ws.id,
-                            "dimension": "COLUMNS",
-                            "startIndex": insert_at,
-                            "endIndex": insert_at + 2,
-                        }
+                    "appendDimension": {
+                        "sheetId": ws.id,
+                        "dimension": "COLUMNS",
+                        "length": 2,
                     }
                 }
             ]
         }
     )
-    ws.update_cell(1, insert_at + 1, "Open")
-    ws.update_cell(1, insert_at + 2, "Click through")
+    c_open = col_count_before + 1
+    c_click = col_count_before + 2
+    ws.update_cell(1, c_open, "Open")
+    ws.update_cell(1, c_click, "Click through")
     print(
         "Migrated sheet: appended columns 'Open' and 'Click through' "
-        f"(inserted at 1-based columns {insert_at + 1}–{insert_at + 2})."
+        f"(1-based columns {c_open}–{c_click})."
     )
     return True
 
@@ -740,7 +801,10 @@ def main() -> None:
     log_ws = ensure_log_worksheet(sh)
 
     if args.migrate_only:
-        print(f"'{LOG_WS}' worksheet ensured (body_plain + status migrations applied if needed). Done.")
+        print(
+            f"'{LOG_WS}' worksheet ensured (body_plain, status, Open/Click, suggestion_id migrations "
+            "applied if needed). Run ensure_email_agent_suggestions_sheet.py for Email Agent Drafts columns."
+        )
         return
 
     service = None
@@ -823,6 +887,14 @@ def main() -> None:
                 subject=m.get("subject") or "",
                 sug_by_email=sug_by_email,
             )
+            sug_row = pick_suggestion_row_for_sent(
+                sug_by_email.get(m["to_email"], []),
+                parse_sent_at_header(m.get("sent_at") or ""),
+                m.get("subject") or "",
+            )
+            open_ct = str(sug_row["open"]) if sug_row else "0"
+            click_ct = str(sug_row["click"]) if sug_row else "0"
+            sugg_id = (sug_row.get("suggestion_id") or "").strip() if sug_row else ""
             new_rows.append(
                 [
                     mid,
@@ -836,8 +908,9 @@ def main() -> None:
                     body_plain,
                     status_val,
                     "gmail_sent_sync",
-                    "0",
-                    "0",
+                    open_ct,
+                    click_ct,
+                    sugg_id,
                 ]
             )
             new_msg_label_ids[mid] = m.get("label_ids") or []
