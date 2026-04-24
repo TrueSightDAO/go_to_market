@@ -6,7 +6,7 @@
 #   ORACLE_ADVISORY_PUSH_TOKEN — fine-grained PAT with **Contents: Read and write** on
 #     TrueSightDAO/agentic_ai_context and TrueSightDAO/ecosystem_change_logs.
 #     (Classic PAT with `repo` scope also works.)
-#   GOOGLE_SERVICE_ACCOUNT_JSON — contents of market_research/google_credentials.json
+#   GOOGLE_CREDENTIALS_JSON — contents of market_research/google_credentials.json
 #     (Google service account JSON for live Sheets fetch; growth goals + sales evidence).
 #
 # Script: scripts/generate_advisory_snapshot.py --github-api-publish --with-sheet-sales
@@ -136,12 +136,12 @@ jobs:
       - name: Write Google service account credentials
         working-directory: repos/market_research
         env:
-          GOOGLE_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: |
           if [ -n "$GOOGLE_JSON" ]; then
             echo "$GOOGLE_JSON" > google_credentials.json
           else
-            echo "Warning: GOOGLE_SERVICE_ACCOUNT_JSON secret not set — live Sheets fetch will be skipped."
+            echo "Warning: GOOGLE_CREDENTIALS_JSON secret not set — live Sheets fetch will be skipped."
           fi
 
       - name: Refresh snapshot and publish via GitHub Contents API
