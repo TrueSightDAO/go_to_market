@@ -18,7 +18,7 @@ Inputs:
   --body-md FILE         Plain markdown/text body. A minimal HTML part is generated.
   --campaign NAME        Free-form campaign tag for the sheet log (e.g. "two_bahia_bars")
   --label LABEL          Gmail label applied to each draft/sent message (e.g. "Newsletter/2 Chocolate Bars")
-  --track-opens          Embed a 1x1 tracking pixel pointing at Edgar. Off by default.
+  --track-opens          Embed a visible Agroverse logo (tracking URL via Edgar). Off by default.
   --track-clicks         Rewrite outbound links through Edgar so each click is logged
                          back to the sheet row. Off by default.
   --edgar-base-url URL   Base for tracking endpoints (default https://edgar.truesight.me)
@@ -28,7 +28,7 @@ Sheet log columns (appended to Agroverse News Letter Emails):
   sent_at_utc, status, opened, first_opened_at_utc, last_opened_at_utc, open_count,
   clicked, first_clicked_at_utc, last_clicked_at_utc, click_count, last_clicked_url
 
-`message_uuid` is our own identifier embedded in the tracking pixel URL; `gmail_message_id`
+`message_uuid` is our own identifier embedded in the tracking image URL; `gmail_message_id`
 is what Gmail assigns when the draft/message is created.
 
 Usage examples:
@@ -287,8 +287,12 @@ def build_tracking_pixel_html(message_uuid: str, recipient: str, edgar_base: str
     r = base64.urlsafe_b64encode(recipient.encode("utf-8")).decode("ascii").rstrip("=")
     url = f"{edgar_base.rstrip('/')}/newsletter/open.gif?mid={message_uuid}&r={r}"
     return (
-        f'<img src="{url}" alt="" width="1" height="1" '
-        f'style="display:block;border:0;width:1px;height:1px;" />'
+        '<div style="margin-top:20px;padding-top:10px;border-top:1px solid #eee;">'
+        '<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;'
+        'font-size:12px;color:#666;margin-bottom:6px;">Agroverse</div>'
+        f'<img src="{url}" alt="Agroverse logo" width="160" '
+        'style="display:block;border:0;width:160px;height:auto;" />'
+        '</div>'
     )
 
 
