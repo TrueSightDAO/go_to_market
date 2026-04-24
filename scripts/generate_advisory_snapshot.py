@@ -234,6 +234,40 @@ def _beer_hall_excerpts(ecosystem_repo: Path, n: int = 3) -> list[dict[str, str]
     return out
 
 
+def _retail_field_excerpts(ecosystem_repo: Path, n: int = 5) -> list[dict[str, object]]:
+    """Read newest retail_field_reports/*.json for oracle visibility.
+
+    Returns a list of parsed payloads (newest first), capped at *n*.
+    """
+    rf_dir = ecosystem_repo / "retail_field_reports"
+    if not rf_dir.is_dir():
+        return []
+    json_files = sorted(rf_dir.glob("*.json"), key=lambda p: p.name, reverse=True)[:n]
+    out: list[dict[str, object]] = []
+    for p in json_files:
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        parsed = data.get("parsed") or {}
+        out.append(
+            {
+                "file": str(p.name),
+                "received_at": data.get("received_at", ""),
+                "signature_verification": data.get("signature_verification", ""),
+                "shop_name": parsed.get("shop_name", ""),
+                "store_key": parsed.get("store_key", ""),
+                "new_status": parsed.get("new_status", ""),
+                "previous_status": parsed.get("previous_status", ""),
+                "shop_type": parsed.get("shop_type", ""),
+                "contact_method": parsed.get("contact_method", ""),
+                "visit_date": parsed.get("visit_date", ""),
+                "remarks": parsed.get("remarks", ""),
+            }
+        )
+    return out
+
+
 _OPERATOR_BLOCK_PLACEHOLDER_RE = re.compile(r"<!--\s*TODO", re.IGNORECASE)
 
 _GROWTH_GOALS_FILENAME = "GROWTH_GOALS.json"
@@ -1104,6 +1138,28 @@ def _build_markdown(
             parts.append(f"- **Message 1 excerpt (first two non-empty lines):**\n\n")
             for line in ex["excerpt"].splitlines():
                 parts.append(f"  {line}\n")
+            parts.append("\n")
+
+    parts.append("---\n\n## Recent retail field reports (DApp store status updates)\n\n")
+    rf_excerpts = _retail_field_excerpts(eco_repo, n=5)
+    if not rf_excerpts:
+        parts.append("_(No `retail_field_reports/*.json` found under ecosystem_change_logs clone.)_\n\n")
+    else:
+        for ex in rf_excerpts:
+            parts.append(f"- **`{ex['file']}`** — `{ex['received_at']}`  \n")
+            parts.append(
+                f"  **{ex['shop_name']}** → `{ex['new_status']}`"
+                f" (was `{ex['previous_status'] or '—'}`)"
+            )
+            if ex['shop_type']:
+                parts.append(f" | type: {ex['shop_type']}")
+            if ex['contact_method']:
+                parts.append(f" | method: {ex['contact_method']}")
+            if ex['visit_date']:
+                parts.append(f" | visited: {ex['visit_date']}")
+            parts.append(f" | sig: {ex['signature_verification']}\n")
+            if ex['remarks']:
+                parts.append(f"  _{ex['remarks']}_\n")
             parts.append("\n")
 
     if sheet_sales_md:
