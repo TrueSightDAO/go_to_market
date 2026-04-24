@@ -101,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     dst_ws.clear()
     last_col = _col_letter(max(len(r) for r in rows))
     rng = f"A1:{last_col}{len(rows)}"
-    dst_ws.update(rng, rows, value_input_option="USER_ENTERED")
+    dst_ws.update(values=rows, range_name=rng, value_input_option="USER_ENTERED")
     dst_ws.format(f"A1:{last_col}1", {"textFormat": {"bold": True}})
     dst_sh.batch_update(
         {
