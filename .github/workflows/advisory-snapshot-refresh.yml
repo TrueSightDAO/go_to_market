@@ -6,8 +6,10 @@
 #   ORACLE_ADVISORY_PUSH_TOKEN — fine-grained PAT with **Contents: Read and write** on
 #     TrueSightDAO/agentic_ai_context and TrueSightDAO/ecosystem_change_logs.
 #     (Classic PAT with `repo` scope also works.)
+#   GOOGLE_SERVICE_ACCOUNT_JSON — contents of market_research/google_credentials.json
+#     (Google service account JSON for live Sheets fetch; growth goals + sales evidence).
 #
-# Script: scripts/generate_advisory_snapshot.py --github-api-publish
+# Script: scripts/generate_advisory_snapshot.py --github-api-publish --with-sheet-sales
 # (no --with-rem in CI — macOS rem CLI not available on Linux runners)
 #
 # Sibling DAO repos are checked out shallowly so `git log` evidence in the snapshot
@@ -131,9 +133,20 @@ jobs:
       - name: Install Python dependencies
         run: pip install --upgrade pip
 
+      - name: Write Google service account credentials
+        working-directory: repos/market_research
+        env:
+          GOOGLE_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$GOOGLE_JSON" ]; then
+            echo "$GOOGLE_JSON" > google_credentials.json
+          else
+            echo "Warning: GOOGLE_SERVICE_ACCOUNT_JSON secret not set — live Sheets fetch will be skipped."
+          fi
+
       - name: Refresh snapshot and publish via GitHub Contents API
         working-directory: repos/market_research
         env:
           TRUESIGHT_DAO_ORACLE_ADVISORY_PAT: ${{ secrets.ORACLE_ADVISORY_PUSH_TOKEN }}
         run: |
-          python3 scripts/generate_advisory_snapshot.py --github-api-publish
+          python3 scripts/generate_advisory_snapshot.py --github-api-publish --with-sheet-sales
