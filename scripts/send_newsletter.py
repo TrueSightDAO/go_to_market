@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Send (or draft) an Agroverse newsletter to a list of recipients, logging each
-message to the "Agroverse News Letter Emails" tab on the Main Ledger spreadsheet.
+message to the "Agroverse News Letter Emails" tab on the dedicated newsletter
+workbook (same ID as Edgar's Gdrive::NewsletterEmails). Subscriber pulls still
+use the Main Ledger when using --recipients-from-sheet.
 
 Two modes:
   --mode draft   Create Gmail drafts for human review (default)
@@ -71,7 +73,11 @@ _REPO = Path(__file__).resolve().parent.parent
 _SA_CREDS = _REPO / "google_credentials.json"
 _GMAIL_TOKEN = _REPO / "credentials" / "gmail" / "token.json"
 
+# Main Ledger: "Agroverse News Letter Subscribers" for --recipients-from-sheet.
 MAIN_LEDGER_ID = "1GE7PUq-UT6x2rBN-Q2ksogbWpgyuh2SaxJyG_uEK6PU"
+# Newsletter send log + Edgar open/click tracking (must match sentiment_importer
+# Gdrive::NewsletterEmails::SPREADSHEET_ID).
+NEWSLETTER_LOG_SPREADSHEET_ID = "1ed3q3SJ8ztGwfWit6Wxz_S72Cn5jKQFkNrHpeOVXP8s"
 SUBSCRIBERS_WS = "Agroverse News Letter Subscribers"
 EMAILS_WS = "Agroverse News Letter Emails"
 
@@ -379,12 +385,13 @@ def main() -> None:
         sys.exit(1)
 
     sa = get_sheets_client()
-    sh = sa.open_by_key(MAIN_LEDGER_ID)
-    emails_ws = ensure_emails_worksheet(sh)
+    ledger_sh = sa.open_by_key(MAIN_LEDGER_ID)
+    log_sh = sa.open_by_key(NEWSLETTER_LOG_SPREADSHEET_ID)
+    emails_ws = ensure_emails_worksheet(log_sh)
 
     recipients: list[str] = [normalize_email(r) for r in args.to if normalize_email(r)]
     if args.recipients_from_sheet:
-        recipients = recipients + load_recipients_from_sheet(sh)
+        recipients = recipients + load_recipients_from_sheet(ledger_sh)
     # De-dupe preserving order
     seen = set()
     deduped: list[str] = []
@@ -487,7 +494,10 @@ def main() -> None:
 
     if log_rows:
         emails_ws.append_rows(log_rows, value_input_option="USER_ENTERED")
-        print(f"Appended {len(log_rows)} row(s) to {EMAILS_WS!r} on Main Ledger")
+        print(
+            f"Appended {len(log_rows)} row(s) to {EMAILS_WS!r} "
+            f"(spreadsheet {NEWSLETTER_LOG_SPREADSHEET_ID})"
+        )
 
     print(
         f"EMAIL_RESULT mode={args.mode} count={n_done} campaign={args.campaign!r} "
