@@ -77,7 +77,7 @@ from google.oauth2.service_account import Credentials as SACredentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from email_agent_tracking import plain_text_to_html_with_open_pixel
+from email_agent_tracking import plain_text_to_html_for_email_agent
 from gmail_plain_body import extract_plain_body_from_payload
 from gmail_user_credentials import load_gmail_user_credentials
 
@@ -129,6 +129,8 @@ SUGGESTIONS_HEADERS = [
     "gmail_label",
     "protocol_version",
     "notes",
+    "Open",
+    "Click through",
 ]
 
 
@@ -1097,6 +1099,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--track-clicks",
+        action="store_true",
+        help=(
+            "Rewrite http(s) URLs in the HTML alternative through Edgar "
+            "GET /email_agent/click?tid=&r=&to= (recipient + destination are base64url); "
+            "implies a multipart HTML part. Combine with --track-opens as needed."
+        ),
+    )
+    parser.add_argument(
         "--expected-mailbox",
         default=EXPECTED_MAILBOX,
         help=f"Abort if Gmail profile != this (default: {EXPECTED_MAILBOX}).",
@@ -1326,8 +1337,20 @@ def main() -> None:
         sug_id = str(uuid.uuid4())
         tracking_base = (os.environ.get("EMAIL_AGENT_TRACKING_BASE_URL") or "https://edgar.truesight.me").strip()
         html_body = None
-        if args.track_opens and tracking_base:
-            html_body = plain_text_to_html_with_open_pixel(body, tracking_base, sug_id)
+        if args.track_opens or args.track_clicks:
+            if not tracking_base:
+                sys.stderr.write(
+                    "EMAIL_AGENT_TRACKING_BASE_URL is empty; cannot use --track-opens/--track-clicks.\n"
+                )
+                sys.exit(2)
+            html_body = plain_text_to_html_for_email_agent(
+                body,
+                tracking_base,
+                sug_id,
+                to_addr,
+                track_opens=args.track_opens,
+                track_clicks=args.track_clicks,
+            )
 
         raw = build_message_raw(me, to_addr, subj, body, html_body=html_body)
 
@@ -1375,6 +1398,8 @@ def main() -> None:
             DEFAULT_GMAIL_LABEL if not args.skip_label else "",
             PROTOCOL_VERSION,
             notes,
+            "0",
+            "0",
         ]
         created_rows.append(row)
         n_made += 1
