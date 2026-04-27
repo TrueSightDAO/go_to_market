@@ -1270,8 +1270,46 @@ def _augment_ops_health_with_sheets(ops_health: dict, repo_root: Path) -> dict:
     return ops_health
 
 
+def _exact_col(cmap: dict[str, int], *want: str) -> int | None:
+    """Strict exact-match header lookup. `_find_header_col`'s pass-2 fuzzy
+    substring fallback bites us on these tabs because:
+      • `Currencies!A1 = "Currencies"` — `"name"` (a synonym we wanted) ends
+        up substring-matching `"farm name"` (col G).
+      • `Shipment Ledger Listing!A1 = " "` — `"shipment"` (synonym) substring-
+        matches `"shipment date"` (col B), swapping IDs and dates.
+      • `off chain asset balance!1 = "Physical Assets"` — title row, real
+        headers live further down.
+    Strict exact match here; callers fall back to a hard column index.
+    """
+    for w in want:
+        ww = _norm_header_cell(w)
+        if ww in cmap:
+            return cmap[ww]
+    return None
+
+
+def _find_header_row(rows: list[list[str]], *required: str, scan_limit: int = 10) -> int:
+    """Return the index of the first row in `rows[:scan_limit]` whose normalized
+    cells include every label in `required`. Used to skip title / blank rows
+    above the actual header row (e.g. `off chain asset balance` puts a
+    "Physical Assets" title in row 1 and the real header in row 4)."""
+    needed = [_norm_header_cell(s) for s in required if s]
+    if not needed:
+        return 0
+    for idx, r in enumerate(rows[:scan_limit]):
+        normalized = {_norm_header_cell(c) for c in r if (c or "").strip()}
+        if all(n in normalized for n in needed):
+            return idx
+    return 0
+
+
 def _read_cash_float(sh) -> dict:
-    """Read `off chain asset balance` + Currencies BRL rate. Tolerant of layout drift."""
+    """Read `off chain asset balance` + Currencies BRL rate.
+
+    Bug-fixed 2026-04-27: header lookups now use `_exact_col` (no fuzzy
+    substring), and the `off chain asset balance` reader scans for the real
+    header row (row 1 is a title `Physical Assets`, real headers around row 4).
+    """
     out: dict = {
         "usd_balance_total": None,
         "brl_balance_total": None,
@@ -1282,13 +1320,19 @@ def _read_cash_float(sh) -> dict:
         "errors": [],
     }
     # 1. Currencies tab — pick the BRL row's `Price in USD` as the rate.
+    #    Header A is literally "Currencies" (the tab title), so fuzzy synonym
+    #    matching mis-fires; hard-code col A for the asset-name column.
     try:
         ws_cur = sh.worksheet(_CURRENCIES_WS)
         cur_rows = ws_cur.get_all_values()
         if cur_rows and len(cur_rows) >= 2:
             cmap = _header_col_map(cur_rows[0])
-            i_a = _find_header_col(cmap, "currency", "name") or 0
-            i_b = _find_header_col(cmap, "price in usd", "usd price") or 1
+            i_a = _exact_col(cmap, "currency", "currencies", "asset", "name")
+            if i_a is None:
+                i_a = 0
+            i_b = _exact_col(cmap, "price in usd", "usd price")
+            if i_b is None:
+                i_b = 1
             for r in cur_rows[1:]:
                 name = (r[i_a] if len(r) > i_a else "").strip()
                 if name.lower() == "brazilian reis":
@@ -1297,7 +1341,10 @@ def _read_cash_float(sh) -> dict:
     except Exception as e:
         out["errors"].append(f"Currencies read failed: {e}")
 
-    # 2. off chain asset balance — Currency / Balance / Unit Value / Value (USD)
+    # 2. off chain asset balance — Asset Type / Balance / Unit Value / Value (USD).
+    #    Row 1 is a title ("Physical Assets"); the real header row sits a few
+    #    rows down. Detect dynamically — the title row count drifts
+    #    occasionally as operators add summary rows above the header.
     try:
         ws_bal = sh.worksheet(_OFFCHAIN_BALANCE_WS)
         bal_rows = ws_bal.get_all_values()
@@ -1307,12 +1354,22 @@ def _read_cash_float(sh) -> dict:
 
     if not bal_rows or len(bal_rows) < 2:
         return out
-    bmap = _header_col_map(bal_rows[0])
-    i_cur = _find_header_col(bmap, "currency", "name", "asset") or 0
-    i_bal = _find_header_col(bmap, "balance", "amount") or 1
-    i_uv = _find_header_col(bmap, "unit value", "price in usd")
-    i_v = _find_header_col(bmap, "value (usd)", "value usd", "value")
-    for r in bal_rows[1:]:
+    header_idx = _find_header_row(bal_rows, "balance", "unit value")
+    if header_idx == 0 and "physical assets" in _norm_header_cell(bal_rows[0][0] if bal_rows[0] else ""):
+        # Title row detected as "header"; tolerant fallback — find any row
+        # within the first 10 with `balance` somewhere.
+        header_idx = _find_header_row(bal_rows, "balance")
+    bmap = _header_col_map(bal_rows[header_idx])
+    i_cur = _exact_col(bmap, "asset type", "currency", "name", "asset")
+    if i_cur is None:
+        i_cur = 0
+    i_bal = _exact_col(bmap, "balance", "amount")
+    if i_bal is None:
+        i_bal = 1
+    i_uv = _exact_col(bmap, "unit value", "price in usd")
+    i_v = _exact_col(bmap, "value (usd)", "value usd")
+
+    for r in bal_rows[header_idx + 1:]:
         if not any((c or "").strip() for c in r):
             continue
         name = (r[i_cur] if len(r) > i_cur else "").strip()
@@ -1332,6 +1389,12 @@ def _read_cash_float(sh) -> dict:
             out["usd_balance_total"] = balance
         elif nlow == "brazilian reis":
             out["brl_balance_total"] = balance
+            # The Unit Value column on this tab already holds USD-per-BRL for
+            # the Brazilian Reis row, so prefer it over the Currencies tab —
+            # one fewer cross-tab dependency. Fall back to whatever Currencies
+            # gave us if Unit Value is missing.
+            if unit_value is not None and unit_value > 0 and not out["brl_to_usd_rate"]:
+                out["brl_to_usd_rate"] = unit_value
         elif "provisions for voting rights" in nlow and "usd" in nlow:
             out["usd_provisions_for_voting_rights_cash_out"] = balance
 
@@ -1355,12 +1418,17 @@ def _read_in_transit_shipments(sh) -> dict:
     if not rows or len(rows) < 2:
         return out
     cmap = _header_col_map(rows[0])
-    i_id = _find_header_col(cmap, "shipment id", "id", "shipment")
-    i_date = _find_header_col(cmap, "shipment date", "date")
-    i_status = _find_header_col(cmap, "status")
-    i_desc = _find_header_col(cmap, "description")
-    i_cargo = _find_header_col(cmap, "cargo size", "cargo")
-    i_kg = _find_header_col(cmap, "cacao (kg)", "cacao kg", "kg")
+    # Header A on this tab is blank (`' '`) — `_find_header_col`'s fuzzy
+    # substring fallback would mis-match `"shipment"` to `"shipment date"` and
+    # swap IDs and dates. Use strict exact matches and fall back to col A.
+    i_id = _exact_col(cmap, "shipment id", "id")
+    if i_id is None:
+        i_id = 0
+    i_date = _exact_col(cmap, "shipment date", "date")
+    i_status = _exact_col(cmap, "status")
+    i_desc = _exact_col(cmap, "description")
+    i_cargo = _exact_col(cmap, "cargo size", "cargo")
+    i_kg = _exact_col(cmap, "cacao (kg)", "cacao kg", "kg")
 
     # Pattern matching is intentionally permissive — column values vary across
     # AGLs ("In Transit", "Shipped", "On Vessel", "Customs hold", etc.).
