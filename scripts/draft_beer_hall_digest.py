@@ -6,7 +6,7 @@ the output of ``generate_beer_hall_preview.py`` to **Anthropic Claude**.
 The Beer Hall WhatsApp send has been retired — digests are **archive-only** artifacts
 that feed the static ``beer_hall/feed/`` (read by truesight.me) and ``ADVISORY_SNAPSHOT.md``
 (read by the oracle at oracle.truesight.me). This drafter replaces the manual/LLM-in-IDE
-summarisation step so the weekly GitHub Action can run end-to-end.
+summarisation step so the daily GitHub Action can run end-to-end.
 
 Writes three files:
 
@@ -59,7 +59,7 @@ def _recent_examples(examples_dir: Path, limit: int = 2) -> list[str]:
     return out
 
 
-_SYSTEM = """You draft the weekly **Beer Hall digest** for the TrueSight DAO — a regenerative cacao supply chain DAO. Your audience is DAO contributors, partners, and non-engineer stakeholders (not only developers).
+_SYSTEM = """You draft the daily **Beer Hall digest** for the TrueSight DAO — a regenerative cacao supply chain DAO. Your audience is DAO contributors, partners, and non-engineer stakeholders (not only developers). The digest publishes daily; the evidence pack you receive may include up to ~7 days of git activity and ~48 h of Telegram community signal because shipped work doesn't perfectly align to the publish cadence — frame Message 1 as **today's update** and let the bullets speak to whatever genuinely shipped or moved since the previous Beer Hall, not "this week".
 
 Output is consumed by the truesight.me static Beer Hall feed and by the oracle.truesight.me Grok advisor. It is NOT broadcast to WhatsApp.
 
@@ -76,7 +76,7 @@ Style rules:
 Output format — return **only** these three sections, in order, with the exact markers shown:
 
 ===SLUG===
-<kebab-case slug, 3–6 words, capturing the week's headline>
+<kebab-case slug, 3–6 words, capturing today's headline>
 ===MESSAGE_1===
 <opener line + TLDR bullets>
 ===MESSAGE_2===
@@ -91,11 +91,13 @@ Community (Telegram log):
 No commentary before, between, or after the markers."""
 
 
-_USER_TEMPLATE = """Here is this week's evidence pack from generate_beer_hall_preview.py. Synthesise it into Message 1 + Message 2 per the system rules.
+_USER_TEMPLATE = """Here is today's evidence pack from generate_beer_hall_preview.py. Synthesise it into Message 1 + Message 2 per the system rules.
+
+The preview's evidence window (`--since-days`, `--telegram-hours`) is wider than 24 h on purpose — DAO work doesn't perfectly chunk into days. Use the wider window as input but write Message 1 as **today's update**, not "this week" — anchor on what genuinely moved since the previous Beer Hall.
 
 {examples_block}
 
-=== THIS WEEK'S EVIDENCE (preview output) ===
+=== TODAY'S EVIDENCE (preview output) ===
 
 {preview}
 """
