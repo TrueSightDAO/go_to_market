@@ -42,7 +42,7 @@ Body markdown supports a tiny vocabulary:
   **bold**                          → <strong>bold</strong>
   *italic*                          → <em>italic</em>
   [text](https://url)               → <a href="…">text</a>
-  ![alt](https://image-url)         → <img src="…" alt="…" width="320" …>
+  ![alt](https://image-url)         → <img src="…" alt="…" width="280" …>
   Blank lines separate paragraphs.
 
 Sheet log columns (appended to Agroverse News Letter Emails):
@@ -305,16 +305,18 @@ _MD_IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 
 def _img_html_substitution(match: re.Match) -> str:
-    # 320px default keeps inline images from dominating mobile / Gmail
-    # newsletter layouts (the first cut was 480px and felt cluttered with
-    # three stacked heroes). max-width:100% scales down on narrow viewports;
-    # margin:auto centers horizontally so images breathe between paragraphs.
+    # 280px default + 4px margin. Two iterations behind us: 480px (cluttered),
+    # 320px (still felt heavy when stacked 3-deep with default <p> margins
+    # of ~16px above + below each image). Now the image is tighter to the
+    # surrounding paragraphs; the paragraph margins themselves provide all
+    # the breathing room. max-width:100% scales down on narrow viewports;
+    # margin:0 auto centers horizontally.
     alt = match.group(1).replace('"', '&quot;')
     src = match.group(2)
     return (
-        f'<img src="{src}" alt="{alt}" width="320" '
+        f'<img src="{src}" alt="{alt}" width="280" '
         f'style="max-width:100%;height:auto;display:block;'
-        f'border-radius:8px;margin:18px auto;" />'
+        f'border-radius:8px;margin:4px auto;" />'
     )
 
 

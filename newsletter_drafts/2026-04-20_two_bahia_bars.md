@@ -12,7 +12,7 @@ Kirsten Ritschel (KiKi's Cocoa) just finished a pair of 81% single-estate dark c
 
 **Oscar's Farm — Bahia, 2024**
 
-![Oscar's farm in Bahia, Brazil — three generations of cacao growers](https://raw.githubusercontent.com/TrueSightDAO/truesight_me/main/assets/shipments/agl14.avif)
+![Oscar's farm in Bahia, Brazil — three generations of cacao growers](https://raw.githubusercontent.com/TrueSightDAO/truesight_me/main/assets/shipments/agl14.jpg)
 
 Deep chocolate and buttery smoothness, moderate earth, a rich full-bodied arc. Oscar's family has been growing cacao in Bahia for three generations — we've been documenting their bean selection on film.
 [Check Oscar's Farm 2024](https://agroverse.shop/product-page/organic-81-dark-chocolate-bar-50g-oscar-bahia-2024/index.html)
