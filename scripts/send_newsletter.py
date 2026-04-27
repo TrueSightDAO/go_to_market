@@ -323,7 +323,11 @@ def _img_html_substitution(match: re.Match) -> str:
 def markdown_to_plain(md: str) -> str:
     # Strip markdown image syntax first (so the link regex doesn't pick it up
     # as `[alt](src)`); then drop bold/italic markers; convert [text](url) to
-    # "text (url)".
+    # "text (url)". Finally, gracefully degrade any raw HTML the body contains
+    # — bodies sometimes embed table/div blocks (e.g. side-by-side comparison
+    # cards) which the simple converter passes through to the HTML alternative
+    # but which would render as gibberish in plain text. Rewrite <a href="X">Y</a>
+    # to "Y (X)", then drop remaining tags and collapse whitespace.
     out = md
     out = _MD_IMG_RE.sub(
         lambda m: f"[image: {m.group(1)}]" if m.group(1) else "[image]", out
@@ -331,6 +335,19 @@ def markdown_to_plain(md: str) -> str:
     out = _MD_LINK_RE.sub(lambda m: f"{m.group(1)} ({m.group(2)})", out)
     out = re.sub(r"\*\*(.+?)\*\*", r"\1", out)
     out = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\1", out)
+    out = re.sub(
+        r'<a\s+[^>]*href\s*=\s*"([^"]+)"[^>]*>([^<]*)</a>',
+        lambda m: f"{m.group(2).strip()} ({m.group(1)})",
+        out,
+        flags=re.IGNORECASE,
+    )
+    # Block-level tags become paragraph breaks; everything else just drops.
+    out = re.sub(r"</(?:p|div|tr|li|h[1-6])>", "\n", out, flags=re.IGNORECASE)
+    out = re.sub(r"<br\s*/?>", "\n", out, flags=re.IGNORECASE)
+    out = re.sub(r"<[^>]+>", "", out)
+    # Collapse runs of inline whitespace, but keep paragraph breaks intact.
+    out = re.sub(r"[ \t]+", " ", out)
+    out = re.sub(r"\n{3,}", "\n\n", out)
     return out.strip() + "\n"
 
 
