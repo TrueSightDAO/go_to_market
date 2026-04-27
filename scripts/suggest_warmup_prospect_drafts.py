@@ -453,13 +453,21 @@ def main() -> None:
     p.add_argument("--skip-reply-promotion", action="store_true")
     p.add_argument(
         "--track-opens",
-        action="store_true",
-        help="Multipart HTML + 1×1 open pixel (tid=suggestion_id); see suggest_manager_followup_drafts --track-opens.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Multipart HTML + 1×1 open pixel (tid=suggestion_id). Default ON; "
+            "pass --no-track-opens to disable for a one-off batch."
+        ),
     )
     p.add_argument(
         "--track-clicks",
-        action="store_true",
-        help="Rewrite http(s) URLs in the HTML part via Edgar /email_agent/click; see suggest_manager_followup_drafts.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Rewrite http(s) URLs in the HTML part via Edgar /email_agent/click. "
+            "Default ON; pass --no-track-clicks to disable for a one-off batch."
+        ),
     )
     args = p.parse_args()
 
