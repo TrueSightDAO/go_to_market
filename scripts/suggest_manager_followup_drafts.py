@@ -1091,20 +1091,24 @@ def main() -> None:
     parser.add_argument("--skip-label", action="store_true", help="Do not create/apply Gmail label.")
     parser.add_argument(
         "--track-opens",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
             "Add an HTML alternative with a 1×1 open pixel (tid=suggestion_id). "
+            "Default ON; pass --no-track-opens to disable for a one-off batch. "
             "Set EMAIL_AGENT_TRACKING_BASE_URL (default https://edgar.truesight.me); "
             "Edgar must implement GET /email_agent/open.gif — see email_agent_tracking.py."
         ),
     )
     parser.add_argument(
         "--track-clicks",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
             "Rewrite http(s) URLs in the HTML alternative through Edgar "
             "GET /email_agent/click?tid=&r=&to= (recipient + destination are base64url); "
-            "implies a multipart HTML part. Combine with --track-opens as needed."
+            "implies a multipart HTML part. Default ON; pass --no-track-clicks to disable. "
+            "Combine with --track-opens as needed."
         ),
     )
     parser.add_argument(
