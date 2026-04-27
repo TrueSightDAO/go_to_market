@@ -6,15 +6,23 @@
 
 Hi —
 
+![Kirsten Ritschel at KiKi's Cocoa, the chocolate maker behind these bars](https://agroverse.shop/assets/partners/headers/kikis-cocoa-header.jpg)
+
 Kirsten Ritschel (KiKi's Cocoa) just finished a pair of 81% single-estate dark chocolate bars for us. Same region (Bahia), same maker, same cacao percentage. Very different chocolate.
 
 **Oscar's Farm — Bahia, 2024**
+
+![Oscar's farm in Bahia, Brazil — three generations of cacao growers](https://agroverse.shop/assets/images/products/oscars-farm.jpeg)
+
 Deep chocolate and buttery smoothness, moderate earth, a rich full-bodied arc. Oscar's family has been growing cacao in Bahia for three generations — we've been documenting their bean selection on film.
-[Try Oscar's Farm 2024](https://agroverse.shop/product-page/organic-81-dark-chocolate-bar-50g-oscar-bahia-2024/index.html)
+[Check Oscar's Farm 2024](https://agroverse.shop/product-page/organic-81-dark-chocolate-bar-50g-oscar-bahia-2024/index.html)
 
 **Fazenda Santa Ana — Bahia, 2023**
+
+![Fazenda Santa Ana — a Coopercabruca regenerative farm in Bahia, Brazil](https://agroverse.shop/assets/images/products/fazenda-santa-ana-product.jpg)
+
 Opens nutty and bright (without citrus), moves through a super-smooth earthy mid-palate with no astringency, then shifts to coffee-mocha with a short finish. Sourced through Coopercabruca — a network of regenerative farms supporting ecosystem biodiversity.
-[Try Fazenda Santa Ana 2023](https://agroverse.shop/product-page/organic-81-dark-chocolate-bar-50g-fazenda-santa-ana-bahia-2023/index.html)
+[Check Fazenda Santa Ana 2023](https://agroverse.shop/product-page/organic-81-dark-chocolate-bar-50g-fazenda-santa-ana-bahia-2023/index.html)
 
 $10 each. Easiest way to experience the difference is to get one of each and taste them side by side.
 
