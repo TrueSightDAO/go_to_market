@@ -12,14 +12,14 @@ Kirsten Ritschel (KiKi's Cocoa) just finished a pair of 81% single-estate dark c
 
 **Oscar's Farm — Bahia, 2024**
 
-![Oscar's farm in Bahia, Brazil — three generations of cacao growers](https://agroverse.shop/assets/images/products/oscars-farm.jpeg)
+![Oscar's farm in Bahia, Brazil — three generations of cacao growers](https://raw.githubusercontent.com/TrueSightDAO/truesight_me/main/assets/shipments/agl14.avif)
 
 Deep chocolate and buttery smoothness, moderate earth, a rich full-bodied arc. Oscar's family has been growing cacao in Bahia for three generations — we've been documenting their bean selection on film.
 [Check Oscar's Farm 2024](https://agroverse.shop/product-page/organic-81-dark-chocolate-bar-50g-oscar-bahia-2024/index.html)
 
 **Fazenda Santa Ana — Bahia, 2023**
 
-![Fazenda Santa Ana — a Coopercabruca regenerative farm in Bahia, Brazil](https://agroverse.shop/assets/images/products/fazenda-santa-ana-product.jpg)
+![Fazenda Santa Ana — a Coopercabruca regenerative farm in Itacaré, Bahia](https://agroverse.shop/assets/images/farms/fazenda-santa-ana-itacare.jpg)
 
 Opens nutty and bright (without citrus), moves through a super-smooth earthy mid-palate with no astringency, then shifts to coffee-mocha with a short finish. Sourced through Coopercabruca — a network of regenerative farms supporting ecosystem biodiversity.
 [Check Fazenda Santa Ana 2023](https://agroverse.shop/product-page/organic-81-dark-chocolate-bar-50g-fazenda-santa-ana-bahia-2023/index.html)
