@@ -1,0 +1,80 @@
+# Regenerates agroverse-inventory/partners-velocity.json from the Main Ledger
+# (Agroverse Partners + Currencies) and Telegram & Submissions (QR Code Sales +
+# Inventory Movement). Per-(partner_id × SKU) historical sales / restock velocity.
+#
+# Sibling to publish-agroverse-inventory-snapshot.yml (which produces the
+# *current snapshot* partners-inventory.json daily). Velocity changes slowly,
+# so this one runs **weekly** per Gary's §9 Q2 decision in
+# agentic_ai_context/PARTNER_VELOCITY_PROPOSAL.md.
+#
+# Required repository secrets (same as the inventory snapshot workflow):
+#   GOOGLE_CREDENTIALS_JSON       — service account JSON with Sheets read
+#                                   on 1GE7PUq-… (Main Ledger) and
+#                                   1qbZZhf-… (Telegram & Submissions).
+#   AGROVERSE_INVENTORY_PUSH_TOKEN — fine-grained PAT with Contents:
+#                                   Read-and-write on
+#                                   TrueSightDAO/agroverse-inventory.
+
+name: Publish partners-velocity snapshot
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays 06:45 UTC — offset from publish-agroverse-inventory-snapshot
+    # (06:15 daily) so they don't burst Sheets API in lockstep.
+    - cron: "45 6 * * 1"
+
+concurrency:
+  group: agroverse-inventory-velocity
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout market_research (this repo)
+        uses: actions/checkout@v4
+
+      - name: Checkout agroverse-inventory (target)
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/agroverse-inventory
+          path: agroverse-inventory
+          token: ${{ secrets.AGROVERSE_INVENTORY_PUSH_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "gspread>=5.12" "google-auth>=2.23"
+
+      - name: Write Google credentials
+        run: |
+          echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > google_credentials.json
+
+      - name: Compute velocity and write partners-velocity.json
+        run: |
+          python3 scripts/sync_partners_velocity.py --execute \
+            --output agroverse-inventory/partners-velocity.json
+
+      - name: Commit and push agroverse-inventory if changed
+        working-directory: agroverse-inventory
+        env:
+          TARGET_TOKEN: ${{ secrets.AGROVERSE_INVENTORY_PUSH_TOKEN }}
+        run: |
+          git remote set-url origin "https://x-access-token:${TARGET_TOKEN}@github.com/TrueSightDAO/agroverse-inventory.git"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add partners-velocity.json
+          if git diff --staged --quiet; then
+            echo "No changes to partners-velocity.json; skipping commit."
+          else
+            git commit -m "chore: refresh partners-velocity snapshot [skip ci]"
+            git push origin HEAD:main
+          fi
