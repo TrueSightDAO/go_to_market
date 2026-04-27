@@ -6,7 +6,11 @@ Gmail **drafts** for Hit List rows with Status = **AI: Warm up prospect** and Em
   while the Gmail draft exists; next draft after **Email Agent Follow Up** shows a prior **sent** at least
   ``--min-days-since-sent`` ago (default **7**), **unless** a pending draft was **discarded** (Gmail draft
   deleted / reconcile), in which case the next draft is allowed immediately. Run **sync_email_agent_followup.py** first.
-- **Attachment:** ``retail_price_list/agroverse_wholesale_price_list_2026.pdf`` on each draft.
+- **Attachments (3 by default):**
+    - ``retail_price_list/agroverse_wholesale_price_list_2026.pdf`` (wholesale tiers)
+    - ``retail_price_list/agroverse_packaging_front.jpeg`` (bag front, on shelf)
+    - ``retail_price_list/agroverse_packaging_back.jpeg`` (bag back, on shelf)
+  Override individually with ``--pdf-path`` / ``--packaging-front`` / ``--packaging-back``.
 - **Grok** (optional ``--use-grok``): first-touch intro; no in-person visit assumption; flexible consignment or bulk;
   lead with Amazon rainforest restoration (tree per bag, QR traceability); style reference in
   ``templates/warmup_outreach_reference.md``.
@@ -52,6 +56,8 @@ import suggest_manager_followup_drafts as smf
 from email_agent_tracking import plain_text_to_html_for_email_agent
 _WARMUP_REF = _REPO / "templates" / "warmup_outreach_reference.md"
 _DEFAULT_PDF = _REPO / "retail_price_list" / "agroverse_wholesale_price_list_2026.pdf"
+_DEFAULT_PACKAGING_FRONT = _REPO / "retail_price_list" / "agroverse_packaging_front.jpeg"
+_DEFAULT_PACKAGING_BACK = _REPO / "retail_price_list" / "agroverse_packaging_back.jpeg"
 
 SPREADSHEET_ID = smf.SPREADSHEET_ID
 HIT_LIST_WS = smf.HIT_LIST_WS
@@ -259,8 +265,9 @@ def grok_warmup_system_prompt() -> str:
         "- **Do not** assume, imply, or acknowledge that the shop **already carries cacao**, has their **own "
         "cacao supplier**, or needs an “alongside what you stock” angle. Do not invite them to compare against "
         "an existing cacao line you do not know they have.\n"
-        "- State clearly that a **wholesale price list PDF is attached** (do not paste prices in the body unless "
-        "already in context notes).\n"
+        "- State clearly that the email has **three attachments**: a **wholesale price list PDF** plus "
+        "**two photos of the packaging** (front and back of the bar) for shelf-fit reference. Do not paste "
+        "prices in the body unless already in context notes.\n"
         "- Salutation: use a natural greeting for the **shop** or a generic “Hi —” if no contact name is known.\n"
         "- **Body** ~140–240 words unless shorter fits. End with a short signature block:\n"
         "  Gary\n"
@@ -294,7 +301,7 @@ def grok_generate_warmup(
         f"- city/state (if known): {locality or '(not provided)'}\n"
         f"- hit_list_row(s): {hit_list_row}\n"
         f"- recipient_email: {to_email}\n"
-        f"- hit_list_status: {HIT_STATUS_WARMUP} (first-touch intro; PDF wholesale list will be attached)\n"
+        f"- hit_list_status: {HIT_STATUS_WARMUP} (first-touch intro; PDF wholesale list + two packaging photos will be attached)\n"
     )
     if crm_notes:
         user += (
@@ -345,7 +352,7 @@ def grok_generate_warmup(
     return subj, body
 
 
-def build_message_raw_with_pdf(
+def build_message_raw_with_attachments(
     sender: str,
     to: str,
     subject: str,
@@ -353,29 +360,38 @@ def build_message_raw_with_pdf(
     pdf_path: Path,
     *,
     html_body: str | None = None,
+    image_paths: list[Path] | None = None,
 ) -> dict[str, str]:
     if not pdf_path.is_file():
         raise FileNotFoundError(f"Wholesale PDF not found: {pdf_path}")
-    data = pdf_path.read_bytes()
+    pdf_data = pdf_path.read_bytes()
+
+    image_blobs: list[tuple[bytes, str, str]] = []
+    for ip in image_paths or []:
+        if not ip.is_file():
+            raise FileNotFoundError(f"Image attachment not found: {ip}")
+        suffix = ip.suffix.lower().lstrip(".")
+        subtype = "jpeg" if suffix in ("jpg", "jpeg") else (suffix or "octet-stream")
+        image_blobs.append((ip.read_bytes(), subtype, ip.name))
+
     msg = EmailMessage()
     msg["From"] = sender
     msg["To"] = to
     msg["Subject"] = subject
+
     if html_body:
         inner = EmailMessage()
         inner.set_content(body, charset="utf-8")
         inner.add_alternative(html_body, subtype="html")
         msg.make_mixed()
         msg.attach(inner)
-        msg.add_attachment(data, maintype="application", subtype="pdf", filename=pdf_path.name)
     else:
         msg.set_content(body, charset="utf-8")
-        msg.add_attachment(
-            data,
-            maintype="application",
-            subtype="pdf",
-            filename=pdf_path.name,
-        )
+
+    msg.add_attachment(pdf_data, maintype="application", subtype="pdf", filename=pdf_path.name)
+    for data, subtype, filename in image_blobs:
+        msg.add_attachment(data, maintype="image", subtype=subtype, filename=filename)
+
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
     return {"raw": raw}
 
@@ -393,7 +409,8 @@ def warmup_body_template(shop_name: str) -> str:
         f"every sale to **Amazon rainforest restoration**: **each bag plants a new tree**, and the **unique QR code "
         f"on that bag** links to **direct traceability** for that planting.\n\n"
         f"We’re **flexible on structure** — **either** **consignment-friendly** retail **or** **wholesale / bulk** "
-        f"works on our side; I’ve attached our **wholesale price list PDF** so you can skim SKUs and tiers. "
+        f"works on our side; I’ve attached our **wholesale price list PDF** so you can skim SKUs and tiers, "
+        f"plus **two photos of the packaging** (front and back) so you can picture how it sits on shelf. "
         f"No need to meet in person on my side; happy to answer by email or on a quick call if that’s easier.\n\n"
         f"If you tell me which path you’d rather explore first (consignment vs bulk), I can point you to the lightest "
         f"next step.\n\n"
@@ -419,6 +436,18 @@ def main() -> None:
         type=Path,
         default=_DEFAULT_PDF,
         help="Wholesale list PDF to attach.",
+    )
+    p.add_argument(
+        "--packaging-front",
+        type=Path,
+        default=_DEFAULT_PACKAGING_FRONT,
+        help="On-shelf packaging photo (front of bag) to attach. Pass empty string to skip.",
+    )
+    p.add_argument(
+        "--packaging-back",
+        type=Path,
+        default=_DEFAULT_PACKAGING_BACK,
+        help="On-shelf packaging photo (back of bag) to attach. Pass empty string to skip.",
     )
     p.add_argument("--reply-promotion-only", action="store_true", help="Only promote Warm up → Prospect replied.")
     p.add_argument("--skip-reply-promotion", action="store_true")
@@ -632,9 +661,14 @@ def main() -> None:
                 track_clicks=args.track_clicks,
             )
 
+        image_paths = [
+            ip for ip in (args.packaging_front, args.packaging_back)
+            if ip and str(ip).strip()
+        ]
         try:
-            raw = build_message_raw_with_pdf(
-                me, to_addr, subj, body, args.pdf_path, html_body=html_body
+            raw = build_message_raw_with_attachments(
+                me, to_addr, subj, body, args.pdf_path,
+                html_body=html_body, image_paths=image_paths,
             )
         except FileNotFoundError as e:
             sys.stderr.write(f"{e}\n")
@@ -665,8 +699,11 @@ def main() -> None:
                 sys.stderr.write(f"Warning: label on draft message {msg_id}: {e}\n")
 
         preview = body.replace("\n", " ")[:BODY_PREVIEW_MAX]
+        attachment_names = ",".join(
+            [args.pdf_path.name] + [p.name for p in image_paths]
+        )
         notes = (
-            f"kind=warmup_intro; attachment={args.pdf_path.name}; source={source}; "
+            f"kind=warmup_intro; attachments={attachment_names}; source={source}; "
             f"cadence min_days={args.min_days_since_sent}; last_logged_send={prev_s}; "
             f"grok_model={args.grok_model if args.use_grok else 'n/a'}. Edit before Send."
         )
