@@ -16,6 +16,7 @@ Use as **style guide only** for AI-generated intros — do not copy sentences ve
 - State clearly that Agroverse is **flexible** — **either** consignment-friendly terms **or** wholesale/bulk — without contrasting retailers or implying bulk is mainly for margin vs peers.
 - Invite **reply by email** with which path they want to explore first (consignment vs bulk).
 - Reference **attached wholesale price list** (PDF) as the place for SKUs and tiers.
+- Include **one short mention** of **https://agroverse.shop/wholesale** as a *visual* companion (packaging, partner-shop photos, current U.S. stockists). Frame it as **complementary** to the PDF, not redundant — page = visual, PDF = SKU/pricing detail. Don’t make the link the primary CTA.
 
 ## Don’ts
 
