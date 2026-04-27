@@ -90,11 +90,15 @@ INV_COL_STATUS_DATE = 6  # G
 INV_COL_RECIPIENT = 8    # I — uppercase header "RECIPIENT NAME"
 INV_COL_CURRENCY = 9     # J — uppercase header "CURRENCY"
 INV_COL_AMOUNT = 10      # K — uppercase header "AMOUNT"
-INV_COL_STATUS = 13      # N — STATUS (NEW / unauthorized)
+INV_COL_STATUS = 13      # N — STATUS
 
 # Statuses considered "real" sales / movements (skip everything else).
 QRS_VALID_STATUSES = {"TOKENIZED", "ACCOUNTED"}
-INV_VALID_STATUSES = {"NEW"}
+# Inventory Movement: NEW = authorized + pending application to ledgers;
+# PROCESSED = already applied. Both count for velocity. `unauthorized` (and
+# any other non-empty value) is skipped. Empty STATUS on rare legacy rows is
+# treated as authorized.
+INV_VALID_STATUSES = {"NEW", "PROCESSED"}
 
 # Time windows (days) — proposal §4.
 WINDOW_30 = 30
@@ -417,7 +421,7 @@ def main() -> None:
     qr_sales_events = read_qr_code_sales(gc)
     movement_events = read_inventory_movements(gc)
     print(f"  {len(qr_sales_events)} QR Code Sales rows (TOKENIZED/ACCOUNTED)")
-    print(f"  {len(movement_events)} Inventory Movement rows (NEW)")
+    print(f"  {len(movement_events)} Inventory Movement rows (NEW/PROCESSED)")
 
     sales_by_partner = aggregate_events(
         qr_sales_events,
