@@ -534,9 +534,42 @@ _MAIN_LEDGER_SPREADSHEET_ID = "1GE7PUq-UT6x2rBN-Q2ksogbWpgyuh2SaxJyG_uEK6PU"
 _TELEGRAM_SUBMISSIONS_SPREADSHEET_ID = "1qbZZhf-_7xzmDTriaJVWj6OZshyQsFkdsAV8-pyzASQ"
 _MONTHLY_STATISTICS_WS = "Monthly Statistics"
 _QR_CODE_SALES_WS = "QR Code Sales"
+_OFFCHAIN_BALANCE_WS = "off chain asset balance"
+_CURRENCIES_WS = "Currencies"
+_SHIPMENT_LEDGER_WS = "Shipment Ledger Listing"
 _SHEETS_SCOPES = (
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.readonly",
+)
+
+# Public read-only treasury cache (Edgar / GAS publish this on every inventory
+# movement; 30-min cron safety net). No auth needed — the dapp / oracle / this
+# script all read the same JSON.
+_TREASURY_CACHE_URL = (
+    "https://raw.githubusercontent.com/TrueSightDAO/treasury-cache/main/"
+    "dao_offchain_treasury.json"
+)
+# Production shippers — the only two that take freight and local fulfilment in
+# practice today. Substring match on `manager_name` so renaming doesn't break us.
+_OPS_HEALTH_PRIMARY_SHIPPERS = (
+    {
+        "key": "kirsten",
+        "label": "Kirsten Ritschel",
+        "role": "San Francisco — retail / online fulfilment / partner restock",
+        "match_substr": "kirsten",
+    },
+    {
+        "key": "matheus",
+        "label": "Matheus Reis",
+        "role": "Ilhéus, Brazil — bulk warehouse + freight to SF",
+        "match_substr": "matheus",
+    },
+    {
+        "key": "gary",
+        "label": "Gary Teh",
+        "role": "Operational cash + assorted retail inventory",
+        "match_substr": "gary teh",
+    },
 )
 
 
@@ -1040,6 +1073,468 @@ def _pipeline_activity(apps: Path, since_iso: str, until_iso: str) -> list[tuple
     return rows
 
 
+# ============================================================================
+# Operations health — supply pipeline + cash float for the daily oracle
+# ----------------------------------------------------------------------------
+# Pain point that motivated this section (Gary, 2026-04-27): "Kirsten goes low
+# on stock at SF before Matheus's next freight inbound has arrived, and the
+# advisory has no signal." We surface stock per primary shipper (Kirsten /
+# Matheus / Gary's float), in-transit freight, and cash float so the oracle
+# can flag re-stock + freight + cash concerns. Burn rate / days-of-cover is
+# v2 — needs SKU-level join between sales and the (sparsely populated)
+# `inventory_type` field. The JSON snapshot has placeholder slots so the dapp
+# page can be built against the schema today and back-fill burn rate later.
+# ============================================================================
+
+
+def _fetch_treasury_cache() -> dict | None:
+    """Pull the public treasury-cache snapshot. Never raises — None on failure."""
+    try:
+        req = urllib.request.Request(_TREASURY_CACHE_URL, headers={"User-Agent": "advisory-snapshot/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError) as e:
+        sys.stderr.write(f"[ops-health] treasury cache fetch failed: {e}\n")
+        return None
+
+
+def _f(v: object) -> float:
+    """Best-effort float coerce; returns 0.0 on bad input."""
+    try:
+        if v is None or v == "":
+            return 0.0
+        if isinstance(v, (int, float)):
+            return float(v)
+        return float(str(v).replace(",", "").strip())
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _compute_ops_health(treasury: dict | None) -> dict:
+    """Build the ops-health snapshot from the public treasury cache.
+
+    Output schema (always-on portion; sheet-derived sections may be merged in later):
+
+        {
+          "schema_version": 1,
+          "generated_at_utc": "...",
+          "source_treasury_cache_generated_at": "...",
+          "primary_shippers": [
+            {
+              "key": "kirsten",
+              "label": "Kirsten Ritschel",
+              "role": "...",
+              "manager_match_substr": "kirsten",
+              "resolved_manager_name": "Kirsten Ritschel",   # actual string from JSON
+              "items_count": 18,
+              "total_units": 1262,
+              "total_value_usd": 12345.67,
+              "by_inventory_type": [
+                {"inventory_type": "Cacao Mass", "unit_format": "Retail Ready", "items": 5, "units": 50, "value_usd": 575.0},
+                ...
+              ],
+              "items": [ ... full per-line items, kept verbose for the dapp page ... ]
+            },
+            ...
+          ],
+          "other_managers_summary": [
+            {"manager_name": "Val Lapidus", "items_count": 10, "total_units": 1269, "total_value_usd": 1500.0},
+            ...
+          ],
+          # populated by `_augment_ops_health_with_sheets` when --with-sheet-sales is on:
+          "cash_float": null,
+          "in_transit_freight": null,
+          # placeholders for v2:
+          "sales_velocity_30d": null,
+          "days_of_cover_at_sf": null
+        }
+    """
+    out: dict = {
+        "schema_version": 1,
+        "generated_at_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source_treasury_cache_generated_at": (treasury or {}).get("generated_at"),
+        "primary_shippers": [],
+        "other_managers_summary": [],
+        "cash_float": None,
+        "in_transit_freight": None,
+        "sales_velocity_30d": None,
+        "days_of_cover_at_sf": None,
+    }
+    if not treasury or not isinstance(treasury, dict):
+        return out
+
+    managers = treasury.get("managers") or []
+    primary_keys: set[str] = set()
+
+    for shipper in _OPS_HEALTH_PRIMARY_SHIPPERS:
+        match = shipper["match_substr"].lower()
+        resolved = next(
+            (m for m in managers if match in str(m.get("manager_name") or "").lower()),
+            None,
+        )
+        if not resolved:
+            out["primary_shippers"].append({
+                **shipper,
+                "resolved_manager_name": None,
+                "items_count": 0,
+                "total_units": 0.0,
+                "total_value_usd": 0.0,
+                "by_inventory_type": [],
+                "items": [],
+            })
+            continue
+
+        resolved_name = resolved.get("manager_name") or ""
+        primary_keys.add(resolved_name)
+        items = resolved.get("items") or []
+        # Roll up by (inventory_type, unit_format). Empty inventory_type bucketed
+        # as "(uncategorized)" — the field was added 2026-04-26 and is still
+        # being back-filled across legacy currency strings.
+        rollup: dict[tuple[str, str], dict] = {}
+        for it in items:
+            ity = (it.get("inventory_type") or "").strip() or "(uncategorized)"
+            ufm = (it.get("unit_format") or "").strip() or "(unspecified)"
+            bucket = rollup.setdefault((ity, ufm), {
+                "inventory_type": ity,
+                "unit_format": ufm,
+                "items": 0,
+                "units": 0.0,
+                "value_usd": 0.0,
+            })
+            bucket["items"] += 1
+            bucket["units"] += _f(it.get("amount"))
+            bucket["value_usd"] += _f(it.get("total_value_usd"))
+
+        out["primary_shippers"].append({
+            **shipper,
+            "resolved_manager_name": resolved_name,
+            "items_count": len(items),
+            "total_units": sum(_f(it.get("amount")) for it in items),
+            "total_value_usd": sum(_f(it.get("total_value_usd")) for it in items),
+            "by_inventory_type": sorted(
+                rollup.values(),
+                key=lambda r: (-r["units"], r["inventory_type"]),
+            ),
+            # Keep the raw items so a dapp dashboard page can show full SKU names
+            # without re-fetching the treasury cache.
+            "items": items,
+        })
+
+    # Everyone else (consigned partners, etc.) — slim summary only.
+    for m in managers:
+        nm = m.get("manager_name") or ""
+        if nm in primary_keys:
+            continue
+        items = m.get("items") or []
+        if not items:
+            continue
+        out["other_managers_summary"].append({
+            "manager_name": nm,
+            "items_count": len(items),
+            "total_units": sum(_f(it.get("amount")) for it in items),
+            "total_value_usd": sum(_f(it.get("total_value_usd")) for it in items),
+        })
+    out["other_managers_summary"].sort(key=lambda r: -r["total_value_usd"])
+    return out
+
+
+def _augment_ops_health_with_sheets(ops_health: dict, repo_root: Path) -> dict:
+    """Best-effort merge of cash float + in-transit freight from Google Sheets.
+
+    Mutates and returns `ops_health` (sets `cash_float` and `in_transit_freight`).
+    Silent skip on any auth / read failure — the always-on treasury portion is
+    independent and stays valid.
+    """
+    cred_path = repo_root / "google_credentials.json"
+    if not cred_path.is_file():
+        sys.stderr.write(
+            f"[ops-health] sheets augment skipped: missing {cred_path.name}\n"
+        )
+        return ops_health
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials as SACredentials
+    except ImportError as e:
+        sys.stderr.write(f"[ops-health] sheets augment skipped: import error: {e}\n")
+        return ops_health
+    try:
+        creds = SACredentials.from_service_account_file(str(cred_path), scopes=_SHEETS_SCOPES)
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(_MAIN_LEDGER_SPREADSHEET_ID)
+    except Exception as e:
+        sys.stderr.write(f"[ops-health] sheets augment auth failed: {e}\n")
+        return ops_health
+
+    ops_health["cash_float"] = _read_cash_float(sh)
+    ops_health["in_transit_freight"] = _read_in_transit_shipments(sh)
+    return ops_health
+
+
+def _read_cash_float(sh) -> dict:
+    """Read `off chain asset balance` + Currencies BRL rate. Tolerant of layout drift."""
+    out: dict = {
+        "usd_balance_total": None,
+        "brl_balance_total": None,
+        "brl_to_usd_rate": None,
+        "brl_balance_usd_equivalent": None,
+        "usd_provisions_for_voting_rights_cash_out": None,
+        "rows": [],
+        "errors": [],
+    }
+    # 1. Currencies tab — pick the BRL row's `Price in USD` as the rate.
+    try:
+        ws_cur = sh.worksheet(_CURRENCIES_WS)
+        cur_rows = ws_cur.get_all_values()
+        if cur_rows and len(cur_rows) >= 2:
+            cmap = _header_col_map(cur_rows[0])
+            i_a = _find_header_col(cmap, "currency", "name") or 0
+            i_b = _find_header_col(cmap, "price in usd", "usd price") or 1
+            for r in cur_rows[1:]:
+                name = (r[i_a] if len(r) > i_a else "").strip()
+                if name.lower() == "brazilian reis":
+                    out["brl_to_usd_rate"] = _f(r[i_b] if len(r) > i_b else "")
+                    break
+    except Exception as e:
+        out["errors"].append(f"Currencies read failed: {e}")
+
+    # 2. off chain asset balance — Currency / Balance / Unit Value / Value (USD)
+    try:
+        ws_bal = sh.worksheet(_OFFCHAIN_BALANCE_WS)
+        bal_rows = ws_bal.get_all_values()
+    except Exception as e:
+        out["errors"].append(f"`{_OFFCHAIN_BALANCE_WS}` read failed: {e}")
+        return out
+
+    if not bal_rows or len(bal_rows) < 2:
+        return out
+    bmap = _header_col_map(bal_rows[0])
+    i_cur = _find_header_col(bmap, "currency", "name", "asset") or 0
+    i_bal = _find_header_col(bmap, "balance", "amount") or 1
+    i_uv = _find_header_col(bmap, "unit value", "price in usd")
+    i_v = _find_header_col(bmap, "value (usd)", "value usd", "value")
+    for r in bal_rows[1:]:
+        if not any((c or "").strip() for c in r):
+            continue
+        name = (r[i_cur] if len(r) > i_cur else "").strip()
+        if not name:
+            continue
+        balance = _f(r[i_bal] if len(r) > i_bal else "")
+        unit_value = _f(r[i_uv]) if (i_uv is not None and len(r) > i_uv) else None
+        value_usd = _f(r[i_v]) if (i_v is not None and len(r) > i_v) else None
+        out["rows"].append({
+            "currency": name,
+            "balance": balance,
+            "unit_value": unit_value,
+            "value_usd": value_usd,
+        })
+        nlow = name.lower()
+        if nlow == "usd":
+            out["usd_balance_total"] = balance
+        elif nlow == "brazilian reis":
+            out["brl_balance_total"] = balance
+        elif "provisions for voting rights" in nlow and "usd" in nlow:
+            out["usd_provisions_for_voting_rights_cash_out"] = balance
+
+    if out["brl_balance_total"] is not None and out["brl_to_usd_rate"]:
+        out["brl_balance_usd_equivalent"] = round(
+            out["brl_balance_total"] * out["brl_to_usd_rate"], 2
+        )
+    return out
+
+
+def _read_in_transit_shipments(sh) -> dict:
+    """Read `Shipment Ledger Listing`; surface rows whose Status looks in-flight."""
+    out: dict = {"in_transit": [], "errors": []}
+    try:
+        ws = sh.worksheet(_SHIPMENT_LEDGER_WS)
+        rows = ws.get_all_values()
+    except Exception as e:
+        out["errors"].append(f"`{_SHIPMENT_LEDGER_WS}` read failed: {e}")
+        return out
+
+    if not rows or len(rows) < 2:
+        return out
+    cmap = _header_col_map(rows[0])
+    i_id = _find_header_col(cmap, "shipment id", "id", "shipment")
+    i_date = _find_header_col(cmap, "shipment date", "date")
+    i_status = _find_header_col(cmap, "status")
+    i_desc = _find_header_col(cmap, "description")
+    i_cargo = _find_header_col(cmap, "cargo size", "cargo")
+    i_kg = _find_header_col(cmap, "cacao (kg)", "cacao kg", "kg")
+
+    # Pattern matching is intentionally permissive — column values vary across
+    # AGLs ("In Transit", "Shipped", "On Vessel", "Customs hold", etc.).
+    in_flight_keywords = ("transit", "shipped", "vessel", "in flight", "in-flight", "freighting", "departed")
+
+    for r in rows[1:]:
+        status = (r[i_status] if (i_status is not None and len(r) > i_status) else "").strip()
+        if not status:
+            continue
+        slow = status.lower()
+        if not any(k in slow for k in in_flight_keywords):
+            continue
+        # Description fields on the ledger sometimes carry Wix-exported HTML
+        # (e.g. `<p class="font_8">…</p>`). Strip tags so the markdown table
+        # stays readable.
+        raw_desc = (r[i_desc] if (i_desc is not None and len(r) > i_desc) else "").strip()
+        clean_desc = re.sub(r"<[^>]+>", "", raw_desc).strip() if raw_desc else ""
+        out["in_transit"].append({
+            "shipment_id": (r[i_id] if (i_id is not None and len(r) > i_id) else "").strip(),
+            "shipment_date": (r[i_date] if (i_date is not None and len(r) > i_date) else "").strip(),
+            "status": status,
+            "description": clean_desc,
+            "cargo_size": (r[i_cargo] if (i_cargo is not None and len(r) > i_cargo) else "").strip(),
+            "cacao_kg": _f(r[i_kg]) if (i_kg is not None and len(r) > i_kg) else None,
+        })
+    return out
+
+
+def _fmt_usd(v: float | None) -> str:
+    if v is None:
+        return "—"
+    return f"${v:,.2f}"
+
+
+def _fmt_units(v: float | None) -> str:
+    if v is None:
+        return "—"
+    return f"{v:,.0f}" if abs(v - round(v)) < 0.01 else f"{v:,.2f}"
+
+
+def _render_ops_health_markdown(ops_health: dict) -> str:
+    """Compact, oracle-friendly rendering. Detail lives in the JSON snapshot."""
+    p: list[str] = []
+    p.append("---\n\n## Operations health (supply pipeline + cash float)\n\n")
+    p.append(
+        "_Live snapshot for the oracle / advisor: per-shipper stock from the "
+        "public **`treasury-cache/dao_offchain_treasury.json`**, cash float "
+        "from `off chain asset balance`, and in-transit freight from "
+        "**`Shipment Ledger Listing`**. Days-of-cover / burn-rate is v2 — "
+        "the JSON snapshot at `ecosystem_change_logs/ops_health/current.json` "
+        "has the full per-SKU detail._\n\n"
+    )
+
+    p.append("### Stock at production shippers\n\n")
+    for shipper in ops_health.get("primary_shippers") or []:
+        label = shipper.get("label") or shipper.get("key")
+        role = shipper.get("role") or ""
+        resolved = shipper.get("resolved_manager_name")
+        if not resolved:
+            p.append(f"**{label}** — _no manager matching substring `{shipper.get('match_substr')}` in current treasury cache._\n\n")
+            continue
+        p.append(f"**{label}** _( {role} )_\n")
+        p.append(
+            f"- Manager record: `{resolved}` · "
+            f"{shipper.get('items_count', 0)} SKU lines · "
+            f"{_fmt_units(shipper.get('total_units'))} total units · "
+            f"{_fmt_usd(shipper.get('total_value_usd'))}\n"
+        )
+        rollup = shipper.get("by_inventory_type") or []
+        if rollup:
+            p.append("\n  | Inventory type | Unit format | Items | Units | Value (USD) |\n")
+            p.append("  |----------------|-------------|-------|-------|-------------|\n")
+            for r in rollup[:12]:
+                p.append(
+                    f"  | {r['inventory_type']} | {r['unit_format']} | {r['items']} | "
+                    f"{_fmt_units(r['units'])} | {_fmt_usd(r['value_usd'])} |\n"
+                )
+            if len(rollup) > 12:
+                p.append(f"  _(+{len(rollup) - 12} more buckets in JSON snapshot)_\n")
+        p.append("\n")
+
+    others = ops_health.get("other_managers_summary") or []
+    if others:
+        top = others[:8]
+        p.append("### Other managers (top 8 by USD value)\n\n")
+        p.append("| Manager | Items | Units | Value (USD) |\n")
+        p.append("|---------|-------|-------|-------------|\n")
+        for m in top:
+            p.append(
+                f"| {m.get('manager_name')} | {m.get('items_count')} | "
+                f"{_fmt_units(m.get('total_units'))} | {_fmt_usd(m.get('total_value_usd'))} |\n"
+            )
+        if len(others) > 8:
+            p.append(f"\n_(+{len(others) - 8} more in JSON snapshot.)_\n")
+        p.append("\n")
+
+    cash = ops_health.get("cash_float")
+    if cash is None:
+        p.append(
+            "### Cash float\n\n"
+            "_Skipped — re-run with `--with-sheet-sales` (or fix `google_credentials.json`) to surface USD / BRL balances._\n\n"
+        )
+    else:
+        p.append("### Cash float (`off chain asset balance`)\n\n")
+        usd = cash.get("usd_balance_total")
+        brl = cash.get("brl_balance_total")
+        rate = cash.get("brl_to_usd_rate")
+        brl_usd_eq = cash.get("brl_balance_usd_equivalent")
+        prov = cash.get("usd_provisions_for_voting_rights_cash_out")
+        p.append(f"- USD on hand: **{_fmt_usd(usd)}**\n")
+        if brl is not None:
+            rate_note = f" · rate `{rate}` USD/BRL" if rate else " · rate not in `Currencies` tab"
+            eq_note = f" → ≈ **{_fmt_usd(brl_usd_eq)}**" if brl_usd_eq is not None else ""
+            p.append(f"- Brazilian Reis: R${brl:,.2f}{rate_note}{eq_note}\n")
+        if prov is not None:
+            p.append(f"- USD provisioned for voting-rights cash-out: **{_fmt_usd(prov)}**\n")
+        if cash.get("errors"):
+            for err in cash["errors"]:
+                p.append(f"- _Read warning: {err}_\n")
+        p.append("\n")
+
+    in_transit = ops_health.get("in_transit_freight")
+    if in_transit is None:
+        p.append(
+            "### In-transit freight\n\n"
+            "_Skipped — re-run with `--with-sheet-sales` to surface in-flight `Shipment Ledger Listing` rows._\n\n"
+        )
+    else:
+        rows = in_transit.get("in_transit") or []
+        p.append(f"### In-transit freight ({len(rows)} row{'s' if len(rows) != 1 else ''})\n\n")
+        if not rows:
+            p.append("_No `Shipment Ledger Listing` rows match in-flight status keywords today._\n\n")
+        else:
+            p.append("| Shipment | Status | Date | Cargo | Cacao (kg) | Description |\n")
+            p.append("|----------|--------|------|-------|------------|-------------|\n")
+            for s in rows[:20]:
+                desc = (s.get("description") or "").replace("|", "/")
+                if len(desc) > 100:
+                    desc = desc[:97] + "…"
+                kg = "" if s.get("cacao_kg") in (None, 0, 0.0) else f"{s['cacao_kg']:,.1f}"
+                p.append(
+                    f"| `{s.get('shipment_id') or ''}` | {s.get('status')} | "
+                    f"{s.get('shipment_date') or ''} | {s.get('cargo_size') or ''} | {kg} | {desc} |\n"
+                )
+            if len(rows) > 20:
+                p.append(f"\n_(+{len(rows) - 20} more in JSON snapshot.)_\n")
+        if in_transit.get("errors"):
+            for err in in_transit["errors"]:
+                p.append(f"- _Read warning: {err}_\n")
+        p.append("\n")
+
+    p.append(
+        "_Burn rate / days-of-cover is v2 — needs a sales × `inventory_type` "
+        "join. The JSON snapshot reserves `sales_velocity_30d` / "
+        "`days_of_cover_at_sf` slots so a dapp dashboard can be wired now and "
+        "back-filled later._\n\n"
+    )
+    return "".join(p)
+
+
+def _write_ops_health_json(eco_repo: Path, ops_health: dict, date_str: str) -> None:
+    """Write the structured snapshot. Best-effort — never raise into main flow."""
+    try:
+        out_dir = eco_repo / "ops_health"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        text = json.dumps(ops_health, indent=2, ensure_ascii=False, default=str)
+        (out_dir / "current.json").write_text(text + "\n", encoding="utf-8")
+        snaps = out_dir / "snapshots"
+        snaps.mkdir(parents=True, exist_ok=True)
+        (snaps / f"{date_str}.json").write_text(text + "\n", encoding="utf-8")
+    except OSError as e:
+        sys.stderr.write(f"[ops-health] failed to write JSON snapshot: {e}\n")
+
+
 def _build_markdown(
     *,
     since_days: int,
@@ -1051,6 +1546,7 @@ def _build_markdown(
     eco_repo: Path,
     sheet_sales_md: str = "",
     rem_md: str = "",
+    ops_health_md: str = "",
 ) -> str:
     now = dt.datetime.now(dt.timezone.utc)
     parts: list[str] = []
@@ -1084,6 +1580,13 @@ def _build_markdown(
         "Partner-pipeline counts by status, mirrored from the Holistic Hit List Pipeline Dashboard. "
         "Refreshed by tokenomics `pipeline_metrics_snapshot` GAS.",
     ))
+
+    # Operations health — supply pipeline + cash float. Placed before
+    # activity/log evidence so the oracle reads concrete stock/freight/cash
+    # state ahead of narrative context. Source of truth for the structured
+    # form is `ecosystem_change_logs/ops_health/current.json`.
+    if ops_health_md:
+        parts.append(ops_health_md)
 
     parts.append("---\n\n## CONTEXT_UPDATES (append-only, heuristic highlights)\n\n")
     cu = ctx_root / "CONTEXT_UPDATES.md"
@@ -1509,6 +2012,20 @@ def main() -> int:
         help="With --with-sheet-sales: scan the last N data rows from the bottom of QR Code Sales (default 600).",
     )
     ap.add_argument(
+        "--ops-health",
+        dest="ops_health",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Render the **Operations health** section (per-shipper stock from "
+            "`treasury-cache/dao_offchain_treasury.json`, plus cash float and "
+            "in-transit freight when `--with-sheet-sales` is also on) into the "
+            "advisory markdown AND write the structured snapshot to "
+            "`ecosystem_change_logs/ops_health/current.json`. "
+            "Pass `--no-ops-health` to skip."
+        ),
+    )
+    ap.add_argument(
         "--with-rem",
         action="store_true",
         help=(
@@ -1597,6 +2114,18 @@ def main() -> int:
             reminders_json=None,
         )
 
+    # Operations health snapshot. Always computes from the public treasury
+    # cache (no auth). When `--with-sheet-sales` is also on, augments with
+    # cash float (`off chain asset balance`) and in-transit freight
+    # (`Shipment Ledger Listing`). `--no-ops-health` opts out entirely.
+    ops_health_md = ""
+    ops_health: dict | None = None
+    if args.ops_health:
+        ops_health = _compute_ops_health(_fetch_treasury_cache())
+        if args.with_sheet_sales:
+            _augment_ops_health_with_sheets(ops_health, _REPO)
+        ops_health_md = _render_ops_health_markdown(ops_health)
+
     text = _build_markdown(
         since_days=args.since_days,
         since_d=since_d,
@@ -1607,6 +2136,7 @@ def main() -> int:
         eco_repo=eco_repo,
         sheet_sales_md=sheet_sales_md,
         rem_md=rem_md,
+        ops_health_md=ops_health_md,
     )
 
     snap_path_ctx = ctx_root / "ADVISORY_SNAPSHOT.md"
@@ -1626,6 +2156,13 @@ def main() -> int:
 
     if open_rem_rows is not None:
         _write_reminders_json(eco_repo, open_rem_rows, date_str)
+
+    # Structured ops-health snapshot for the dapp dashboard / future burn-rate
+    # join. Same payload that drives the markdown section above; written even
+    # when the markdown is short (e.g. sheets auth missing) so consumers always
+    # see the latest treasury slice.
+    if ops_health is not None:
+        _write_ops_health_json(eco_repo, ops_health, date_str)
 
     readme = advisory_dir / "README.md"
     readme_body = (
