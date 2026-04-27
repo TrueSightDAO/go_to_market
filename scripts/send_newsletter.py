@@ -18,10 +18,32 @@ Inputs:
   --body-md FILE         Plain markdown/text body. A minimal HTML part is generated.
   --campaign NAME        Free-form campaign tag for the sheet log (e.g. "two_bahia_bars")
   --label LABEL          Gmail label applied to each draft/sent message (e.g. "Newsletter/2 Chocolate Bars")
-  --track-opens          Embed a visible Agroverse logo (tracking URL via Edgar). Off by default.
-  --track-clicks         Rewrite outbound links through Edgar so each click is logged
-                         back to the sheet row. Off by default.
+  --track-opens / --no-track-opens
+                         Embed a visible Agroverse logo (tracking URL via Edgar).
+                         **Default ON.** A forgotten flag must not silently
+                         produce an untracked send — pass --no-track-opens
+                         only for an explicit one-off untracked test.
+  --track-clicks / --no-track-clicks
+                         Rewrite outbound links through Edgar so each click is
+                         logged back to the sheet row. **Default ON.**
+  --exclude-buyers-of-substring TEXT
+                         Repeatable. Drop any recipient whose email appears in
+                         the 'Agroverse QR codes' tab as Owner Email on a row
+                         whose Currency contains TEXT (case-insensitive
+                         substring match) AND whose status matches
+                         --exclude-buyers-status (default: SOLD). Avoid
+                         pitching a SKU to someone who already bought it.
+  --exclude-buyers-status STATUS
+                         Repeatable. Statuses that count as 'already bought'
+                         for the exclusion above (default: SOLD).
   --edgar-base-url URL   Base for tracking endpoints (default https://edgar.truesight.me)
+
+Body markdown supports a tiny vocabulary:
+  **bold**                          → <strong>bold</strong>
+  *italic*                          → <em>italic</em>
+  [text](https://url)               → <a href="…">text</a>
+  ![alt](https://image-url)         → <img src="…" alt="…" width="480" …>
+  Blank lines separate paragraphs.
 
 Sheet log columns (appended to Agroverse News Letter Emails):
   message_uuid, gmail_message_id, campaign, subject, recipient_email,
@@ -42,14 +64,16 @@ Usage examples:
       --campaign two_bahia_bars_review \
       --label "Newsletter/2 Chocolate Bars"
 
-  # Full list live send with open + click tracking
+  # Full list live send (tracking on by default; skip recipients who
+  # already hold either of the two bars in the campaign):
   python3 scripts/send_newsletter.py \
       --mode send --recipients-from-sheet \
       --subject "Two Bahia farms, two very different chocolates" \
       --body-md newsletter_drafts/2026-04-20_two_bahia_bars.md \
       --campaign two_bahia_bars \
       --label "Newsletter/2 Chocolate Bars" \
-      --track-opens --track-clicks
+      --exclude-buyers-of-substring "Oscar Fazenda, Brazil 2024" \
+      --exclude-buyers-of-substring "Santa Anna Fazenda, Brazil 2023"
 """
 
 from __future__ import annotations
@@ -80,6 +104,18 @@ MAIN_LEDGER_ID = "1GE7PUq-UT6x2rBN-Q2ksogbWpgyuh2SaxJyG_uEK6PU"
 NEWSLETTER_LOG_SPREADSHEET_ID = "1ed3q3SJ8ztGwfWit6Wxz_S72Cn5jKQFkNrHpeOVXP8s"
 SUBSCRIBERS_WS = "Agroverse News Letter Subscribers"
 EMAILS_WS = "Agroverse News Letter Emails"
+
+# Main Ledger: "Agroverse QR codes" tab — used by --exclude-buyers-of-substring
+# to skip recipients who already hold a QR for the SKU(s) the campaign is about
+# (don't pitch a bar to someone who already bought it). Column layout:
+#   col D (idx 3) = status (SOLD, MINTED, ON CONSIGNMENT, SAMPLE, …)
+#   col I (idx 8) = Currency (the SKU/product string we substring-match)
+#   col L (idx 11) = Owner Email (the buyer's address; the join key)
+QR_CODES_WS = "Agroverse QR codes"
+QR_STATUS_COL_INDEX = 3
+QR_CURRENCY_COL_INDEX = 8
+QR_OWNER_EMAIL_COL_INDEX = 11
+DEFAULT_BUYER_STATUSES = ["SOLD"]
 
 EXPECTED_MAILBOX = "garyjob@agroverse.shop"
 DEFAULT_EDGAR_BASE = "https://edgar.truesight.me"
@@ -204,6 +240,44 @@ def load_recipients_from_sheet(sh: gspread.Spreadsheet) -> list[str]:
     return out
 
 
+def load_qr_buyer_emails(
+    sh: gspread.Spreadsheet,
+    currency_substrings: list[str],
+    statuses: list[str],
+) -> tuple[set[str], int]:
+    """Read `Agroverse QR codes` tab and return (lowercased Owner Emails of
+    rows whose Currency contains any of the given substrings AND whose status
+    is in the given statuses, count of matching QR rows).
+
+    `Agroverse QR codes` is the canonical record of which contributor email
+    holds which serialized SKU; we treat any matching row as evidence the
+    address has already received the SKU and therefore should not be pitched
+    that SKU again. Used by `--exclude-buyers-of-substring`.
+    """
+    if not currency_substrings:
+        return set(), 0
+    needles = [s.strip().lower() for s in currency_substrings if s.strip()]
+    if not needles:
+        return set(), 0
+    valid_statuses = {s.strip().upper() for s in statuses if s.strip()}
+    ws = sh.worksheet(QR_CODES_WS)
+    rows = ws.get_all_values()
+    emails: set[str] = set()
+    matched = 0
+    for r in rows[1:]:
+        if len(r) <= QR_OWNER_EMAIL_COL_INDEX:
+            continue
+        currency = r[QR_CURRENCY_COL_INDEX].strip().lower()
+        status = r[QR_STATUS_COL_INDEX].strip().upper()
+        email = normalize_email(r[QR_OWNER_EMAIL_COL_INDEX])
+        if not email or status not in valid_statuses:
+            continue
+        if any(n in currency for n in needles):
+            matched += 1
+            emails.add(email)
+    return emails, matched
+
+
 def gmail_profile_email(service) -> str:
     prof = service.users().getProfile(userId="me").execute()
     return str(prof.get("emailAddress", "") or "").strip().lower()
@@ -224,11 +298,30 @@ def ensure_user_label_id(service, label_name: str) -> str:
 
 
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+# Standard markdown image syntax `![alt](src)`. Must be substituted BEFORE the
+# link regex sees it, otherwise `![alt](src)` becomes `<a href="src">alt</a>`
+# (the link regex doesn't lookbehind for the leading `!`).
+_MD_IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+
+
+def _img_html_substitution(match: re.Match) -> str:
+    alt = match.group(1).replace('"', '&quot;')
+    src = match.group(2)
+    return (
+        f'<img src="{src}" alt="{alt}" width="480" '
+        f'style="max-width:100%;height:auto;display:block;'
+        f'border-radius:8px;margin:12px 0;" />'
+    )
 
 
 def markdown_to_plain(md: str) -> str:
-    # Drop bold/italic markers; convert [text](url) to "text (url)".
+    # Strip markdown image syntax first (so the link regex doesn't pick it up
+    # as `[alt](src)`); then drop bold/italic markers; convert [text](url) to
+    # "text (url)".
     out = md
+    out = _MD_IMG_RE.sub(
+        lambda m: f"[image: {m.group(1)}]" if m.group(1) else "[image]", out
+    )
     out = _MD_LINK_RE.sub(lambda m: f"{m.group(1)} ({m.group(2)})", out)
     out = re.sub(r"\*\*(.+?)\*\*", r"\1", out)
     out = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\1", out)
@@ -258,8 +351,11 @@ def markdown_to_html(md: str, link_transform=None) -> str:
         if not line.strip():
             flush_para()
             continue
+        # Images first — `![alt](src)` → <img>. Without this step the link
+        # regex below treats it as `[alt](src)` and emits an <a> instead.
+        converted = _MD_IMG_RE.sub(_img_html_substitution, line)
         converted = _MD_LINK_RE.sub(
-            lambda m: f'<a href="{rewrite(m.group(2))}">{m.group(1)}</a>', line
+            lambda m: f'<a href="{rewrite(m.group(2))}">{m.group(1)}</a>', converted
         )
         converted = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", converted)
         converted = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", converted)
@@ -350,8 +446,53 @@ def main() -> None:
         action="store_true",
         help=f"Load CONFIRMED subscribers from {SUBSCRIBERS_WS!r}",
     )
-    p.add_argument("--track-opens", action="store_true")
-    p.add_argument("--track-clicks", action="store_true")
+    p.add_argument(
+        "--track-opens",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Embed the visible Agroverse-logo open pixel via Edgar. Default ON "
+            "(every newsletter send is tracked unless explicitly opted out); "
+            "pass --no-track-opens for a one-off untracked test send."
+        ),
+    )
+    p.add_argument(
+        "--track-clicks",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Rewrite outbound markdown links through Edgar so each click is "
+            "logged. Default ON; pass --no-track-clicks to disable."
+        ),
+    )
+    p.add_argument(
+        "--exclude-buyers-of-substring",
+        action="append",
+        default=[],
+        metavar="TEXT",
+        help=(
+            "Repeatable. Drop any recipient whose email appears in the "
+            "'Agroverse QR codes' tab as Owner Email on a row whose Currency "
+            "contains TEXT (case-insensitive substring match) AND whose status "
+            "is in --exclude-buyers-status. Use this to avoid pitching a SKU "
+            "to someone who already bought it. Example for the two-Bahia-bars "
+            "campaign: --exclude-buyers-of-substring \"Oscar Fazenda, Brazil "
+            "2024\" --exclude-buyers-of-substring \"Santa Anna Fazenda, Brazil "
+            "2023\"."
+        ),
+    )
+    p.add_argument(
+        "--exclude-buyers-status",
+        action="append",
+        default=None,
+        metavar="STATUS",
+        help=(
+            f"Repeatable. QR statuses that count as 'already bought' for "
+            f"--exclude-buyers-of-substring. Default: "
+            f"{','.join(DEFAULT_BUYER_STATUSES)}. Pass extra statuses (e.g. "
+            f"SAMPLE) to broaden the exclusion."
+        ),
+    )
     p.add_argument("--edgar-base-url", default=DEFAULT_EDGAR_BASE)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--expected-mailbox", default=EXPECTED_MAILBOX)
@@ -405,6 +546,21 @@ def main() -> None:
             deduped.append(r)
     recipients = deduped
 
+    # Subtract buyers of the SKU(s) this campaign is about. The 'Agroverse QR
+    # codes' tab is the canonical record of which contributor email holds
+    # which serialized SKU; if a recipient already shows up there for the
+    # campaign's SKU, don't pitch them the SKU they already own.
+    buyer_statuses = args.exclude_buyers_status or list(DEFAULT_BUYER_STATUSES)
+    excluded_count = 0
+    matched_qr_rows = 0
+    if args.exclude_buyers_of_substring:
+        buyer_emails, matched_qr_rows = load_qr_buyer_emails(
+            ledger_sh, args.exclude_buyers_of_substring, buyer_statuses,
+        )
+        before = len(recipients)
+        recipients = [r for r in recipients if r not in buyer_emails]
+        excluded_count = before - len(recipients)
+
     if not recipients:
         sys.stderr.write("No recipients. Pass --to or --recipients-from-sheet.\n")
         sys.exit(1)
@@ -426,6 +582,13 @@ def main() -> None:
     print(f"Label:       {args.label or '(none)'}")
     print(f"Track opens: {args.track_opens}")
     print(f"Track clicks: {args.track_clicks}")
+    if args.exclude_buyers_of_substring:
+        print(
+            f"Excluded buyers: {excluded_count} recipient(s) dropped "
+            f"({matched_qr_rows} matching QR row(s); statuses="
+            f"{','.join(buyer_statuses)}; substrings="
+            f"{args.exclude_buyers_of_substring})"
+        )
     print(f"Recipients:  {len(recipients)}")
     for r in recipients[:10]:
         print(f"  - {r}")
