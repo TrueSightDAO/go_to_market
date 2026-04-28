@@ -20,10 +20,14 @@ Two queues per run:
      is left unchanged (still used for place_id / discovery context).
 
 2. **Fill-gap queue** (default cap 20, disable with ``--no-fill-gaps``):
-   - Any row whose Notes has ``place_id: …`` AND at least one of {Address, City, State,
-     Latitude, Longitude, Monday Open, Google listing} is empty. (The contact-enrichment queue
-     above also applies this fill on its own rows in the same Places Details call — single
-     API call, both responsibilities discharged.)
+   - Any row whose Notes has ``place_id: …`` AND at least one of {Shop Type, Address, City,
+     State, Phone, Website, Latitude, Longitude, Monday Open, Google listing} is empty.
+     (The contact-enrichment queue above also applies this fill on its own rows in the
+     same Places Details call — single API call, both responsibilities discharged.)
+   - Shop Type maps from Places ``types`` via ``shop_type_from_places_types`` to the
+     canonical 12-value taxonomy used by ``dapp/stores_nearby.html`` and
+     ``dapp/stores_by_status.html``; falls back to ``Other`` so every row stays visible
+     under DApp filter facets.
    - Subsumes the standalone ``backfill_hit_list_opening_hours.py`` and
      ``backfill_hit_list_google_listing.py`` for the routine cron path; those remain available
      as manual one-shots.
@@ -191,7 +195,16 @@ def place_details_full(key: str, place_id: str) -> dict[str, Any]:
     return data.get("result") or {}
 
 
-GAP_HEADERS_PRIMARY = ("Address", "City", "State", "Latitude", "Longitude")
+GAP_HEADERS_PRIMARY = (
+    "Shop Type",
+    "Address",
+    "City",
+    "State",
+    "Phone",
+    "Website",
+    "Latitude",
+    "Longitude",
+)
 GAP_HEADER_HOURS_FIRST = "Monday Open"
 GAP_HEADER_LISTING = dl.GOOGLE_LISTING_COL
 
@@ -206,7 +219,8 @@ def _row_cell(row: list[str], header: list[str], name: str) -> tuple[str, int]:
 
 
 def has_any_gap(row: list[str], header: list[str]) -> bool:
-    """True if any of {Address, City, State, Lat, Lng, Monday Open, Google listing} is empty."""
+    """True if any of {Shop Type, Address, City, State, Phone, Website, Lat, Lng,
+    Monday Open, Google listing} is empty."""
     for name in (*GAP_HEADERS_PRIMARY, GAP_HEADER_HOURS_FIRST, GAP_HEADER_LISTING):
         cur, ci = _row_cell(row, header, name)
         if ci < 0:
@@ -214,6 +228,39 @@ def has_any_gap(row: list[str], header: list[str]) -> bool:
         if not cur:
             return True
     return False
+
+
+SHOP_TYPE_FALLBACK = "Other"
+
+
+def shop_type_from_places_types(types: list[str] | None) -> str:
+    """Map a Places ``types`` list to the canonical 12-value Hit List Shop Type taxonomy
+    used by ``dapp/stores_nearby.html`` (Add Store dropdown + filter) and
+    ``dapp/stores_by_status.html`` ``SHOP_TYPE_OPTIONS``. Always returns one of those
+    12 values — falls back to ``Other`` so every row remains visible to filter facets.
+    """
+    t = set(s.strip().lower() for s in (types or []))
+    if "herbalist" in t or "pharmacy" in t:
+        return "Apothecary"
+    if "health_food_store" in t:
+        return "Health Food Store"
+    if "gift_shop" in t:
+        return "Gift Shop"
+    if (
+        "book_store" in t
+        and (
+            "clothing_store" in t
+            or "jewelry_store" in t
+            or "home_goods_store" in t
+        )
+    ):
+        return "Metaphysical/Spiritual"
+    if "gym" in t and "health" in t:
+        return "Wellness Center"
+    # Cafe/coffee only when it's not also a liquor/restaurant combo.
+    if (("cafe" in t) or ("coffee_shop" in t)) and "liquor_store" not in t:
+        return "Conscious Cafe"
+    return SHOP_TYPE_FALLBACK
 
 
 def apply_place_result_to_row_gaps(
@@ -227,11 +274,13 @@ def apply_place_result_to_row_gaps(
     force: bool = False,
     log_prefix: str = "",
 ) -> list[str]:
-    """Fill empty {Address, City, State, Latitude, Longitude, weekday hours, Google listing} cells
-    on row ``rn`` from a Places Details ``result`` dict.
+    """Fill empty {Shop Type, Address, City, State, Phone, Website, Latitude, Longitude,
+    weekday hours, Google listing} cells on row ``rn`` from a Places Details ``result`` dict.
 
     Idempotent: skips columns whose current value is non-empty unless ``force=True``.
     Opening hours are written only when ALL 14 weekday cells are currently empty (atomic block).
+    Shop Type always falls back to ``Other`` (canonical taxonomy value) so the row stays
+    visible under DApp filter facets — see ``shop_type_from_places_types``.
 
     Returns the list of header names whose cells were updated (or would be, in dry-run)."""
     parsed = dl.parse_address_components(res.get("address_components") or [])
@@ -240,6 +289,12 @@ def apply_place_result_to_row_gaps(
     p_lng = loc.get("lng")
 
     updates: list[tuple[int, str, str]] = []  # (col_idx_0based, header_name, value)
+
+    cur_st, ci_st = _row_cell(row, header, "Shop Type")
+    if ci_st >= 0 and (force or not cur_st):
+        st_val = shop_type_from_places_types(res.get("types"))
+        if st_val:
+            updates.append((ci_st, "Shop Type", st_val))
 
     cur_addr, ci_addr = _row_cell(row, header, "Address")
     if ci_addr >= 0 and (force or not cur_addr):
@@ -258,6 +313,18 @@ def apply_place_result_to_row_gaps(
         state = parsed.get("state") or ""
         if state:
             updates.append((ci_state, "State", state))
+
+    cur_phone, ci_phone = _row_cell(row, header, "Phone")
+    if ci_phone >= 0 and (force or not cur_phone):
+        phone = (res.get("formatted_phone_number") or "").strip()
+        if phone:
+            updates.append((ci_phone, "Phone", phone))
+
+    cur_web, ci_web = _row_cell(row, header, "Website")
+    if ci_web >= 0 and (force or not cur_web):
+        site = (res.get("website") or "").strip()
+        if site:
+            updates.append((ci_web, "Website", site))
 
     cur_lat, ci_lat = _row_cell(row, header, "Latitude")
     if ci_lat >= 0 and (force or not cur_lat) and p_lat is not None:
