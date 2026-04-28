@@ -152,43 +152,91 @@ def _months_between(d: date, today: date) -> float:
 # Sheet readers
 # ---------------------------------------------------------------------------
 
-def read_partner_types(sh: gspread.Spreadsheet) -> dict[str, str]:
-    """Map partner_id -> partner_type from `Agroverse Partners`!I.
+_ALLOWED_PARTNER_TYPES = {"Wholesale", "Consignment", "Operator", "Supplier", "Manufacturer"}
 
-    Validated values per canonical `States`!Z enum: `Wholesale`,
-    `Consignment`, `Operator`, `Supplier`, `Manufacturer`. Anything else
-    (or empty) is mapped to `Consignment` per the 2026-04-27 default.
+
+def _normalize_header_token(s: str) -> str:
+    """Normalize a header cell or a lookup key: lowercase, strip, treat
+    spaces / underscores / hyphens as equivalent. The Agroverse Partners
+    sheet has the literal header `partner type` (with a space) for col I,
+    while previous code looked for `partner_type` — normalization here
+    means either form (or `Partner Type`, etc.) resolves to the same key.
     """
-    ALLOWED = {"Wholesale", "Consignment", "Operator", "Supplier", "Manufacturer"}
+    return "".join(ch for ch in (s or "").strip().lower() if ch not in (" ", "_", "-"))
+
+
+def _build_header_index(header_row: list[str], aliases: dict[str, list[str]], fallbacks: dict[str, int]) -> dict[str, int]:
+    """Map each canonical key to the column index whose normalized header
+    matches one of its aliases. Falls back to `fallbacks[key]` when no
+    alias matches (so the function is robust to header drift / misnames).
+    """
+    norm_header = [_normalize_header_token(c) for c in header_row]
+    out: dict[str, int] = {}
+    for key, alias_list in aliases.items():
+        idx = None
+        for alias in alias_list:
+            try:
+                idx = norm_header.index(_normalize_header_token(alias))
+                break
+            except ValueError:
+                continue
+        out[key] = idx if idx is not None else fallbacks[key]
+    return out
+
+
+def read_partner_metadata(sh: gspread.Spreadsheet) -> dict[str, dict[str, str]]:
+    """Read per-partner metadata from `Agroverse Partners`.
+
+    Returns: ``{partner_id: {"partner_name": str, "location": str, "partner_type": str}}``
+
+    Header lookup is normalized (case + whitespace + underscore-insensitive)
+    so the live sheet's ``partner type`` (with space) matches a lookup of
+    ``partner_type``, ``Partner Type``, etc. Falls back to fixed column
+    indexes if a header is renamed unexpectedly.
+
+    `partner_type` is validated against the canonical `States`!Z enum
+    (Wholesale / Consignment / Operator / Supplier / Manufacturer);
+    unset / unknown values default to `Consignment` per the 2026-04-27
+    operator-defined default.
+    """
     ws = sh.worksheet(inv.PARTNERS_SHEET_NAME)
     rows = inv._gspread_retry(lambda: ws.get_all_values())
     if not rows:
         return {}
-    header = [c.strip().lower() for c in rows[0]]
+    idx = _build_header_index(
+        rows[0],
+        aliases={
+            "partner_id": ["partner_id", "partner id"],
+            "partner_name": ["partner_name", "partner name", "display_name", "name"],
+            "location": ["location", "city", "city_state"],
+            "partner_type": ["partner_type", "partner type", "type"],
+        },
+        # Live-sheet column indexes as of 2026-04-28: A B F I (0-based 0/1/5/8).
+        fallbacks={"partner_id": 0, "partner_name": 1, "location": 5, "partner_type": 8},
+    )
 
-    def _idx(name: str, fallback: int) -> int:
-        try:
-            return header.index(name)
-        except ValueError:
-            return fallback
-
-    partner_idx = _idx("partner_id", 0)
-    type_idx = _idx("partner_type", 8)  # Column I = 8 (0-based)
-
-    out: dict[str, str] = {}
+    out: dict[str, dict[str, str]] = {}
     for row in rows[1:]:
-        if not row or len(row) <= partner_idx:
+        if not row or len(row) <= idx["partner_id"]:
             continue
-        partner_id = (row[partner_idx] or "").strip()
+        partner_id = (row[idx["partner_id"]] or "").strip()
         if not partner_id:
             continue
-        ptype_raw = ""
-        if len(row) > type_idx and row[type_idx]:
-            ptype_raw = row[type_idx].strip()
-        # Default unset / unknown values to Consignment (operator-defined default).
-        ptype = ptype_raw if ptype_raw in ALLOWED else "Consignment"
-        out[partner_id] = ptype
+        ptype_raw = (row[idx["partner_type"]] if len(row) > idx["partner_type"] else "").strip()
+        ptype = ptype_raw if ptype_raw in _ALLOWED_PARTNER_TYPES else "Consignment"
+        out[partner_id] = {
+            "partner_name": (row[idx["partner_name"]] if len(row) > idx["partner_name"] else "").strip(),
+            "location": (row[idx["location"]] if len(row) > idx["location"] else "").strip(),
+            "partner_type": ptype,
+        }
     return out
+
+
+def read_partner_types(sh: gspread.Spreadsheet) -> dict[str, str]:
+    """Backwards-compatible wrapper around `read_partner_metadata` —
+    callers that only need partner_type still work without a refactor.
+    """
+    return {pid: meta["partner_type"] for pid, meta in read_partner_metadata(sh).items()}
 
 
 @dataclass
@@ -320,10 +368,17 @@ def build_partners_block(
     *,
     sales_by_partner: dict[str, dict[str, _SkuStats]],
     restocks_by_partner: dict[str, dict[str, _SkuStats]],
-    partner_types: dict[str, str],
+    partner_metadata: dict[str, dict[str, str]],
 ) -> dict[str, dict]:
-    """Merge sales + restocks → partners block keyed by partner_id."""
-    all_partner_ids = set(sales_by_partner) | set(restocks_by_partner) | set(partner_types)
+    """Merge sales + restocks → partners block keyed by partner_id.
+
+    `partner_metadata` carries `partner_name`, `location`, and
+    `partner_type` per partner_id (from `read_partner_metadata`). Each is
+    surfaced at the partner level of the JSON so consumers (e.g. the
+    DApp restock recommender) can show a real display name + city
+    instead of slug-derived text.
+    """
+    all_partner_ids = set(sales_by_partner) | set(restocks_by_partner) | set(partner_metadata)
     out: dict[str, dict] = {}
     for pid in sorted(all_partner_ids):
         items: dict[str, dict] = {}
@@ -347,8 +402,11 @@ def build_partners_block(
                 entry.update({"restocks_30d": 0, "restocks_90d": 0, "restocks_12m_monthly_avg": 0,
                               "last_restock_date": None, "sample_size_restocks": 0})
             items[sku] = entry
+        meta = partner_metadata.get(pid, {})
         out[pid] = {
-            "partner_type": partner_types.get(pid, "Consignment"),
+            "partner_name": meta.get("partner_name") or "",
+            "location": meta.get("location") or "",
+            "partner_type": meta.get("partner_type") or "Consignment",
             "items": items,
         }
     return out
@@ -412,7 +470,7 @@ def main() -> None:
     contributor_to_partners = inv.read_partners_by_contributor(main_sh)
     if not contributor_to_partners:
         raise SystemExit("No active partners found in `Agroverse Partners` — abort.")
-    partner_types = read_partner_types(main_sh)
+    partner_metadata = read_partner_metadata(main_sh)
     currency_to_sku = inv.get_currency_to_sku_mapping(main_sh)
     if not currency_to_sku:
         raise SystemExit("No currency→SKU mappings found in `Currencies` — abort.")
@@ -439,7 +497,7 @@ def main() -> None:
     partners_block = build_partners_block(
         sales_by_partner=sales_by_partner,
         restocks_by_partner=restocks_by_partner,
-        partner_types=partner_types,
+        partner_metadata=partner_metadata,
     )
     category_medians = compute_category_medians(sales_by_partner, restocks_by_partner)
 
