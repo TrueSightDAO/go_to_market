@@ -233,6 +233,54 @@ REGIONS: dict[str, RegionConfig] = {
         required_state="CA",
         allowed_states=frozenset({"CA", "OR", "WA"}),
     ),
+    # Pacific Northwest corridor: Portland OR → Seattle → Spokane → Boise.
+    # Three connected segments, one region:
+    #   • Portland → Seattle on I-5 (PDX, Vancouver WA, Kelso/Longview,
+    #     Centralia, Olympia, Tacoma, Seattle).
+    #   • Seattle → Spokane on I-90 (Bellevue, North Bend/Cle Elum,
+    #     Ellensburg, Moses Lake, Spokane).
+    #   • Spokane → Boise on US-95 / I-90→US-95 south (Coeur d'Alene,
+    #     Moscow, Lewiston, Riggins/McCall, Boise).
+    # 50 km radii overlap so a single ceremonial-cacao retailer between
+    # towns isn't missed. Bounding box trims inland bleed; allowed_states
+    # gates Place Details to OR/WA/ID only.
+    "pnw_corridor": RegionConfig(
+        key="pnw_corridor",
+        notes_label="Pacific Northwest corridor (PDX–SEA–SPK–BOI)",
+        centers=(
+            # I-5 Portland → Seattle
+            (45.5152, -122.6784, 50000, "Portland OR"),
+            (45.6272, -122.6734, 35000, "Vancouver WA"),
+            (46.1382, -122.9382, 40000, "Longview / Kelso"),
+            (46.7163, -122.9543, 40000, "Centralia / Chehalis"),
+            (47.0379, -122.9007, 45000, "Olympia"),
+            (47.2529, -122.4443, 45000, "Tacoma"),
+            (47.6062, -122.3321, 50000, "Seattle"),
+            # I-90 Seattle → Spokane
+            (47.6101, -122.2015, 30000, "Bellevue / Eastside"),
+            (47.4954, -121.7869, 35000, "North Bend / Snoqualmie"),
+            (47.1953, -120.9389, 40000, "Cle Elum"),
+            (46.9965, -120.5478, 40000, "Ellensburg"),
+            (47.1303, -119.2780, 45000, "Moses Lake"),
+            (47.6588, -117.4260, 50000, "Spokane"),
+            # US-95 Spokane → Boise (via Coeur d'Alene, Lewiston, McCall)
+            (47.6777, -116.7805, 40000, "Coeur d'Alene"),
+            (46.7324, -117.0002, 35000, "Moscow ID"),
+            (46.4165, -117.0177, 40000, "Lewiston ID"),
+            (44.9111, -116.1003, 45000, "McCall ID"),
+            (43.6150, -116.2023, 50000, "Boise ID"),
+        ),
+        # Bounding box generous enough to cover OR/WA/ID coverage including
+        # eastern WA + the Idaho panhandle; min_lng pushes east to capture
+        # Spokane / Boise.
+        min_lat=43.20,
+        max_lat=49.25,
+        min_lng=-124.30,
+        max_lng=-115.50,
+        fallback_city="Portland",
+        required_state="OR",
+        allowed_states=frozenset({"OR", "WA", "ID"}),
+    ),
     # San Diego through Portland OR only (no Washington stops); CA + OR states.
     "i5_sd_portland": RegionConfig(
         key="i5_sd_portland",
