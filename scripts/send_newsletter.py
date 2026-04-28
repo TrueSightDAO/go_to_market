@@ -105,6 +105,13 @@ NEWSLETTER_LOG_SPREADSHEET_ID = "1ed3q3SJ8ztGwfWit6Wxz_S72Cn5jKQFkNrHpeOVXP8s"
 SUBSCRIBERS_WS = "Agroverse News Letter Subscribers"
 EMAILS_WS = "Agroverse News Letter Emails"
 
+# Top-level audience label applied to every newsletter send alongside the
+# per-campaign label (e.g. "Newsletter/2 Chocolate Bars"). Lets the operator
+# filter "all consumer-facing email I've sent, across every campaign, ever"
+# with a single Gmail click. Parallel to the per-campaign label — both
+# applied; nothing renamed; existing per-campaign saved searches keep working.
+AUDIENCE_LABEL_DTC = "DTC"
+
 # Main Ledger: "Agroverse QR codes" tab — used by --exclude-buyers-of-substring
 # to skip recipients who already hold a QR for the SKU(s) the campaign is about
 # (don't pitch a bar to someone who already bought it). Column layout:
@@ -595,8 +602,14 @@ def main() -> None:
         sys.exit(2)
 
     label_id: str | None = None
-    if args.label and not args.dry_run:
-        label_id = ensure_user_label_id(gsvc, args.label)
+    audience_label_id: str | None = None
+    if not args.dry_run:
+        if args.label:
+            label_id = ensure_user_label_id(gsvc, args.label)
+        # Audience label is applied unconditionally (every send through this
+        # script is by definition DTC — goes to the consumer subscriber
+        # list). Skip in dry-run since we're not creating any messages.
+        audience_label_id = ensure_user_label_id(gsvc, AUDIENCE_LABEL_DTC)
 
     print(f"Mailbox:     {me}")
     print(f"Mode:        {args.mode}")
@@ -656,9 +669,13 @@ def main() -> None:
             status = "sent"
             print(f"Sent: {gmail_msg_id!r} -> {recipient}")
 
-        if label_id and gmail_msg_id:
+        label_ids_to_apply = [lid for lid in (label_id, audience_label_id) if lid]
+        if label_ids_to_apply and gmail_msg_id:
             try:
-                apply_label(gsvc, gmail_msg_id, label_id)
+                gsvc.users().messages().modify(
+                    userId="me", id=gmail_msg_id,
+                    body={"addLabelIds": label_ids_to_apply},
+                ).execute()
             except Exception as e:
                 sys.stderr.write(f"Warning: label apply failed for {gmail_msg_id}: {e}\n")
 

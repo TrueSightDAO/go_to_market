@@ -1272,8 +1272,14 @@ def main() -> None:
         return
 
     label_id: str | None = None
+    audience_label_id: str | None = None
     if not args.dry_run and not args.skip_label:
         label_id = ensure_user_label_id(gsvc, DEFAULT_GMAIL_LABEL)
+        # Top-level audience label parallel to AI/Follow-up. Every follow-up
+        # draft from this script targets a retailer (Manager Follow-up /
+        # Bulk Info Requested / AI: Prospect replied), so by definition B2B.
+        # Applied as a SECOND label so existing AI/* filters keep working.
+        audience_label_id = ensure_user_label_id(gsvc, "B2B")
 
     created_rows: list[list[str]] = []
     n_made = 0
@@ -1372,12 +1378,13 @@ def main() -> None:
         msg = draft.get("message") or {}
         msg_id = msg.get("id", "") or ""
 
-        if label_id and msg_id:
+        ids_to_apply = [lid for lid in (label_id, audience_label_id) if lid]
+        if ids_to_apply and msg_id:
             try:
                 gsvc.users().messages().modify(
                     userId="me",
                     id=msg_id,
-                    body={"addLabelIds": [label_id]},
+                    body={"addLabelIds": ids_to_apply},
                 ).execute()
             except Exception as e:
                 sys.stderr.write(f"Warning: could not apply label to draft message {msg_id}: {e}\n")
