@@ -1,0 +1,70 @@
+# Hit List: detect circle-hosting retailers from their Website and fast-track
+# circle-hosters past photo review directly into AI: Enrich with contact.
+#
+# Secrets: GOOGLE_CREDENTIALS_JSON (no external APIs needed — pure HTTP crawl).
+#
+# Scheduled runs process up to 30 rows per execution. The script is idempotent
+# (only crawls rows whose Hosts Circles is empty unless --force).
+
+name: Detect circle-hosting retailers
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Max rows to crawl (only rows with Website + empty Hosts Circles)'
+        required: true
+        default: "30"
+      dry_run:
+        description: Set to "true" to print plan only (no sheet writes)
+        required: false
+        default: "false"
+      rescue_rejected:
+        description: Set to "true" to also promote AI:Photo rejected rows with Hosts Circles=Yes
+        required: false
+        default: "false"
+  schedule:
+    - cron: "50 * * * *" # Every hour at :50 UTC (staggered from photo review :00 and enrich :35)
+
+concurrency:
+  group: detect-circle-hosting
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Write service account JSON
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: printf '%s' "$GOOGLE_CREDENTIALS_JSON" > google_credentials.json
+
+      - name: Run circle-hosting detector
+        env:
+          INPUT_LIMIT: ${{ github.event.inputs.limit || '' }}
+          DRY: ${{ github.event.inputs.dry_run || '' }}
+          RESCUE: ${{ github.event.inputs.rescue_rejected || '' }}
+          SCHEDULE_DEFAULT_LIMIT: "30"
+        run: |
+          set -e
+          LIMIT="${INPUT_LIMIT}"
+          if [ -z "$LIMIT" ]; then LIMIT="$SCHEDULE_DEFAULT_LIMIT"; fi
+          EXTRA=""
+          if [ "${DRY}" = "true" ]; then EXTRA="$EXTRA --dry-run"; fi
+          if [ "${RESCUE}" = "true" ]; then EXTRA="$EXTRA --rescue-rejected"; fi
+          python3 scripts/detect_circle_hosting_retailers.py --limit "$LIMIT" $EXTRA

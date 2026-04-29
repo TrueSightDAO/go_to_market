@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Hit List: detect retailers that **host circles** (women's circles, cacao ceremonies,
-sound baths, breathwork, etc.) by crawling their **Website** for high-precision keywords.
+sound baths, breathwork, etc.) by crawling their **Website** for high-precision
+keywords, AND fast-track those rows through the pipeline.
 
 Why this matters: 2026-04-28 observation — both Way Home Shop (just onboarded) and
 Lumin Earth (existing partner) prominently host women's circles. Ceremonial cacao
@@ -19,7 +20,20 @@ Output values written to **Hosts Circles**:
   - empty / unset — row had no Website, or all fetches failed (treated as "not yet
     checked" so the next run can retry).
 
-Idempotent: only writes rows whose **Hosts Circles** is currently empty unless ``--force``.
+Status promotion (default ON; disable with ``--no-promote``): when a row is
+detected as ``Yes`` and its current Status is ``Research``, the script also promotes
+it to ``AI: Enrich with contact`` via the **DApp Remarks** audit trail — bypassing
+photo review entirely (which can wrongly reject circle-hosting venues whose Google
+Places photos don't look like a "metaphysical shop") and dropping the row directly
+into the next ``hit_list_enrich_contact`` cron's queue. The pipeline then carries
+it forward: enrich → email/form → warm-up draft.
+
+Retroactive rescue (``--rescue-rejected``): also promote rows currently at
+``AI: Photo rejected`` to ``AI: Enrich with contact`` if their Hosts Circles is
+``Yes``. Off by default in the cron — it un-rejects rows the photo reviewer
+already decided on, so it's an opt-in one-shot for cleanup.
+
+Idempotent: only writes empty Hosts Circles cells unless ``--force``.
 
 Environment:
   - ``google_credentials.json`` (Sheets editor on the Hit List workbook)
@@ -29,7 +43,8 @@ Usage:
   cd market_research
   python3 scripts/detect_circle_hosting_retailers.py --dry-run --limit 5
   python3 scripts/detect_circle_hosting_retailers.py --limit 200
-  python3 scripts/detect_circle_hosting_retailers.py --force --limit 50  # re-check
+  python3 scripts/detect_circle_hosting_retailers.py --rescue-rejected --limit 50
+  python3 scripts/detect_circle_hosting_retailers.py --no-promote --limit 50
 """
 
 from __future__ import annotations
@@ -38,6 +53,8 @@ import argparse
 import re
 import sys
 import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import gspread
@@ -46,14 +63,25 @@ from google.oauth2.service_account import Credentials
 from gspread.utils import rowcol_to_a1
 
 REPO = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from hit_list_dapp_remarks_sheet import append_dapp_remark_and_apply  # noqa: E402
+
 SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
 HIT_LIST_WS = "Hit List"
+DAPP_REMARKS_WS = "DApp Remarks"
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
 
 HOSTS_CIRCLES_COL = "Hosts Circles"
+SUBMITTED_BY_CIRCLE = "detect_circle_hosting_retailers"
+PROMOTABLE_FROM_RESEARCH = "Research"
+PROMOTABLE_FROM_REJECTED = "AI: Photo rejected"
+PROMOTION_TARGET_STATUS = "AI: Enrich with contact"
 
 KEYWORD_PATTERNS: tuple[tuple[str, str], ...] = (
     # (regex, canonical label written into the cell)
@@ -145,6 +173,57 @@ def crawl_site(website: str, *, sleep_s: float, max_chars: int) -> tuple[bool, l
     return fetched_ok, found
 
 
+def promote_row_to_enrichment(
+    ws: gspread.Worksheet,
+    remark_ws: gspread.Worksheet,
+    rn: int,
+    shop: str,
+    matched: list[str],
+    *,
+    rescue: bool,
+    dry_run: bool,
+) -> bool:
+    """Promote ``rn`` to AI: Enrich with contact via DApp Remarks audit trail.
+
+    ``rescue=True`` indicates we're un-rejecting an AI: Photo rejected row;
+    the audit text reflects that.
+    """
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    submitted_at = datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")
+    matched_str = ", ".join(matched) if matched else "circle keywords"
+    if rescue:
+        remark = (
+            f"[circle-detect {stamp}] outcome=rescue_from_photo_rejection "
+            f"matched={matched_str}"
+        )
+    else:
+        remark = (
+            f"[circle-detect {stamp}] outcome=fast_track_research_to_enrich "
+            f"matched={matched_str}"
+        )
+
+    if dry_run:
+        action = "rescue from AI: Photo rejected" if rescue else "promote from Research"
+        print(
+            f"  [dry-run] row {rn} {shop!r}: would {action} -> {PROMOTION_TARGET_STATUS}",
+            flush=True,
+        )
+        return True
+
+    append_dapp_remark_and_apply(
+        ws,
+        remark_ws,
+        rn,
+        shop,
+        PROMOTION_TARGET_STATUS,
+        remark,
+        SUBMITTED_BY_CIRCLE,
+        submitted_at,
+        str(uuid.uuid4()),
+    )
+    return True
+
+
 def ensure_hosts_circles_column(ws: gspread.Worksheet, header: list[str], dry_run: bool) -> int:
     """Returns 0-based column index of Hosts Circles, adding the header if missing."""
     if HOSTS_CIRCLES_COL in header:
@@ -172,6 +251,17 @@ def main() -> None:
     p.add_argument("--sleep", type=float, default=0.4, help="Seconds between HTTP fetches.")
     p.add_argument("--sleep-write", type=float, default=0.3, help="Seconds between Sheets writes.")
     p.add_argument("--max-chars", type=int, default=80000, help="Per-page text truncation cap.")
+    p.add_argument(
+        "--no-promote",
+        action="store_true",
+        help="Disable Research -> AI: Enrich with contact promotion when Hosts Circles=Yes.",
+    )
+    p.add_argument(
+        "--rescue-rejected",
+        action="store_true",
+        help="Also promote AI: Photo rejected rows whose Hosts Circles is Yes "
+        "(retroactive rescue; off in cron by default).",
+    )
     args = p.parse_args()
 
     gc = gspread_client()
@@ -189,7 +279,9 @@ def main() -> None:
 
     i_shop = col("Shop Name")
     i_web = col("Website")
+    i_status = col("Status")
     i_hc = ensure_hosts_circles_column(ws, header, args.dry_run)
+    remark_ws = gc.open_by_key(SPREADSHEET_ID).worksheet(DAPP_REMARKS_WS) if not args.no_promote else None
 
     queued: list[int] = []
     for ri, row in enumerate(rows[1:], start=2):
@@ -212,10 +304,13 @@ def main() -> None:
     yes_count = 0
     nd_count = 0
     skip_count = 0
+    promote_count = 0
+    rescue_count = 0
     for ri in queued:
         cells = rows[ri - 1] + [""] * (len(header) - len(rows[ri - 1]))
         shop = cells[i_shop].strip()
         site = cells[i_web].strip()
+        cur_status = cells[i_status].strip()
         ok, hits = crawl_site(site, sleep_s=args.sleep, max_chars=args.max_chars)
         if not ok:
             print(f"  row {ri} {shop!r}: site unreachable — leaving blank for retry", flush=True)
@@ -236,9 +331,60 @@ def main() -> None:
             )
             time.sleep(max(0.0, args.sleep_write))
 
+        if hits and not args.no_promote:
+            if cur_status == PROMOTABLE_FROM_RESEARCH:
+                promote_row_to_enrichment(
+                    ws, remark_ws, ri, shop, hits, rescue=False, dry_run=args.dry_run,
+                )
+                promote_count += 1
+                if not args.dry_run:
+                    time.sleep(max(0.0, args.sleep_write))
+            elif cur_status == PROMOTABLE_FROM_REJECTED and args.rescue_rejected:
+                promote_row_to_enrichment(
+                    ws, remark_ws, ri, shop, hits, rescue=True, dry_run=args.dry_run,
+                )
+                rescue_count += 1
+                if not args.dry_run:
+                    time.sleep(max(0.0, args.sleep_write))
+
+    # Post-crawl sweep: promote any row whose Hosts Circles is already "Yes" but
+    # whose Status hasn't been promoted yet (covers rows whose Hosts Circles was set
+    # in a prior run before the promotion logic existed, or the --rescue-rejected case).
+    swept_promote = 0
+    swept_rescue = 0
+    if not args.no_promote:
+        rows = ws.get_all_values()  # re-read to see fresh writes from this run
+        for ri, raw in enumerate(rows[1:], start=2):
+            row = list(raw) + [""] * (len(header) - len(raw))
+            hc = row[i_hc].strip() if i_hc < len(row) else ""
+            if not hc.lower().startswith("yes"):
+                continue
+            status = row[i_status].strip()
+            shop = row[i_shop].strip()
+            matched = []
+            m = re.match(r"^Yes\s*\((.*)\)\s*$", hc, re.IGNORECASE)
+            if m:
+                matched = [s.strip() for s in m.group(1).split(",") if s.strip()]
+            if status == PROMOTABLE_FROM_RESEARCH:
+                promote_row_to_enrichment(
+                    ws, remark_ws, ri, shop, matched, rescue=False, dry_run=args.dry_run,
+                )
+                swept_promote += 1
+                if not args.dry_run:
+                    time.sleep(max(0.0, args.sleep_write))
+            elif status == PROMOTABLE_FROM_REJECTED and args.rescue_rejected:
+                promote_row_to_enrichment(
+                    ws, remark_ws, ri, shop, matched, rescue=True, dry_run=args.dry_run,
+                )
+                swept_rescue += 1
+                if not args.dry_run:
+                    time.sleep(max(0.0, args.sleep_write))
+
     print(
         f"Done. yes={yes_count} not_detected={nd_count} unreachable_skip={skip_count} "
-        f"dry_run={args.dry_run} force={args.force}",
+        f"promote_research={promote_count} rescue_rejected={rescue_count} "
+        f"sweep_promote={swept_promote} sweep_rescue={swept_rescue} "
+        f"dry_run={args.dry_run} force={args.force} rescue_flag={args.rescue_rejected}",
         flush=True,
     )
 
