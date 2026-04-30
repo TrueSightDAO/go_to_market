@@ -17,6 +17,7 @@ Use as **style guide only** for AI-generated intros — do not copy sentences ve
 - Invite **reply by email** with which path they want to explore first (consignment vs bulk).
 - Reference **attached wholesale price list** (PDF) as the place for SKUs and tiers.
 - Include **one short mention** of **https://agroverse.shop/wholesale** as a *visual* companion (packaging, partner-shop photos, current U.S. stockists). Frame it as **complementary** to the PDF, not redundant — page = visual, PDF = SKU/pricing detail. Don’t make the link the primary CTA.
+- Include **one short mention** of **https://www.instagram.com/p/DJqW8TRtJK3/** as a 30-second visual proof of the Amazon-restoration mission (actual tree planting + the satellite imagery the QR code unlocks for customers). Pair with the Amazon-restoration line earlier in the body. Frame as a *short proof* — 30 seconds, watch on phone — not a CTA.
 
 ## Don’ts
 
