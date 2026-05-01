@@ -54,6 +54,8 @@ if str(_SCRIPTS) not in sys.path:
 import suggest_manager_followup_drafts as smf
 
 from email_agent_tracking import plain_text_to_html_for_email_agent
+from gmail_plain_body import extract_plain_body_from_payload
+from hit_list_dapp_remarks_sheet import append_dapp_remark_and_apply
 _WARMUP_REF = _REPO / "templates" / "warmup_outreach_reference.md"
 _DEFAULT_PDF = _REPO / "retail_price_list" / "agroverse_wholesale_price_list_2026.pdf"
 _DEFAULT_PACKAGING_FRONT = _REPO / "retail_price_list" / "agroverse_packaging_front.jpeg"
@@ -132,17 +134,17 @@ def _message_internal_ms(full: dict) -> int:
         return 0
 
 
-def inbound_from_partner_after(
+def inbound_reply_details(
     service,
     *,
     partner_email: str,
     after_ms: int,
     max_scan: int = 30,
-) -> bool:
-    """True if any message From partner with internalDate > after_ms."""
+) -> dict | None:
+    """Return reply details dict if partner sent a message after after_ms, else None."""
     want = smf.normalize_email(partner_email)
     if not want:
-        return False
+        return None
     q = f"from:{want}"
     page_token = None
     scanned = 0
@@ -166,31 +168,48 @@ def inbound_from_partner_after(
                 continue
             pl = full.get("payload") or {}
             frm = ""
+            subject = ""
             for h in pl.get("headers") or []:
-                if (h.get("name") or "").lower() == "from":
+                hn = (h.get("name") or "").lower()
+                if hn == "from":
                     frm = h.get("value") or ""
-                    break
+                elif hn == "subject":
+                    subject = h.get("value") or ""
             from_addr = _email_from_from_header(frm)
             if from_addr != want:
                 continue
-            # Exclude obvious auto-reply if From is partner but we want real human - still count as reply
-            return True
+            body = extract_plain_body_from_payload(pl, max_total=5_000)
+            if not body:
+                body = (full.get("snippet") or "").replace("\n", " ").strip()
+            date_iso = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+            return {
+                "message_id": mid,
+                "subject": subject,
+                "date": date_iso,
+                "body": body,
+            }
         scanned += len(resp.get("messages") or [])
         page_token = resp.get("nextPageToken")
         if not page_token:
             break
-    return False
+    return None
+
+
+# Backward-compatible alias
+inbound_from_partner_after = inbound_reply_details
 
 
 def promote_warmup_replies(
     hit_ws: gspread.Worksheet,
     log_ws: gspread.Worksheet | None,
     gsvc: Any,
+    remarks_ws: gspread.Worksheet | None,
     *,
     dry_run: bool,
     verbose: bool,
 ) -> int:
-    """Set Hit List Status to AI: Prospect replied when inbound after last logged sent."""
+    """Set Hit List Status to AI: Prospect replied when inbound after last logged sent.
+    Also appends a DApp Remarks row with the reply content for audit + template refinement."""
     if log_ws is None:
         print("WARNING: Email Agent Follow Up missing — skip reply promotion.")
         return 0
@@ -202,6 +221,7 @@ def promote_warmup_replies(
     hdr = smf.header_map(values[0])
     status_i = hdr.get("Status")
     email_i = hdr.get("Email")
+    shop_i = hdr.get("Shop Name")
     if status_i is None or email_i is None:
         return 0
     status_col = status_i + 1
@@ -219,10 +239,34 @@ def promote_warmup_replies(
                 print(f"  promote-skip row {r} {em}: no logged sent in {LOG_WS!r}")
             continue
         after_ms = int(prev.timestamp() * 1000)
-        if inbound_from_partner_after(gsvc, partner_email=em, after_ms=after_ms):
+        reply = inbound_reply_details(gsvc, partner_email=em, after_ms=after_ms)
+        if reply:
             if verbose:
                 print(f"  promote row {r} {em}: inbound after last send → {HIT_STATUS_REPLIED!r}")
             if not dry_run:
+                # Append DApp Remarks with reply content before flipping status
+                if remarks_ws is not None:
+                    shop_name = smf.cell(row, shop_i) if shop_i is not None else ""
+                    remarks_text = (
+                        f"Prospect replied to warm-up email.\n\n"
+                        f"Reply subject: {reply['subject']}\n"
+                        f"Reply date: {reply['date']}\n"
+                        f"Reply body:\n{reply['body']}"
+                    )
+                    try:
+                        append_dapp_remark_and_apply(
+                            hit_ws=hit_ws,
+                            remark_ws=remarks_ws,
+                            sheet_row=r,
+                            name=shop_name,
+                            ai_status=HIT_STATUS_REPLIED,
+                            remarks=remarks_text,
+                            submitted_by="warmup_reply_promotion",
+                            submitted_at=reply['date'],
+                            submission_id=str(uuid.uuid4()),
+                        )
+                    except Exception as e:
+                        print(f"  WARNING: DApp Remarks append failed for row {r}: {e}")
                 hit_ws.update_cell(r, status_col, HIT_STATUS_REPLIED)
             n += 1
     return n
@@ -515,6 +559,7 @@ def main() -> None:
             hit_ws,
             log_ws,
             gsvc,
+            remarks_ws,
             dry_run=args.dry_run,
             verbose=args.verbose,
         )
