@@ -119,17 +119,14 @@ def gspread_client() -> gspread.Client:
 
 
 def place_details_website(key: str, place_id: str) -> str:
-    fields = "website"
-    r = requests.get(
-        DETAILS_URL,
-        params={"place_id": place_id, "fields": fields, "key": key},
-        timeout=45,
-    )
-    r.raise_for_status()
-    data = r.json()
-    if data.get("status") != "OK":
-        return ""
-    return ((data.get("result") or {}).get("website") or "").strip()
+    """Pull just the ``website`` field. Goes through the cached helper —
+    on a cached hit (any tier including ``website``) returns immediately
+    without a paid call. ``website`` is Contact-tier; we use the full
+    helper since ``website`` lives there.
+    """
+    from places_cache import cached_place_details_full
+    result = cached_place_details_full(key, place_id)
+    return (result.get("website") or "").strip()
 
 
 def normalize_ig_handle(raw: str) -> str | None:

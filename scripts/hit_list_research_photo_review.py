@@ -122,16 +122,18 @@ def find_place(key: str, text: str, lat: float | None, lng: float | None, radius
 
 
 def place_details(key: str, place_id: str) -> dict:
-    url = "https://maps.googleapis.com/maps/api/place/details/json"
-    fields = (
-        "place_id,name,formatted_address,geometry,photos,"
-        "business_status,rating,user_ratings_total,url"
-    )
-    r = requests.get(
-        url, params={"place_id": place_id, "fields": fields, "key": key}, timeout=30
-    )
-    r.raise_for_status()
-    return r.json()
+    """Place Details, cached via the ``places-cache`` repo. Lite tier — this
+    script only needs ``photos``, ``place_id``, ``name``, ``business_status``,
+    which are all Basic-tier fields. Atmosphere fields (rating /
+    user_ratings_total) were previously requested but never read; dropped.
+
+    Return shape preserved for back-compat with the photo downloader.
+    """
+    from places_cache import cached_place_details_lite
+    result = cached_place_details_lite(key, place_id)
+    if not result:
+        return {"status": "ZERO_RESULTS", "result": {}}
+    return {"status": "OK", "result": result}
 
 
 def download_place_photos(key: str, place_id: str, out_dir: Path, max_n: int) -> list[Path]:

@@ -1,0 +1,343 @@
+#!/usr/bin/env python3
+"""
+Permanent cache for Google Places API responses, backed by the
+``TrueSightDAO/places-cache`` GitHub repo via the Contents API.
+
+The Places API charges per call. A single ``place_id`` rarely changes, but
+the codebase used to re-pay for the same lookup every time a script ran.
+This module reads cached responses from the cache repo via the GitHub
+Contents API (or via raw.githubusercontent.com for read-only use), only
+hits the live API on a miss, and writes the response back to the cache
+repo so the next caller — local, CI, or anyone — gets it free.
+
+The cache is **permanent**: cached records do not expire. Three fields
+decay (``business_status``, ``opening_hours``, ``formatted_phone_number``)
+and need a separate cheap refresh sweep using only Basic-tier fields. That
+sweep lives in the cache repo, not here.
+
+Field tiers (Places Details API legacy pricing):
+  - Basic   ($17/1k):  place_id, name, formatted_address, geometry, types,
+                       address_component, business_status, vicinity, photos,
+                       url, plus_code, icon, …
+  - Contact (+$3/1k):  formatted_phone_number, website, opening_hours,
+                       international_phone_number, current_opening_hours
+  - Atmosphere (+$5/1k): rating, user_ratings_total, reviews, price_level
+
+A 2026-05-01 audit of every caller in the codebase confirmed ``rating``,
+``user_ratings_total``, ``reviews`` are NEVER read out of any response. The
+canonical helper now never requests them, saving ~25% per Details call.
+
+Two helpers:
+  - ``cached_place_details_lite(key, place_id)``
+      Basic fields only. Use when you only need photos, types, business
+      status, geometry — i.e. when you don't need phone/website/hours.
+  - ``cached_place_details_full(key, place_id)``
+      Basic + Contact. The default for enrichment / discovery work that
+      needs phone, website, opening hours.
+
+Both check the cache first; on miss, fetch from Places, then write to the
+cache repo. On a cache hit where ``fields_requested`` already covers what's
+needed, the live call is skipped entirely.
+
+Usage:
+    from places_cache import cached_place_details_full
+
+    res = cached_place_details_full(api_key, place_id)
+    # res is the Places Details "result" dict (or {} on hard error).
+"""
+from __future__ import annotations
+
+import base64
+import json
+import os
+import sys
+import time
+import urllib.parse
+from datetime import datetime, timezone
+from pathlib import Path
+
+import requests
+
+
+CACHE_REPO_OWNER = "TrueSightDAO"
+CACHE_REPO_NAME = "places-cache"
+CACHE_REPO_BRANCH = "main"
+
+CONTENTS_API = (
+    f"https://api.github.com/repos/{CACHE_REPO_OWNER}/{CACHE_REPO_NAME}/contents"
+)
+RAW_BASE = (
+    f"https://raw.githubusercontent.com/{CACHE_REPO_OWNER}/{CACHE_REPO_NAME}/"
+    f"{CACHE_REPO_BRANCH}"
+)
+PLACES_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
+
+# Field sets — KEEP IN SYNC with the README in the cache repo.
+BASIC_FIELDS = (
+    "place_id",
+    "name",
+    "formatted_address",
+    "geometry",
+    "types",
+    "address_component",
+    "business_status",
+    "vicinity",
+    "photos",
+    "url",
+)
+CONTACT_FIELDS = (
+    "formatted_phone_number",
+    "website",
+    "opening_hours",
+)
+# Atmosphere fields intentionally omitted (audit 2026-05-01: never consumed).
+
+LITE_FIELDS = BASIC_FIELDS
+FULL_FIELDS = BASIC_FIELDS + CONTACT_FIELDS
+
+# Where to look for the write token. PLACES_CACHE_PAT first; falls back to
+# the broader oracle PATs if available (those have access too).
+TOKEN_ENV_VARS = (
+    "PLACES_CACHE_PAT",
+    "TRUESIGHT_DAO_ORACLE_ADVISORY_PAT",
+    "ORACLE_ADVISORY_PUSH_TOKEN",
+)
+
+
+def _load_dotenv(path: Path) -> None:
+    """Mini .env loader; doesn't override existing env vars."""
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k = k.strip()
+        v = v.strip()
+        if k and k not in os.environ:
+            os.environ[k] = v
+
+
+# Load the local .env if present so callers don't need to load it themselves.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_load_dotenv(_REPO_ROOT / ".env")
+
+
+def _write_token() -> str | None:
+    for v in TOKEN_ENV_VARS:
+        tok = os.environ.get(v, "").strip()
+        if tok:
+            return tok
+    return None
+
+
+def _cache_path(place_id: str) -> str:
+    """Layout: places/<2-char-prefix>/<place_id>.json"""
+    pid = place_id.strip()
+    if not pid:
+        raise ValueError("place_id is empty")
+    prefix = pid[:2] if len(pid) >= 2 else pid
+    return f"places/{prefix}/{pid}.json"
+
+
+def _fetch_cached_record(place_id: str) -> tuple[dict | None, str | None]:
+    """Return (record_dict, sha) or (None, None) on miss / error.
+
+    Reads via the GitHub Contents API rather than raw.githubusercontent.com
+    because raw is fronted by a CDN with up to ~5-minute staleness — that
+    produced false cache-misses immediately after a write, and write retries
+    then failed with 422 ("sha wasn't supplied"). The Contents API is
+    real-time and returns the file content + sha in one response, which is
+    exactly what the writer needs anyway.
+
+    Authenticated requests get 5000 reads/hour, far above any plausible
+    cache hit rate.
+    """
+    path = _cache_path(place_id)
+    api_url = f"{CONTENTS_API}/{path}?ref={CACHE_REPO_BRANCH}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    token = _write_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        r = requests.get(api_url, headers=headers, timeout=15)
+    except requests.RequestException:
+        return None, None
+    if r.status_code == 404:
+        return None, None
+    if r.status_code != 200:
+        sys.stderr.write(
+            f"places_cache: read HTTP {r.status_code} for {place_id}: {r.text[:200]}\n"
+        )
+        return None, None
+
+    payload = r.json()
+    sha = payload.get("sha")
+    encoded = payload.get("content", "")
+    if not encoded:
+        return None, sha
+    try:
+        decoded = base64.b64decode(encoded).decode("utf-8")
+        rec = json.loads(decoded)
+    except (ValueError, json.JSONDecodeError):
+        return None, sha
+    return rec, sha
+
+
+def _write_cached_record(place_id: str, record: dict, prior_sha: str | None) -> bool:
+    """PUT the record to the cache repo via Contents API. True on success."""
+    token = _write_token()
+    if not token:
+        sys.stderr.write(
+            "places_cache: no PLACES_CACHE_PAT (or fallback) set; skipping cache write\n"
+        )
+        return False
+    path = _cache_path(place_id)
+    body = {
+        "message": f"cache: {place_id}",
+        "content": base64.b64encode(
+            json.dumps(record, indent=2, sort_keys=True).encode("utf-8")
+        ).decode("ascii"),
+        "branch": CACHE_REPO_BRANCH,
+    }
+    if prior_sha:
+        body["sha"] = prior_sha
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        r = requests.put(f"{CONTENTS_API}/{path}", headers=headers, json=body, timeout=30)
+    except requests.RequestException as e:
+        sys.stderr.write(f"places_cache: write failed for {place_id}: {e}\n")
+        return False
+    if r.status_code in (200, 201):
+        return True
+    # 409 = sha mismatch (someone else wrote in the meantime); refetch + retry once.
+    if r.status_code == 409 and prior_sha:
+        _, fresh_sha = _fetch_cached_record(place_id)
+        if fresh_sha and fresh_sha != prior_sha:
+            body["sha"] = fresh_sha
+            try:
+                r2 = requests.put(f"{CONTENTS_API}/{path}", headers=headers, json=body, timeout=30)
+                if r2.status_code in (200, 201):
+                    return True
+            except requests.RequestException:
+                pass
+    sys.stderr.write(
+        f"places_cache: write rejected for {place_id} ({r.status_code}): {r.text[:200]}\n"
+    )
+    return False
+
+
+def _live_place_details(api_key: str, place_id: str, fields: tuple[str, ...]) -> dict:
+    """Hit Places Details API; return the `result` dict or {} on non-OK."""
+    params = {
+        "place_id": place_id,
+        "fields": ",".join(fields),
+        "key": api_key,
+    }
+    try:
+        r = requests.get(PLACES_DETAILS_URL, params=params, timeout=30)
+    except requests.RequestException as e:
+        sys.stderr.write(f"places_cache: live call failed for {place_id}: {e}\n")
+        return {}
+    if r.status_code != 200:
+        sys.stderr.write(
+            f"places_cache: live HTTP {r.status_code} for {place_id}: {r.text[:200]}\n"
+        )
+        return {}
+    data = r.json()
+    if data.get("status") != "OK":
+        # Don't cache non-OK responses (NOT_FOUND, INVALID_REQUEST, etc.).
+        sys.stderr.write(
+            f"places_cache: live status {data.get('status')!r} for {place_id}\n"
+        )
+        return {}
+    return data.get("result") or {}
+
+
+def _record_satisfies(record: dict, needed: tuple[str, ...]) -> bool:
+    have = set(record.get("fields_requested") or [])
+    return have.issuperset(set(needed))
+
+
+def cached_place_details(
+    api_key: str, place_id: str, *, fields: tuple[str, ...], refresh: bool = False
+) -> dict:
+    """Core lookup. Returns the Places Details `result` dict.
+
+    Cache-hit path: if a cached record exists and ``fields_requested`` covers
+    ``fields``, return cached ``result`` (no live call).
+
+    Cache-miss path: fetch live for the union of cached + requested fields,
+    write back, return the fresh ``result``.
+    """
+    pid = (place_id or "").strip()
+    if not pid:
+        return {}
+
+    cached_rec, sha = (None, None) if refresh else _fetch_cached_record(pid)
+    if cached_rec and _record_satisfies(cached_rec, fields):
+        return cached_rec.get("result") or {}
+
+    # On a partial-coverage hit, fetch the union so we don't lose existing fields.
+    union = tuple(sorted(set(fields) | set((cached_rec or {}).get("fields_requested") or [])))
+
+    fresh = _live_place_details(api_key, pid, union)
+    if not fresh:
+        # Live call failed; if we have any cache, return it as best-effort.
+        return (cached_rec or {}).get("result") or {}
+
+    record = {
+        "place_id": pid,
+        "name": fresh.get("name", ""),
+        "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "fields_requested": list(union),
+        "result": fresh,
+    }
+    _write_cached_record(pid, record, sha)
+    return fresh
+
+
+def cached_place_details_lite(api_key: str, place_id: str, *, refresh: bool = False) -> dict:
+    """Basic-tier fields only ($17/1k flat). Use for photo / type / geometry needs."""
+    return cached_place_details(api_key, place_id, fields=LITE_FIELDS, refresh=refresh)
+
+
+def cached_place_details_full(api_key: str, place_id: str, *, refresh: bool = False) -> dict:
+    """Basic + Contact ($20/1k). Default for enrichment with phone / website / hours."""
+    return cached_place_details(api_key, place_id, fields=FULL_FIELDS, refresh=refresh)
+
+
+# ---- CLI for ad-hoc inspection ---------------------------------------------
+
+def _cli(argv=None) -> int:
+    import argparse
+    p = argparse.ArgumentParser(description="places_cache CLI — inspect or refresh a place_id")
+    p.add_argument("place_id")
+    p.add_argument("--tier", choices=["lite", "full"], default="full")
+    p.add_argument("--refresh", action="store_true",
+                   help="Bypass cache and re-fetch live; overwrite cached record.")
+    p.add_argument("--key", default=None,
+                   help="Google API key. Defaults to GOOGLE_MAPS_API_KEY / GOOGLE_PLACES_API_KEY.")
+    args = p.parse_args(argv)
+
+    api_key = args.key or os.environ.get("GOOGLE_MAPS_API_KEY") or os.environ.get("GOOGLE_PLACES_API_KEY", "")
+    if not api_key:
+        sys.stderr.write("No API key (set GOOGLE_MAPS_API_KEY or pass --key).\n")
+        return 1
+    fn = cached_place_details_lite if args.tier == "lite" else cached_place_details_full
+    res = fn(api_key, args.place_id, refresh=args.refresh)
+    print(json.dumps(res, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_cli())
