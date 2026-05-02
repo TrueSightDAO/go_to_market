@@ -28,6 +28,10 @@ on:
         description: 'Dry run — no Gmail or Sheet writes'
         type: boolean
         default: false
+      create_reply_drafts:
+        description: 'Auto-create contextual reply drafts for prospects who have replied'
+        type: boolean
+        default: true
   schedule:
     # Daily 14:00 UTC — refreshes Follow Up log; drafts only for recipients past cadence
     - cron: '0 14 * * *'
@@ -115,13 +119,14 @@ jobs:
             --min-days-since-sent "$MIN" \
             $EXTRA
 
-      - name: Suggest AI Warm up prospect drafts (intro + wholesale PDF + reply promotion)
+      - name: Suggest AI Warm up prospect drafts (intro + wholesale PDF + reply promotion + reply drafts)
         env:
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
           GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           INPUT_MIN_DAYS: ${{ github.event.inputs.min_days_since_sent }}
           INPUT_USE_GROK: ${{ github.event.inputs.use_grok }}
           INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+          INPUT_CREATE_REPLY_DRAFTS: ${{ github.event.inputs.create_reply_drafts }}
         run: |
           MIN="${INPUT_MIN_DAYS:-7}"
           EXTRA=""
@@ -130,6 +135,9 @@ jobs:
           fi
           if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
             EXTRA="$EXTRA --dry-run"
+          fi
+          if [ "${INPUT_CREATE_REPLY_DRAFTS:-true}" != "false" ]; then
+            EXTRA="$EXTRA --create-reply-drafts"
           fi
           python scripts/suggest_warmup_prospect_drafts.py \
             --min-days-since-sent "$MIN" \

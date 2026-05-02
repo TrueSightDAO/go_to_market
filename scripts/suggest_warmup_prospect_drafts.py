@@ -70,6 +70,8 @@ DAPP_REMARKS_WS = smf.DAPP_REMARKS_WS
 HIT_STATUS_WARMUP = "AI: Warm up prospect"
 HIT_STATUS_REPLIED = "AI: Prospect replied"
 PROTOCOL_VERSION = "PARTNER_OUTREACH_PROTOCOL v0.1 warmup_intro"
+REPLIED_GMAIL_LABEL = "AI/Prospect Replied"
+REPLY_PROTOCOL_VERSION = "PARTNER_OUTREACH_PROTOCOL v0.1 warmup_reply"
 DEFAULT_MIN_DAYS = smf.DEFAULT_MIN_DAYS_SINCE_SENT
 BODY_PREVIEW_MAX = smf.BODY_PREVIEW_MAX
 GROK_ENDPOINT = smf.GROK_ENDPOINT
@@ -199,6 +201,214 @@ def inbound_reply_details(
 inbound_from_partner_after = inbound_reply_details
 
 
+def find_warmup_thread_and_messages(
+    service,
+    partner_email: str,
+    *,
+    my_email: str,
+    max_list: int = 40,
+) -> tuple[str | None, list[dict], dict | None]:
+    """Find the Gmail thread containing the warm-up exchange with partner_email.
+
+    Returns (thread_id, all_messages_in_thread, latest_inbound_message).
+    latest_inbound_message is the most recent message where From != my_email.
+    """
+    want = smf.normalize_email(partner_email)
+    if not want:
+        return None, [], None
+    q = f"to:{want} OR from:{want}"
+    resp = service.users().messages().list(userId="me", q=q, maxResults=max_list).execute()
+    msgs = resp.get("messages") or []
+    if not msgs:
+        return None, [], None
+
+    # Group by threadId and pick the thread with the most messages.
+    by_thread: dict[str, list[str]] = {}
+    for m in msgs:
+        tid = m.get("threadId")
+        if tid:
+            by_thread.setdefault(tid, []).append(m.get("id"))
+
+    if not by_thread:
+        return None, [], None
+
+    best_tid = max(by_thread.keys(), key=lambda t: len(by_thread[t]))
+
+    thread = service.users().threads().get(
+        userId="me", id=best_tid, format="full"
+    ).execute()
+    thread_msgs = thread.get("messages") or []
+
+    latest_inbound: dict | None = None
+    for m in reversed(thread_msgs):
+        pl = m.get("payload") or {}
+        frm = ""
+        for h in pl.get("headers") or []:
+            if (h.get("name") or "").lower() == "from":
+                frm = h.get("value") or ""
+                break
+        if my_email.lower() not in frm.lower():
+            latest_inbound = m
+            break
+
+    return best_tid, thread_msgs, latest_inbound
+
+
+def grok_reply_system_prompt() -> str:
+    return (
+        "You draft a **reply** to a prospect who responded to Gary's warm-up email about "
+        "Agroverse ceremonial cacao. The merchant should need only light editing before sending.\n"
+        "Rules:\n"
+        '- Output **only** valid JSON: one object with keys "subject" and "body" (plain text, use \\n for newlines).\n'
+        "- No markdown fences, no preamble.\n"
+        "- **Do not** propose or invite an in-person meeting, a return visit to the shop, "
+        "'stopping by' again, or 'circling back' in person. Gary is often traveling and not "
+        "reliably available for on-site meetings. Prefer: **reply by email**, a **scheduled phone "
+        "or video call**, or **delivery / logistics / paperwork** next steps.\n"
+        "- **Lead with mission impact** when relevant: purchases support **restoration of the Amazon "
+        "rainforest**; **each bag plants a new tree**, **directly traceable** via the **unique QR code "
+        "on that bag**.\n"
+        "- **Commercial fit:** Agroverse is **flexible** and happy with **either** a "
+        "**consignment-friendly** retail path **or** **wholesale / bulk** — present them as "
+        "**parallel options**, not as a contrast.\n"
+        "- **Address the prospect's actual questions / concerns** directly and specifically. "
+        "Reference their reply content. Do not ignore what they asked.\n"
+        "- If they ask about **pricing**, **paste vs block**, **licensing**, **shelf fit**, "
+        "**samples**, or **delivery**, answer honestly using Agroverse's actual offerings. "
+        "Do not invent prices, SKUs, or terms not in the context.\n"
+        "- **Body** ~120–220 words unless the reply naturally needs more. "
+        "End with a short signature block:\n"
+        "  Gary\n"
+        "  Agroverse | ceremonial cacao for retail\n"
+        "  garyjob@agroverse.shop\n"
+        "- Subject: prepend 'Re:' if the original subject is known; otherwise a natural reply subject. "
+        "Keep it scannable and under ~90 characters.\n"
+    )
+
+
+def grok_generate_reply(
+    *,
+    api_key: str,
+    model: str,
+    shop_name: str,
+    store_key: str,
+    to_email: str,
+    hit_list_row: str,
+    city_state: str,
+    hit_list_notes: str,
+    conversation_history: str,
+) -> tuple[str, str]:
+    crm_notes = (hit_list_notes or "").strip()
+    locality = (city_state or "").strip()
+    user = (
+        f"Lead context (Hit List CRM):\n"
+        f"- shop_name: {shop_name}\n"
+        f"- store_key: {store_key}\n"
+        f"- city/state (if known): {locality or '(not provided)'}\n"
+        f"- hit_list_row(s): {hit_list_row}\n"
+        f"- recipient_email: {to_email}\n"
+        f"- hit_list_status: {HIT_STATUS_REPLIED} (prospect replied to warm-up; this is a reply draft)\n"
+    )
+    if crm_notes:
+        user += (
+            "- internal_hit_list_notes (use for specificity; do not quote as if the merchant wrote this): "
+            f"{crm_notes}\n"
+        )
+    user += "\n"
+    user += (
+        "Gmail thread conversation history (oldest first):\n\n"
+        f"{conversation_history or '(none)'}\n"
+    )
+    user += (
+        "\n\nDraft a reply to the prospect's most recent message above. "
+        "Be specific to their questions, warm but concise, and aligned with the Agroverse mission.\n"
+    )
+    payload = {
+        "model": model,
+        "temperature": 0.42,
+        "messages": [
+            {"role": "system", "content": grok_reply_system_prompt()},
+            {"role": "user", "content": user},
+        ],
+    }
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+    r = requests.post(GROK_ENDPOINT, headers=headers, json=payload, timeout=120)
+    if not r.ok:
+        raise RuntimeError(f"Grok HTTP {r.status_code}: {r.text[:500]}")
+    data = r.json()
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError("Grok returned no choices")
+    content = (choices[0].get("message") or {}).get("content") or ""
+    content = content.strip()
+    if "```json" in content:
+        a = content.find("```json") + 7
+        b = content.find("```", a)
+        content = content[a:b].strip()
+    elif content.startswith("```"):
+        a = content.find("```") + 3
+        b = content.find("```", a)
+        content = content[a:b].strip()
+    parsed = json.loads(content)
+    subj = str(parsed.get("subject", "")).strip()
+    body = str(parsed.get("body", "")).strip()
+    if not subj or not body:
+        raise RuntimeError("Grok JSON missing subject or body")
+    return subj, body
+
+
+def _header_from_payload(msg: dict, name: str) -> str:
+    pl = msg.get("payload") or {}
+    for h in pl.get("headers") or []:
+        if (h.get("name") or "").lower() == name.lower():
+            return h.get("value") or ""
+    return ""
+
+
+def discard_old_drafts_on_thread(service, thread_id: str) -> int:
+    """Delete any existing Gmail drafts on thread_id. Returns count deleted."""
+    deleted = 0
+    page_token = None
+    while True:
+        resp = service.users().drafts().list(userId="me", maxResults=100, pageToken=page_token).execute()
+        for d in resp.get("drafts") or []:
+            d_msg = d.get("message") or {}
+            if d_msg.get("threadId") == thread_id:
+                try:
+                    service.users().drafts().delete(userId="me", id=d["id"]).execute()
+                    deleted += 1
+                except Exception:
+                    pass
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return deleted
+
+
+def build_reply_message_raw(
+    sender: str,
+    to: str,
+    subject: str,
+    body: str,
+    *,
+    in_reply_to: str,
+    references: str,
+    html_body: str | None = None,
+) -> str:
+    msg = EmailMessage()
+    msg["From"] = sender
+    msg["To"] = to
+    msg["Subject"] = subject
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+    if references:
+        msg["References"] = references
+    msg.set_content(body, charset="utf-8")
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
+    return base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+
+
 def promote_warmup_replies(
     hit_ws: gspread.Worksheet,
     log_ws: gspread.Worksheet | None,
@@ -270,6 +480,265 @@ def promote_warmup_replies(
                 hit_ws.update_cell(r, status_col, HIT_STATUS_REPLIED)
             n += 1
     return n
+
+
+def _email_has_reply_draft_in_suggestions(sugg_ws: gspread.Worksheet, email: str) -> bool:
+    """Return True if Email Agent Drafts already has a kind=warmup_reply row for this email."""
+    if sugg_ws is None:
+        return False
+    try:
+        values = sugg_ws.get_all_values()
+    except Exception:
+        return False
+    if len(values) < 2:
+        return False
+    hdr = smf.header_map(values[0])
+    email_i = hdr.get("Email")
+    notes_i = hdr.get("Notes")
+    if email_i is None:
+        return False
+    em = smf.normalize_email(email) or ""
+    for row in values[1:]:
+        if smf.normalize_email(smf.cell(row, email_i)) == em:
+            notes = smf.cell(row, notes_i) if notes_i is not None else ""
+            if "kind=warmup_reply" in notes:
+                return True
+    return False
+
+
+def create_reply_drafts_for_replied_prospects(
+    hit_ws: gspread.Worksheet,
+    gsvc: Any,
+    sugg_ws: gspread.Worksheet,
+    *,
+    dry_run: bool,
+    verbose: bool,
+    use_grok: bool,
+    grok_model: str,
+    track_opens: bool,
+    track_clicks: bool,
+    skip_label: bool,
+    max_drafts: int = 0,
+) -> int:
+    """For every Hit List row with HIT_STATUS_REPLIED, create a Gmail reply draft
+    in the existing thread (if one does not already exist). Returns count created."""
+    values = hit_ws.get_all_values()
+    if len(values) < 2:
+        return 0
+    hdr = smf.header_map(values[0])
+    status_i = hdr.get("Status")
+    email_i = hdr.get("Email")
+    shop_i = hdr.get("Shop Name")
+    store_i = hdr.get("Store Key")
+    notes_i = hdr.get("Notes")
+    city_i = hdr.get("City")
+    state_i = hdr.get("State")
+    if status_i is None or email_i is None:
+        return 0
+
+    me = smf.gmail_profile_email(gsvc)
+    tracking_base = (os.environ.get("EMAIL_AGENT_TRACKING_BASE_URL") or "https://edgar.truesight.me").strip()
+
+    label_id: str | None = None
+    if not dry_run and not skip_label:
+        label_id = smf.ensure_user_label_id(gsvc, REPLIED_GMAIL_LABEL)
+
+    synced_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    created_rows: list[list[str]] = []
+    n_created = 0
+
+    grok_key = smf.get_grok_api_key() if use_grok else None
+
+    for r, row in enumerate(values[1:], start=2):
+        if max_drafts > 0 and n_created >= max_drafts:
+            break
+        if smf.cell(row, status_i) != HIT_STATUS_REPLIED:
+            continue
+        em = smf.normalize_email(smf.cell(row, email_i))
+        if not em:
+            continue
+        shop = smf.cell(row, shop_i) if shop_i is not None else ""
+        sk = smf.cell(row, store_i) if store_i is not None else ""
+        city = smf.cell(row, city_i) if city_i is not None else ""
+        state = smf.cell(row, state_i) if state_i is not None else ""
+        locale = ", ".join(x for x in [city, state] if x)
+        hit_notes = smf.cell(row, notes_i) if notes_i is not None else ""
+
+        # Skip if suggestions already has a reply draft for this email.
+        if _email_has_reply_draft_in_suggestions(sugg_ws, em):
+            if verbose:
+                print(f"  reply-draft-skip row {r} {em}: already has reply draft in {SUGGESTIONS_WS!r}")
+            continue
+
+        thread_id, thread_msgs, latest_inbound = find_warmup_thread_and_messages(
+            gsvc, em, my_email=me
+        )
+        if not thread_id or not latest_inbound:
+            if verbose:
+                print(f"  reply-draft-skip row {r} {em}: no Gmail thread found")
+            continue
+
+        # Skip if there is already a draft on this thread.
+        has_draft = False
+        page_token = None
+        while True:
+            resp = gsvc.users().drafts().list(userId="me", maxResults=100, pageToken=page_token).execute()
+            for d in resp.get("drafts") or []:
+                d_msg = d.get("message") or {}
+                if d_msg.get("threadId") == thread_id:
+                    has_draft = True
+                    break
+            if has_draft:
+                break
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+        if has_draft:
+            if verbose:
+                print(f"  reply-draft-skip row {r} {em}: draft already exists on thread {thread_id}")
+            continue
+
+        # Build conversation history from thread messages.
+        convo_parts: list[str] = []
+        for m in thread_msgs:
+            pl = m.get("payload") or {}
+            block = smf.format_full_message_block(me.lower(), m)
+            convo_parts.append(block)
+        conversation_history = "\n".join(convo_parts)
+        # Cap to avoid token bloat.
+        if len(conversation_history) > 40_000:
+            conversation_history = conversation_history[-39_999:] + "…"
+
+        subj: str
+        body: str
+        source = "template"
+
+        if use_grok and grok_key and not dry_run:
+            try:
+                subj, body = grok_generate_reply(
+                    api_key=grok_key,
+                    model=grok_model,
+                    shop_name=shop,
+                    store_key=sk,
+                    to_email=em,
+                    hit_list_row=str(r),
+                    city_state=locale,
+                    hit_list_notes=hit_notes,
+                    conversation_history=conversation_history,
+                )
+                source = "grok"
+            except Exception as e:
+                sys.stderr.write(f"Grok reply failed for {em}: {e}\n")
+                # Fallback: use a simple reply template.
+                latest_subj = _header_from_payload(latest_inbound, "Subject") or "Re: Agroverse cacao"
+                subj = latest_subj if latest_subj.lower().startswith("re:") else f"Re: {latest_subj}"
+                body = (
+                    f"Hi —\n\n"
+                    f"Thanks for getting back to me. I'd love to keep the conversation going — "
+                    f"happy to answer any questions or jump on a quick call whenever works for you.\n\n"
+                    f"Gary\n"
+                    f"Agroverse | ceremonial cacao for retail\n"
+                    f"garyjob@agroverse.shop\n"
+                )
+                source = "template_fallback"
+        else:
+            latest_subj = _header_from_payload(latest_inbound, "Subject") or "Re: Agroverse cacao"
+            subj = latest_subj if latest_subj.lower().startswith("re:") else f"Re: {latest_subj}"
+            body = (
+                f"Hi —\n\n"
+                f"Thanks for getting back to me. I'd love to keep the conversation going — "
+                f"happy to answer any questions or jump on a quick call whenever works for you.\n\n"
+                f"Gary\n"
+                f"Agroverse | ceremonial cacao for retail\n"
+                f"garyjob@agroverse.shop\n"
+            )
+
+        if dry_run:
+            print(f"\n--- dry-run reply draft → {em} ({shop}) ---")
+            if use_grok:
+                print("(Note: --dry-run skips Grok; preview is template.)")
+            print(f"Subject: {subj}")
+            print(body[:700] + ("…" if len(body) > 700 else ""))
+            n_created += 1
+            continue
+
+        # Build MIME with threading headers.
+        msg_id_hdr = _header_from_payload(latest_inbound, "Message-ID")
+        refs_hdr = _header_from_payload(latest_inbound, "References")
+        from_hdr = _header_from_payload(latest_inbound, "From")
+        references = (refs_hdr + " " + msg_id_hdr).strip() if refs_hdr else msg_id_hdr
+
+        sug_id = str(uuid.uuid4())
+        html_body = None
+        if track_opens or track_clicks:
+            html_body = plain_text_to_html_for_email_agent(
+                body,
+                tracking_base,
+                sug_id,
+                em,
+                track_opens=track_opens,
+                track_clicks=track_clicks,
+            )
+
+        raw = build_reply_message_raw(
+            sender=me,
+            to=from_hdr or em,
+            subject=subj,
+            body=body,
+            in_reply_to=msg_id_hdr,
+            references=references,
+            html_body=html_body,
+        )
+
+        # Discard any old drafts on the thread (should be none after our check, but be safe).
+        discard_old_drafts_on_thread(gsvc, thread_id)
+
+        draft = gsvc.users().drafts().create(
+            userId="me", body={"message": {"raw": raw, "threadId": thread_id}}
+        ).execute()
+        draft_id = draft.get("id", "") or ""
+        msg = draft.get("message") or {}
+        msg_id = msg.get("id", "") or ""
+
+        if label_id and msg_id:
+            try:
+                gsvc.users().messages().modify(
+                    userId="me", id=msg_id, body={"addLabelIds": [label_id]}
+                ).execute()
+            except Exception as e:
+                sys.stderr.write(f"Warning: label on reply draft message {msg_id}: {e}\n")
+
+        preview = body.replace("\n", " ")[:BODY_PREVIEW_MAX]
+        notes = (
+            f"kind=warmup_reply; source={source}; thread_id={thread_id}; "
+            f"grok_model={grok_model if use_grok else 'n/a'}. Edit before Send."
+        )
+        row_data = [
+            sug_id,
+            synced_at,
+            sk,
+            shop,
+            em,
+            str(r),
+            draft_id,
+            subj,
+            preview,
+            "pending_review",
+            REPLIED_GMAIL_LABEL if not skip_label else "",
+            REPLY_PROTOCOL_VERSION,
+            notes,
+            "0",
+            "0",
+        ]
+        created_rows.append(row_data)
+        n_created += 1
+        print(f"Created reply draft #{n_created} id={draft_id!r} → {em} ({shop})")
+
+    if created_rows and not dry_run:
+        sugg_ws.append_rows(created_rows, value_input_option="USER_ENTERED")
+        print(f"Appended {len(created_rows)} reply-draft row(s) to {SUGGESTIONS_WS!r}.")
+
+    return n_created
 
 
 def load_warmup_reference_text() -> str:
@@ -510,6 +979,22 @@ def main() -> None:
     p.add_argument("--reply-promotion-only", action="store_true", help="Only promote Warm up → Prospect replied.")
     p.add_argument("--skip-reply-promotion", action="store_true")
     p.add_argument(
+        "--create-reply-drafts",
+        action="store_true",
+        help="After promotion, auto-create contextual reply drafts for prospects who have replied.",
+    )
+    p.add_argument(
+        "--reply-drafts-only",
+        action="store_true",
+        help="Only create reply drafts for prospects who have replied (skip warm-up drafts).",
+    )
+    p.add_argument(
+        "--reply-drafts-max",
+        type=int,
+        default=0,
+        help="Cap reply drafts created; 0 = unlimited.",
+    )
+    p.add_argument(
         "--track-opens",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -568,6 +1053,28 @@ def main() -> None:
         if args.reply_promotion_only:
             print(f"WARMUP_REPLY_PROMOTION count={promoted} dry_run={args.dry_run}")
             return
+
+    if args.reply_drafts_only:
+        reply_drafts_created = create_reply_drafts_for_replied_prospects(
+            hit_ws=hit_ws,
+            gsvc=gsvc,
+            sugg_ws=sugg_ws,
+            dry_run=args.dry_run,
+            verbose=args.verbose,
+            use_grok=args.use_grok,
+            grok_model=args.grok_model,
+            track_opens=args.track_opens,
+            track_clicks=args.track_clicks,
+            skip_label=args.skip_label,
+            max_drafts=args.reply_drafts_max,
+        )
+        if reply_drafts_created:
+            print(f"Created {reply_drafts_created} reply draft(s) for replied prospects.")
+        print(
+            f"WARMUP_REPLY_DRAFT_RESULT count={reply_drafts_created} "
+            f"mode={'dry_run' if args.dry_run else 'live'} promoted={promoted}"
+        )
+        return
 
     log_tab_present = log_ws is not None
     last_sent = smf.last_sent_utctime_per_to_email(log_ws)
@@ -804,10 +1311,29 @@ def main() -> None:
         n_made += 1
         print(f"Created warmup draft #{n_made} id={draft_id!r} → {to_addr} ({shop})")
 
+    reply_drafts_created = 0
+    if args.create_reply_drafts:
+        reply_drafts_created = create_reply_drafts_for_replied_prospects(
+            hit_ws=hit_ws,
+            gsvc=gsvc,
+            sugg_ws=sugg_ws,
+            dry_run=args.dry_run,
+            verbose=args.verbose,
+            use_grok=args.use_grok,
+            grok_model=args.grok_model,
+            track_opens=args.track_opens,
+            track_clicks=args.track_clicks,
+            skip_label=args.skip_label,
+            max_drafts=args.reply_drafts_max,
+        )
+        if reply_drafts_created:
+            print(f"Created {reply_drafts_created} reply draft(s) for replied prospects.")
+
     if args.dry_run:
         print(
             f"WARMUP_DRAFT_RESULT count={n_made} mode=dry_run promoted={promoted} "
-            f"skipped_pending={skipped_pending} skipped_cadence={skipped_cadence}"
+            f"skipped_pending={skipped_pending} skipped_cadence={skipped_cadence} "
+            f"reply_drafts={reply_drafts_created}"
         )
         return
 
@@ -820,6 +1346,7 @@ def main() -> None:
         + str(len(created_rows))
         + f" mode=live promoted_replies={promoted} "
         f"skipped_pending={skipped_pending} skipped_cadence={skipped_cadence} "
+        f"reply_drafts={reply_drafts_created} "
         f"follow_up_tab={str(log_tab_present).lower()}"
     )
 
