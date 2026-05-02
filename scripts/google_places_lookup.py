@@ -77,15 +77,24 @@ def find_place(
 
 
 def place_details(key: str, place_id: str) -> dict:
-    url = "https://maps.googleapis.com/maps/api/place/details/json"
-    fields = (
-        "place_id,name,formatted_address,geometry,types,business_status,"
-        "international_phone_number,website,url,opening_hours,photos,rating,user_ratings_total"
-    )
-    params = {"place_id": place_id, "fields": fields, "key": key}
-    r = requests.get(url, params=params, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    """Place Details lookup, served from the persistent places-cache repo.
+
+    Delegates to ``places_cache.cached_place_details_full`` so repeated
+    lookups for the same ``place_id`` from any caller (locally or in CI) cost
+    nothing after the first hit. Atmosphere fields (rating / user_ratings_total)
+    are not requested — a 2026-05-01 audit confirmed nobody reads them, and
+    skipping that tier saves $5/1k per Details call.
+
+    Return shape preserved for backward compatibility: ``{"status": "OK"|"...",
+    "result": {...}}``. Consumers that already check ``status == "OK"`` keep
+    working unchanged.
+    """
+    # Lazy import to avoid a circular if places_cache imports back.
+    from places_cache import cached_place_details_full
+    result = cached_place_details_full(key, place_id)
+    if not result:
+        return {"status": "ZERO_RESULTS", "result": {}}
+    return {"status": "OK", "result": result}
 
 
 def main() -> None:

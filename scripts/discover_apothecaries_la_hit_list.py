@@ -675,17 +675,19 @@ def collect_nearby_for_center(
 
 
 def place_details(key: str, place_id: str) -> dict[str, Any]:
-    fields = (
-        "place_id,name,formatted_address,formatted_phone_number,website,geometry,"
-        "types,address_component,business_status,url,opening_hours"
-    )
-    r = requests.get(
-        DETAILS_URL,
-        params={"place_id": place_id, "fields": fields, "key": key},
-        timeout=45,
-    )
-    r.raise_for_status()
-    return r.json()
+    """Place Details, cached via the ``places-cache`` repo.
+
+    Delegates to ``places_cache.cached_place_details_full`` so re-runs of
+    this discovery pipeline don't re-pay for places already discovered.
+    Field set (Basic + Contact, no Atmosphere) matches the rest of the
+    pipeline. Return shape preserved for back-compat with callers that
+    check ``status``.
+    """
+    from places_cache import cached_place_details_full
+    result = cached_place_details_full(key, place_id)
+    if not result:
+        return {"status": "ZERO_RESULTS", "result": {}}
+    return {"status": "OK", "result": result}
 
 
 # Google weekday on periods: 0 = Sunday .. 6 = Saturday.
