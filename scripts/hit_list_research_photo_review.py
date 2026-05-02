@@ -40,6 +40,11 @@ import requests
 from google.oauth2.service_account import Credentials
 
 from hit_list_dapp_remarks_sheet import append_dapp_remark_and_apply
+# Reuse the site-keyword crawler from detect_circle_hosting_retailers so the
+# "site shows qualifying signals?" check stays consistent between the two
+# scripts. Crawl is HTTP-only (free) — used here as a gate before triggering
+# Place Photos at $7/1k each.
+from detect_circle_hosting_retailers import crawl_site as _crawl_site_for_gate
 
 REPO = Path(__file__).resolve().parents[1]
 SPREADSHEET_ID = "1eiqZr3LW-qEI6Hmy0Vrur_8flbRwxwA7jXVrbUnHbvc"
@@ -55,9 +60,12 @@ GROK_MODEL = "grok-4-1-fast-non-reasoning"
 SUBMITTED_BY_LABEL = "Grok photo scan (Google Places)"
 SUBMITTED_BY_NO_PHOTOS = "Hit List photo automation (no Places images)"
 SUBMITTED_BY_ERROR = "Hit List photo automation (run error)"
+SUBMITTED_BY_GATE_SKIP = "Hit List photo automation (skipped — site signals weak)"
 MAX_PHOTOS_DEFAULT = 5
 PLACES_MAX_WIDTH = 1200
 SLEEP_BETWEEN_SHOPS_SEC = 3
+GATE_CRAWL_SLEEP_S = 0.5
+GATE_CRAWL_MAX_CHARS = 200_000
 
 
 def load_dotenv_repo() -> None:
@@ -433,6 +441,8 @@ def collect_target_rows(
             "Address": cells[idx["Address"]].strip(),
             "City": cells[idx["City"]].strip(),
             "State": cells[idx["State"]].strip(),
+            "Website": cells[idx["Website"]].strip() if "Website" in idx else "",
+            "Hosts Circles": cells[idx["Hosts Circles"]].strip() if "Hosts Circles" in idx else "",
             "lat": lat_s,
             "lng": lng_s,
             "_lat_float": lat,
@@ -444,6 +454,60 @@ def collect_target_rows(
     return out
 
 
+def should_fetch_photos(fields: dict[str, Any]) -> tuple[bool, str]:
+    """Cheap site-crawl gate — returns ``(allow_photos, reason)``.
+
+    Place Photos cost $7/1k each, and the per-shop run downloads up to 5,
+    so an unqualified shop costs ~$0.04 in photo billing alone before the
+    Grok vision call. The gate uses HTTP-only signal detection (free) to
+    skip shops whose website shows no qualifying keywords (cacao ceremony /
+    women's circle / sound bath / etc.) — same keyword set as
+    ``detect_circle_hosting_retailers.py`` for consistency.
+
+    Order of evidence (cheapest first):
+      1. ``Hosts Circles`` cell already populated by a prior detect run →
+         site already known to qualify; let the photo path proceed.
+      2. ``Website`` blank → can't crawl; skip photos.
+      3. Crawl site; if any keyword found → proceed; otherwise skip.
+    """
+    cached = (fields.get("Hosts Circles") or "").strip()
+    if cached:
+        return True, f"prior detect run flagged: {cached[:120]}"
+
+    site = (fields.get("Website") or "").strip()
+    if not site:
+        return False, "no website on Hit List row to crawl"
+
+    fetched, found = _crawl_site_for_gate(
+        site, sleep_s=GATE_CRAWL_SLEEP_S, max_chars=GATE_CRAWL_MAX_CHARS,
+    )
+    if not fetched:
+        return False, f"site fetch failed for {site}"
+    if found:
+        return True, f"crawl found signals: {', '.join(found[:5])}"
+    return False, f"crawled {site} — no qualifying keywords found"
+
+
+def format_gate_skip_remarks(
+    name: str, addr: str, city: str, state: str, gate_reason: str,
+) -> str:
+    return (
+        f"Photo automation skipped for {name} ({addr}, {city}, {state}).\n"
+        f"\n"
+        f"Reason: {gate_reason}.\n"
+        f"\n"
+        f"No Place Photos were fetched and no Grok vision rubric ran. The "
+        f"site-crawl keyword gate (see detect_circle_hosting_retailers.py "
+        f"for the keyword set) found no positive signals; spending on "
+        f"Place Photos for this row would not have improved the AI "
+        f"classification beyond what the site itself already says.\n"
+        f"\n"
+        f"If this row deserves a manual look despite the weak site "
+        f"signals, run with --photo-gate=off to force the photo + Grok "
+        f"path."
+    )
+
+
 def run_one_shop(
     hit_ws: gspread.Worksheet,
     remark_ws: gspread.Worksheet,
@@ -451,12 +515,35 @@ def run_one_shop(
     fields: dict[str, Any],
     max_photos: int,
     dry_run: bool,
+    photo_gate: str = "strict",
 ) -> None:
-    mkey = maps_api_key()
     name = fields["Shop Name"]
     addr = fields["Address"]
     city = fields["City"]
     state = fields["State"]
+
+    # Cheap gate first — skip Find Place + Photos + Grok entirely if the
+    # site shows no qualifying signal. Saves $7/1k * up to 5 photos plus
+    # the Find Place / Details and the Grok vision invocation.
+    if photo_gate != "off":
+        gate_ok, gate_reason = should_fetch_photos(fields)
+        if not gate_ok:
+            print(f"[{name}] photo gate: SKIP — {gate_reason}", flush=True)
+            remarks = format_gate_skip_remarks(name, addr, city, state, gate_reason)
+            submission_id = str(uuid.uuid4())
+            submitted_at = datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")
+            if dry_run:
+                print("--- Remarks (preview) ---")
+                print(remarks)
+                return
+            append_dapp_remark_and_apply(
+                hit_ws, remark_ws, sheet_row, name,
+                "AI: Photo rejected", remarks,
+                SUBMITTED_BY_GATE_SKIP, submitted_at, submission_id,
+            )
+            return
+
+    mkey = maps_api_key()
     lat_f = fields.get("_lat_float")
     lng_f = fields.get("_lng_float")
     query = f"{name} {addr} {city} {state}".strip()
@@ -563,6 +650,17 @@ def main() -> None:
         action="store_true",
         help="Exit with code 1 if any shop in the batch raised (for CI alerting). Default: exit 0 so partial success keeps the job green.",
     )
+    p.add_argument(
+        "--photo-gate",
+        choices=("strict", "off"),
+        default="strict",
+        help=(
+            "Site-crawl gate that runs BEFORE Place Photos / Find Place / Grok. "
+            "'strict' (default): only proceed if Hosts Circles is already populated "
+            "or a fresh crawl finds qualifying keywords. 'off': legacy behavior, "
+            "always fetch photos regardless of site signals."
+        ),
+    )
     args = p.parse_args()
 
     gc = gspread_client()
@@ -578,7 +676,10 @@ def main() -> None:
     failed = 0
     for i, (sheet_row, fields) in enumerate(targets):
         try:
-            run_one_shop(hit_ws, remark_ws, sheet_row, fields, args.max_photos, args.dry_run)
+            run_one_shop(
+                hit_ws, remark_ws, sheet_row, fields,
+                args.max_photos, args.dry_run, photo_gate=args.photo_gate,
+            )
         except Exception as exc:
             print(f"ERROR row {sheet_row} {fields.get('Shop Name')!r}: {exc}", flush=True)
             try:
