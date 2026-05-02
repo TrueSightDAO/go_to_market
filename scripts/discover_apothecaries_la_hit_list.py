@@ -655,23 +655,33 @@ def collect_nearby_for_center(
     keyword: str,
     label: str,
     sleep_s: float,
+    *,
+    refresh: bool = False,
 ) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    pagetoken: str | None = None
-    page = 0
-    while True:
-        page += 1
-        data = nearby_page(key, lat, lng, radius, keyword, pagetoken)
-        st = data.get("status")
-        if st not in ("OK", "ZERO_RESULTS"):
-            raise RuntimeError(f"Nearby search failed ({label} p{page}): {data}")
-        for res in data.get("results") or []:
-            out.append({**res, "_search_label": label})
-        pagetoken = data.get("next_page_token")
-        if not pagetoken:
-            break
-        time.sleep(max(2.0, sleep_s))
-    return out
+    """Cached Nearby Search around a centroid.
+
+    Delegates to ``places_cache.cached_nearby_search`` so re-runs of the
+    discovery pipeline against an already-covered (lat, lng, radius_m,
+    keyword) combo skip the live API call entirely (Nearby Search is
+    $32/1k — the most expensive Places endpoint we hit).
+
+    Pass ``refresh=True`` to bypass the cache and re-search a centroid.
+
+    The ``_search_label`` annotation is preserved so downstream dedup logic
+    in this script keeps working.
+    """
+    from places_cache import cached_nearby_search
+    results, was_live = cached_nearby_search(
+        key, lat, lng, radius, keyword,
+        label=label, refresh=refresh, sleep_between_pages=sleep_s,
+    )
+    if not was_live:
+        print(
+            f"[nearby] {label}: cache hit (no live call) "
+            f"+{len(results)} cached results",
+            flush=True,
+        )
+    return [{**res, "_search_label": label} for res in results]
 
 
 def place_details(key: str, place_id: str) -> dict[str, Any]:
@@ -942,6 +952,15 @@ def main() -> None:
         metavar="KEY",
         help=f"Region preset: {', '.join(sorted(REGIONS.keys()))} (default: la).",
     )
+    p.add_argument(
+        "--refresh-coverage",
+        action="store_true",
+        help=(
+            "Bypass the Nearby Search coverage cache for this run and re-search "
+            "every centroid live. Default is to skip live calls for already-covered "
+            "(lat, lng, radius, keyword) combos."
+        ),
+    )
     p.add_argument("--dry-run", action="store_true", help="Do not write the sheet; print plan.")
     p.add_argument(
         "--keyword",
@@ -975,7 +994,8 @@ def main() -> None:
     print(f"Region: {region.key} ({region.notes_label})", flush=True)
     for lat, lng, radius, label in region.centers:
         chunk = collect_nearby_for_center(
-            key, lat, lng, radius, args.keyword, label, sleep_s=2.0
+            key, lat, lng, radius, args.keyword, label, sleep_s=2.0,
+            refresh=args.refresh_coverage,
         )
         raw_results.extend(chunk)
         print(f"[nearby] {label}: +{len(chunk)} raw (running total {len(raw_results)})", flush=True)

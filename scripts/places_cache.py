@@ -316,6 +316,170 @@ def cached_place_details_full(api_key: str, place_id: str, *, refresh: bool = Fa
     return cached_place_details(api_key, place_id, fields=FULL_FIELDS, refresh=refresh)
 
 
+# ---- Nearby Search coverage cache -----------------------------------------
+#
+# Nearby Search at $32/1k is the most expensive Places endpoint we hit. The
+# discovery pipeline iterates ~50+ centroids per region and re-runs land on
+# the same centroids; without a coverage cache, every re-run repays for
+# already-discovered geography. The cache below stores the raw Nearby result
+# list per (keyword, lat, lng, radius_m) combo so re-runs short-circuit and
+# return the cached results — same dedup / Place Details flow downstream.
+#
+# Layout in the cache repo:
+#   coverage/nearby/<sanitized_combo>.json
+# where sanitized_combo encodes lat/lng/radius/keyword.
+#
+# Permanent by default; pass ``refresh=True`` to bypass and re-search a combo.
+
+NEARBY_SEARCH_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+
+
+def _coverage_path(keyword: str, lat: float, lng: float, radius_m: int) -> str:
+    safe_kw = (
+        "".join(c if c.isalnum() else "_" for c in (keyword or "").strip().lower())
+        or "nokeyword"
+    )
+    fname = f"{safe_kw}__lat{lat:.4f}_lng{lng:.4f}_r{int(radius_m)}m.json"
+    return f"coverage/nearby/{fname}"
+
+
+def _fetch_coverage_record(combo_path: str) -> tuple[dict | None, str | None]:
+    api_url = f"{CONTENTS_API}/{combo_path}?ref={CACHE_REPO_BRANCH}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    token = _write_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        r = requests.get(api_url, headers=headers, timeout=15)
+    except requests.RequestException:
+        return None, None
+    if r.status_code == 404:
+        return None, None
+    if r.status_code != 200:
+        return None, None
+    payload = r.json()
+    sha = payload.get("sha")
+    encoded = payload.get("content", "")
+    if not encoded:
+        return None, sha
+    try:
+        decoded = base64.b64decode(encoded).decode("utf-8")
+        return json.loads(decoded), sha
+    except (ValueError, json.JSONDecodeError):
+        return None, sha
+
+
+def _write_coverage_record(combo_path: str, record: dict, prior_sha: str | None) -> bool:
+    token = _write_token()
+    if not token:
+        return False
+    body = {
+        "message": f"coverage: {combo_path.split('/')[-1]}",
+        "content": base64.b64encode(
+            json.dumps(record, indent=2, sort_keys=True).encode("utf-8")
+        ).decode("ascii"),
+        "branch": CACHE_REPO_BRANCH,
+    }
+    if prior_sha:
+        body["sha"] = prior_sha
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        r = requests.put(f"{CONTENTS_API}/{combo_path}", headers=headers, json=body, timeout=30)
+    except requests.RequestException:
+        return False
+    return r.status_code in (200, 201)
+
+
+def _live_nearby_search(
+    api_key: str, lat: float, lng: float, radius: int, keyword: str, sleep_between_pages: float = 2.0
+) -> list[dict]:
+    """Hit Nearby Search live, exhausting pagination. Returns full results list."""
+    out: list[dict] = []
+    pagetoken: str | None = None
+    while True:
+        params: dict = {
+            "location": f"{lat},{lng}",
+            "radius": str(int(radius)),
+            "keyword": keyword,
+            "key": api_key,
+        }
+        if pagetoken:
+            params["pagetoken"] = pagetoken
+        try:
+            r = requests.get(NEARBY_SEARCH_URL, params=params, timeout=45)
+        except requests.RequestException as e:
+            sys.stderr.write(f"places_cache: nearby live failed: {e}\n")
+            return out
+        if r.status_code != 200:
+            sys.stderr.write(f"places_cache: nearby HTTP {r.status_code}: {r.text[:200]}\n")
+            return out
+        data = r.json()
+        st = data.get("status")
+        if st not in ("OK", "ZERO_RESULTS"):
+            sys.stderr.write(f"places_cache: nearby status {st!r}: {data}\n")
+            return out
+        for res in data.get("results") or []:
+            out.append(res)
+        pagetoken = data.get("next_page_token")
+        if not pagetoken:
+            break
+        time.sleep(max(2.0, sleep_between_pages))
+    return out
+
+
+def cached_nearby_search(
+    api_key: str,
+    lat: float,
+    lng: float,
+    radius_m: int,
+    keyword: str,
+    *,
+    label: str = "",
+    refresh: bool = False,
+    sleep_between_pages: float = 2.0,
+) -> tuple[list[dict], bool]:
+    """Cache-aware Nearby Search.
+
+    Returns ``(results, was_live)`` — ``was_live`` indicates whether this
+    incarnation hit the live API (and was billed). Results are the raw
+    Nearby Search response items from Google.
+
+    On a cache hit the live call is skipped entirely; the cached
+    ``results`` list is returned as-is. On a miss we hit the live API,
+    write the response to the cache repo, and return.
+    """
+    combo = _coverage_path(keyword, lat, lng, radius_m)
+    cached, sha = (None, None) if refresh else _fetch_coverage_record(combo)
+    if cached and isinstance(cached.get("results"), list) and cached["results"]:
+        return cached["results"], False
+    # Treat empty-result records the same as a cached zero — they're a real
+    # finding (the geography returned nothing for this keyword) and still
+    # worth not re-paying for.
+    if cached and "results" in cached:
+        return cached.get("results") or [], False
+
+    live = _live_nearby_search(
+        api_key, lat, lng, radius_m, keyword, sleep_between_pages=sleep_between_pages
+    )
+    record = {
+        "centroid": {"lat": lat, "lng": lng, "radius_m": int(radius_m)},
+        "keyword": keyword,
+        "label": label,
+        "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "result_count": len(live),
+        "results": live,
+    }
+    _write_coverage_record(combo, record, sha)
+    return live, True
+
+
 # ---- CLI for ad-hoc inspection ---------------------------------------------
 
 def _cli(argv=None) -> int:
