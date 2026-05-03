@@ -24,10 +24,10 @@ Status promotion (default ON; disable with ``--no-promote``): when a row is
 detected as ``Yes``, the script promotes it via the **DApp Remarks** audit
 trail. Two cases:
 
-  - **Email already on the row** → ``AI: Warm-up needed`` (skip Enrich
+  - **Email already on the row** → ``AI: Warm up prospect`` (skip Enrich
     entirely; warm-up drafter has everything it needs).
   - **Email missing** → ``AI: Enrich with contact`` (Enrich runs to harvest
-    the email, then the row promotes to Warm-up needed).
+    the email, then the row promotes to Warm up prospect).
 
 This replaces the old photo+Grok rubric in ``hit_list_research_photo_review``
 which used Place Photos to qualify rows. The site crawl is the cheaper +
@@ -47,6 +47,13 @@ Retroactive rescue (``--rescue-rejected``, default ON): also re-evaluates
 Hosts Circles comes back as ``Yes``. Default-on so existing photo-rejected
 rows (which were never crawled by site keyword) get re-evaluated under the
 new criteria. Pass ``--no-rescue-rejected`` to opt out.
+
+Rescue of stuck rows: ``AI: Enrich — manual`` and ``AI: Photo needs review``
+rows are also eligible for promotion if their website reveals circle-hosting
+signal. These are dead-end states where the row is waiting for human action;
+a clear circle keyword on the site is strong enough signal to fast-track them
+straight to ``AI: Warm up prospect`` (if email present) or
+``AI: Enrich with contact`` (if not).
 
 Idempotent: only writes empty Hosts Circles cells unless ``--force``.
 
@@ -99,9 +106,11 @@ PROMOTABLE_FROM_REJECTED = "AI: Photo rejected"
 # Two promotion targets, picked at runtime based on whether the row has an
 # email already — see promote_row_to_enrichment().
 PROMOTION_TARGET_STATUS_ENRICH = "AI: Enrich with contact"
-PROMOTION_TARGET_STATUS_WARMUP = "AI: Warm-up needed"
+PROMOTION_TARGET_STATUS_WARMUP = "AI: Warm up prospect"
 # Back-compat alias for the most common case (no email yet).
 PROMOTION_TARGET_STATUS = PROMOTION_TARGET_STATUS_ENRICH
+PROMOTABLE_FROM_MANUAL = "AI: Enrich — manual"
+PROMOTABLE_FROM_NEEDS_REVIEW = "AI: Photo needs review"
 
 KEYWORD_PATTERNS: tuple[tuple[str, str], ...] = (
     # (regex, canonical label written into the cell)
@@ -253,10 +262,10 @@ def promote_row_to_enrichment(
     """Promote ``rn`` based on Hosts Circles match, via DApp Remarks audit.
 
     Target status:
-      - ``has_email=True``  → ``AI: Warm-up needed`` (skip Enrich entirely;
+      - ``has_email=True``  → ``AI: Warm up prospect`` (skip Enrich entirely;
         the warm-up drafter has the email it needs).
       - ``has_email=False`` → ``AI: Enrich with contact`` (Enrich runs to
-        harvest the email, then promotes onward to Warm-up needed).
+        harvest the email, then promotes onward to Warm up prospect).
 
     ``rescue=True`` indicates we're un-rejecting an AI: Photo rejected row
     by site-crawl signal; the audit text reflects that.
@@ -333,7 +342,7 @@ def main() -> None:
     p.add_argument(
         "--no-promote",
         action="store_true",
-        help="Disable Research -> AI: Enrich with contact promotion when Hosts Circles=Yes.",
+        help="Disable ALL promotion/rescue when Hosts Circles=Yes. Prevents Research → AI: Enrich with contact, and prevents rescue of AI: Photo rejected / AI: Enrich — manual / AI: Photo needs review rows.",
     )
     p.add_argument(
         "--no-rescue-rejected",
@@ -441,14 +450,21 @@ def main() -> None:
                 promote_count += 1
                 if not args.dry_run:
                     time.sleep(max(0.0, args.sleep_write))
-            elif cur_status == PROMOTABLE_FROM_REJECTED and rescue_rejected:
-                promote_row_to_enrichment(
-                    ws, remark_ws, ri, shop, hits,
-                    rescue=True, dry_run=args.dry_run, has_email=has_email,
-                )
-                rescue_count += 1
-                if not args.dry_run:
-                    time.sleep(max(0.0, args.sleep_write))
+            elif cur_status in (PROMOTABLE_FROM_REJECTED, PROMOTABLE_FROM_MANUAL, PROMOTABLE_FROM_NEEDS_REVIEW):
+                # Rescue dead-end rows: photo-rejected, enrichment-gave-up, or
+                # photo-needs-review. All three are stuck states where a clear
+                # circle-hosting signal on the website is strong enough to
+                # fast-track back into the pipeline.
+                if cur_status == PROMOTABLE_FROM_REJECTED and not rescue_rejected:
+                    pass  # user opted out of rejected rescue
+                else:
+                    promote_row_to_enrichment(
+                        ws, remark_ws, ri, shop, hits,
+                        rescue=True, dry_run=args.dry_run, has_email=has_email,
+                    )
+                    rescue_count += 1
+                    if not args.dry_run:
+                        time.sleep(max(0.0, args.sleep_write))
         elif not hits and reject_no_signal and cur_status == PROMOTABLE_FROM_RESEARCH and not args.no_promote:
             # Site crawled OK + zero matches → mark as photo-rejected
             # (the status name is preserved for back-compat with downstream
@@ -486,14 +502,17 @@ def main() -> None:
                 swept_promote += 1
                 if not args.dry_run:
                     time.sleep(max(0.0, args.sleep_write))
-            elif status == PROMOTABLE_FROM_REJECTED and rescue_rejected:
-                promote_row_to_enrichment(
-                    ws, remark_ws, ri, shop, matched,
-                    rescue=True, dry_run=args.dry_run, has_email=has_email,
-                )
-                swept_rescue += 1
-                if not args.dry_run:
-                    time.sleep(max(0.0, args.sleep_write))
+            elif status in (PROMOTABLE_FROM_REJECTED, PROMOTABLE_FROM_MANUAL, PROMOTABLE_FROM_NEEDS_REVIEW):
+                if status == PROMOTABLE_FROM_REJECTED and not rescue_rejected:
+                    pass
+                else:
+                    promote_row_to_enrichment(
+                        ws, remark_ws, ri, shop, matched,
+                        rescue=True, dry_run=args.dry_run, has_email=has_email,
+                    )
+                    swept_rescue += 1
+                    if not args.dry_run:
+                        time.sleep(max(0.0, args.sleep_write))
 
     print(
         f"Done. yes={yes_count} not_detected={nd_count} unreachable_skip={skip_count} "

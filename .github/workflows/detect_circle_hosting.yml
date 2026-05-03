@@ -1,5 +1,9 @@
 # Hit List: detect circle-hosting retailers from their Website and fast-track
-# circle-hosters past photo review directly into AI: Enrich with contact.
+# circle-hosters past photo review directly into AI: Enrich with contact or
+# AI: Warm up prospect (if email already present).
+#
+# Rescue scope: AI: Photo rejected, AI: Enrich — manual, and AI: Photo needs review
+# rows are all eligible for promotion if their website reveals circle-hosting signal.
 #
 # Secrets: GOOGLE_CREDENTIALS_JSON (no external APIs needed — pure HTTP crawl).
 #
