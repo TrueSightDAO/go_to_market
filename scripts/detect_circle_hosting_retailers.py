@@ -21,17 +21,32 @@ Output values written to **Hosts Circles**:
     checked" so the next run can retry).
 
 Status promotion (default ON; disable with ``--no-promote``): when a row is
-detected as ``Yes`` and its current Status is ``Research``, the script also promotes
-it to ``AI: Enrich with contact`` via the **DApp Remarks** audit trail — bypassing
-photo review entirely (which can wrongly reject circle-hosting venues whose Google
-Places photos don't look like a "metaphysical shop") and dropping the row directly
-into the next ``hit_list_enrich_contact`` cron's queue. The pipeline then carries
-it forward: enrich → email/form → warm-up draft.
+detected as ``Yes``, the script promotes it via the **DApp Remarks** audit
+trail. Two cases:
 
-Retroactive rescue (``--rescue-rejected``): also promote rows currently at
-``AI: Photo rejected`` to ``AI: Enrich with contact`` if their Hosts Circles is
-``Yes``. Off by default in the cron — it un-rejects rows the photo reviewer
-already decided on, so it's an opt-in one-shot for cleanup.
+  - **Email already on the row** → ``AI: Warm-up needed`` (skip Enrich
+    entirely; warm-up drafter has everything it needs).
+  - **Email missing** → ``AI: Enrich with contact`` (Enrich runs to harvest
+    the email, then the row promotes to Warm-up needed).
+
+This replaces the old photo+Grok rubric in ``hit_list_research_photo_review``
+which used Place Photos to qualify rows. The site crawl is the cheaper +
+more direct signal: if the website mentions cacao ceremony / women's circle
+/ sound bath / etc., the row is qualified — no need to fetch storefront
+photos and run them through a vision rubric to confirm.
+
+Rejection on no signal (default ON; disable with ``--no-reject-no-signal``):
+when a row's site is crawled successfully but **no** keyword matches, the
+script promotes Status to ``AI: Photo rejected`` with an audit remark
+explaining "no site signal". The status name is preserved for back-compat
+with downstream filters; under the new model it means "site shows no
+qualifying keywords" rather than "photos didn't show fit".
+
+Retroactive rescue (``--rescue-rejected``, default ON): also re-evaluates
+``AI: Photo rejected`` rows by crawling their sites and promoting any whose
+Hosts Circles comes back as ``Yes``. Default-on so existing photo-rejected
+rows (which were never crawled by site keyword) get re-evaluated under the
+new criteria. Pass ``--no-rescue-rejected`` to opt out.
 
 Idempotent: only writes empty Hosts Circles cells unless ``--force``.
 
@@ -81,7 +96,12 @@ HOSTS_CIRCLES_COL = "Hosts Circles"
 SUBMITTED_BY_CIRCLE = "detect_circle_hosting_retailers"
 PROMOTABLE_FROM_RESEARCH = "Research"
 PROMOTABLE_FROM_REJECTED = "AI: Photo rejected"
-PROMOTION_TARGET_STATUS = "AI: Enrich with contact"
+# Two promotion targets, picked at runtime based on whether the row has an
+# email already — see promote_row_to_enrichment().
+PROMOTION_TARGET_STATUS_ENRICH = "AI: Enrich with contact"
+PROMOTION_TARGET_STATUS_WARMUP = "AI: Warm-up needed"
+# Back-compat alias for the most common case (no email yet).
+PROMOTION_TARGET_STATUS = PROMOTION_TARGET_STATUS_ENRICH
 
 KEYWORD_PATTERNS: tuple[tuple[str, str], ...] = (
     # (regex, canonical label written into the cell)
@@ -173,39 +193,34 @@ def crawl_site(website: str, *, sleep_s: float, max_chars: int) -> tuple[bool, l
     return fetched_ok, found
 
 
-def promote_row_to_enrichment(
+def reject_row_no_signal(
     ws: gspread.Worksheet,
     remark_ws: gspread.Worksheet,
     rn: int,
     shop: str,
-    matched: list[str],
     *,
-    rescue: bool,
     dry_run: bool,
 ) -> bool:
-    """Promote ``rn`` to AI: Enrich with contact via DApp Remarks audit trail.
+    """Mark ``rn`` as ``AI: Photo rejected`` because a successful site crawl
+    found no qualifying circle / ceremony / cacao keywords.
 
-    ``rescue=True`` indicates we're un-rejecting an AI: Photo rejected row;
-    the audit text reflects that.
+    This replaces the photo+Grok rubric that ``hit_list_research_photo_review``
+    used to run for the same purpose. The site crawl is the cheaper, more
+    direct signal: if the site doesn't say it hosts circles, photos won't
+    confidently say it does either. ``--rescue-rejected`` still re-promotes
+    such rows later if the site develops the keywords.
     """
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     submitted_at = datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")
-    matched_str = ", ".join(matched) if matched else "circle keywords"
-    if rescue:
-        remark = (
-            f"[circle-detect {stamp}] outcome=rescue_from_photo_rejection "
-            f"matched={matched_str}"
-        )
-    else:
-        remark = (
-            f"[circle-detect {stamp}] outcome=fast_track_research_to_enrich "
-            f"matched={matched_str}"
-        )
+    remark = (
+        f"[circle-detect {stamp}] outcome=reject_research_no_site_signal "
+        f"site_crawled_ok matched=none "
+        f"(photo+Grok rubric retired; site crawl is canonical qualifier)"
+    )
 
     if dry_run:
-        action = "rescue from AI: Photo rejected" if rescue else "promote from Research"
         print(
-            f"  [dry-run] row {rn} {shop!r}: would {action} -> {PROMOTION_TARGET_STATUS}",
+            f"  [dry-run] row {rn} {shop!r}: would reject (no signal) -> AI: Photo rejected",
             flush=True,
         )
         return True
@@ -215,7 +230,71 @@ def promote_row_to_enrichment(
         remark_ws,
         rn,
         shop,
-        PROMOTION_TARGET_STATUS,
+        "AI: Photo rejected",
+        remark,
+        SUBMITTED_BY_CIRCLE,
+        submitted_at,
+        str(uuid.uuid4()),
+    )
+    return True
+
+
+def promote_row_to_enrichment(
+    ws: gspread.Worksheet,
+    remark_ws: gspread.Worksheet,
+    rn: int,
+    shop: str,
+    matched: list[str],
+    *,
+    rescue: bool,
+    dry_run: bool,
+    has_email: bool = False,
+) -> bool:
+    """Promote ``rn`` based on Hosts Circles match, via DApp Remarks audit.
+
+    Target status:
+      - ``has_email=True``  → ``AI: Warm-up needed`` (skip Enrich entirely;
+        the warm-up drafter has the email it needs).
+      - ``has_email=False`` → ``AI: Enrich with contact`` (Enrich runs to
+        harvest the email, then promotes onward to Warm-up needed).
+
+    ``rescue=True`` indicates we're un-rejecting an AI: Photo rejected row
+    by site-crawl signal; the audit text reflects that.
+    """
+    target = PROMOTION_TARGET_STATUS_WARMUP if has_email else PROMOTION_TARGET_STATUS_ENRICH
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    submitted_at = datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")
+    matched_str = ", ".join(matched) if matched else "circle keywords"
+    skip_note = "skip_enrich=true" if has_email else "skip_enrich=false"
+    if rescue:
+        remark = (
+            f"[circle-detect {stamp}] outcome=rescue_from_photo_rejection "
+            f"matched={matched_str} {skip_note}"
+        )
+    else:
+        outcome = (
+            "fast_track_research_to_warmup"
+            if has_email else "fast_track_research_to_enrich"
+        )
+        remark = (
+            f"[circle-detect {stamp}] outcome={outcome} "
+            f"matched={matched_str} {skip_note}"
+        )
+
+    if dry_run:
+        action = "rescue from AI: Photo rejected" if rescue else "promote from Research"
+        print(
+            f"  [dry-run] row {rn} {shop!r}: would {action} -> {target}",
+            flush=True,
+        )
+        return True
+
+    append_dapp_remark_and_apply(
+        ws,
+        remark_ws,
+        rn,
+        shop,
+        target,
         remark,
         SUBMITTED_BY_CIRCLE,
         submitted_at,
@@ -257,10 +336,21 @@ def main() -> None:
         help="Disable Research -> AI: Enrich with contact promotion when Hosts Circles=Yes.",
     )
     p.add_argument(
-        "--rescue-rejected",
+        "--no-rescue-rejected",
         action="store_true",
-        help="Also promote AI: Photo rejected rows whose Hosts Circles is Yes "
-        "(retroactive rescue; off in cron by default).",
+        help="Disable re-evaluation of AI: Photo rejected rows. Default is to "
+        "rescue: crawl their sites and promote any whose Hosts Circles comes "
+        "back as Yes. Default-on so existing photo-rejected rows (which were "
+        "never crawled by site keyword) get re-evaluated under the new criteria.",
+    )
+    p.add_argument(
+        "--no-reject-no-signal",
+        action="store_true",
+        help="Disable Research -> AI: Photo rejected when the site crawl "
+        "succeeds but finds no qualifying keywords. Default is to reject — "
+        "this is the simplification that retires the photo+Grok rubric "
+        "(which used to gate Research -> rejected). Pass this flag to keep "
+        "no-signal rows in Research for manual triage.",
     )
     args = p.parse_args()
 
@@ -280,8 +370,17 @@ def main() -> None:
     i_shop = col("Shop Name")
     i_web = col("Website")
     i_status = col("Status")
+    i_email = header.index("Email") if "Email" in header else -1
     i_hc = ensure_hosts_circles_column(ws, header, args.dry_run)
     remark_ws = gc.open_by_key(SPREADSHEET_ID).worksheet(DAPP_REMARKS_WS) if not args.no_promote else None
+    rescue_rejected = not args.no_rescue_rejected
+    reject_no_signal = not args.no_reject_no_signal
+
+    def row_has_email(cells: list[str]) -> bool:
+        if i_email < 0:
+            return False
+        v = cells[i_email].strip() if i_email < len(cells) else ""
+        return bool(v) and "@" in v
 
     queued: list[int] = []
     for ri, row in enumerate(rows[1:], start=2):
@@ -306,11 +405,13 @@ def main() -> None:
     skip_count = 0
     promote_count = 0
     rescue_count = 0
+    reject_count = 0
     for ri in queued:
         cells = rows[ri - 1] + [""] * (len(header) - len(rows[ri - 1]))
         shop = cells[i_shop].strip()
         site = cells[i_web].strip()
         cur_status = cells[i_status].strip()
+        has_email = row_has_email(cells)
         ok, hits = crawl_site(site, sleep_s=args.sleep, max_chars=args.max_chars)
         if not ok:
             print(f"  row {ri} {shop!r}: site unreachable — leaving blank for retry", flush=True)
@@ -334,18 +435,29 @@ def main() -> None:
         if hits and not args.no_promote:
             if cur_status == PROMOTABLE_FROM_RESEARCH:
                 promote_row_to_enrichment(
-                    ws, remark_ws, ri, shop, hits, rescue=False, dry_run=args.dry_run,
+                    ws, remark_ws, ri, shop, hits,
+                    rescue=False, dry_run=args.dry_run, has_email=has_email,
                 )
                 promote_count += 1
                 if not args.dry_run:
                     time.sleep(max(0.0, args.sleep_write))
-            elif cur_status == PROMOTABLE_FROM_REJECTED and args.rescue_rejected:
+            elif cur_status == PROMOTABLE_FROM_REJECTED and rescue_rejected:
                 promote_row_to_enrichment(
-                    ws, remark_ws, ri, shop, hits, rescue=True, dry_run=args.dry_run,
+                    ws, remark_ws, ri, shop, hits,
+                    rescue=True, dry_run=args.dry_run, has_email=has_email,
                 )
                 rescue_count += 1
                 if not args.dry_run:
                     time.sleep(max(0.0, args.sleep_write))
+        elif not hits and reject_no_signal and cur_status == PROMOTABLE_FROM_RESEARCH and not args.no_promote:
+            # Site crawled OK + zero matches → mark as photo-rejected
+            # (the status name is preserved for back-compat with downstream
+            # filters; meaning under new model is "site shows no qualifying
+            # signals," which retires the photo+Grok rubric).
+            reject_row_no_signal(ws, remark_ws, ri, shop, dry_run=args.dry_run)
+            reject_count += 1
+            if not args.dry_run:
+                time.sleep(max(0.0, args.sleep_write))
 
     # Post-crawl sweep: promote any row whose Hosts Circles is already "Yes" but
     # whose Status hasn't been promoted yet (covers rows whose Hosts Circles was set
@@ -361,20 +473,23 @@ def main() -> None:
                 continue
             status = row[i_status].strip()
             shop = row[i_shop].strip()
+            has_email = row_has_email(row)
             matched = []
             m = re.match(r"^Yes\s*\((.*)\)\s*$", hc, re.IGNORECASE)
             if m:
                 matched = [s.strip() for s in m.group(1).split(",") if s.strip()]
             if status == PROMOTABLE_FROM_RESEARCH:
                 promote_row_to_enrichment(
-                    ws, remark_ws, ri, shop, matched, rescue=False, dry_run=args.dry_run,
+                    ws, remark_ws, ri, shop, matched,
+                    rescue=False, dry_run=args.dry_run, has_email=has_email,
                 )
                 swept_promote += 1
                 if not args.dry_run:
                     time.sleep(max(0.0, args.sleep_write))
-            elif status == PROMOTABLE_FROM_REJECTED and args.rescue_rejected:
+            elif status == PROMOTABLE_FROM_REJECTED and rescue_rejected:
                 promote_row_to_enrichment(
-                    ws, remark_ws, ri, shop, matched, rescue=True, dry_run=args.dry_run,
+                    ws, remark_ws, ri, shop, matched,
+                    rescue=True, dry_run=args.dry_run, has_email=has_email,
                 )
                 swept_rescue += 1
                 if not args.dry_run:
@@ -383,8 +498,10 @@ def main() -> None:
     print(
         f"Done. yes={yes_count} not_detected={nd_count} unreachable_skip={skip_count} "
         f"promote_research={promote_count} rescue_rejected={rescue_count} "
+        f"reject_no_signal={reject_count} "
         f"sweep_promote={swept_promote} sweep_rescue={swept_rescue} "
-        f"dry_run={args.dry_run} force={args.force} rescue_flag={args.rescue_rejected}",
+        f"dry_run={args.dry_run} force={args.force} "
+        f"rescue_rejected={rescue_rejected} reject_no_signal={reject_no_signal}",
         flush=True,
     )
 
