@@ -47,10 +47,13 @@ SUGGESTIONS_HEADERS = [
     "notes",
     "Open",
     "Click through",
+    "gmail_message_id",
 ]
 
-# Before engagement columns (matches prior script revision).
-SUGGESTIONS_HEADERS_LEGACY = SUGGESTIONS_HEADERS[:-2]
+# Before gmail_message_id (the 15-column generation that added Open / Click through).
+SUGGESTIONS_HEADERS_PRE_MSG_ID = SUGGESTIONS_HEADERS[:-1]
+# Before engagement columns (the 13-column original).
+SUGGESTIONS_HEADERS_LEGACY = SUGGESTIONS_HEADERS_PRE_MSG_ID[:-2]
 
 # Canonical label name to apply via Gmail API when creating drafts (future script).
 DEFAULT_GMAIL_LABEL = "Email Agent suggestions"
@@ -103,6 +106,41 @@ def migrate_drafts_add_open_click(ws: gspread.Worksheet, header_row: list[str]) 
     return True
 
 
+def migrate_drafts_add_message_id(ws: gspread.Worksheet, header_row: list[str]) -> bool:
+    """Append **gmail_message_id** at end of row 1 if missing.
+
+    Existing rows are left blank — `backfill_email_agent_drafts_message_id.py`
+    walks pending_review rows and fills them by hitting Gmail draft API.
+    """
+    hm = header_map(header_row)
+    if hm.get("gmail_message_id") is not None:
+        return False
+
+    col_count_before = len(header_row)
+    ws.spreadsheet.batch_update(
+        {
+            "requests": [
+                {
+                    "appendDimension": {
+                        "sheetId": ws.id,
+                        "dimension": "COLUMNS",
+                        "length": 1,
+                    }
+                }
+            ]
+        }
+    )
+    c_msg = col_count_before + 1
+    ws.update_cell(1, c_msg, "gmail_message_id")
+    print(
+        "Migrated Email Agent Drafts: appended column 'gmail_message_id' "
+        f"(1-based column {c_msg}). Existing rows left blank — run "
+        "scripts/backfill_email_agent_drafts_message_id.py to populate "
+        "pending_review rows from Gmail."
+    )
+    return True
+
+
 def get_client():
     if not _SA_CREDS.is_file():
         sys.stderr.write(f"Missing service account {_SA_CREDS}\n")
@@ -140,14 +178,23 @@ def main() -> None:
         print(f"{SUGGESTIONS_WS!r} already has the expected header row.")
         return
 
+    if first == SUGGESTIONS_HEADERS_PRE_MSG_ID:
+        migrate_drafts_add_message_id(ws, vals[0])
+        print(f"{SUGGESTIONS_WS!r} migrated to include gmail_message_id.")
+        return
+
     if first == SUGGESTIONS_HEADERS_LEGACY:
         migrate_drafts_add_open_click(ws, vals[0])
-        print(f"{SUGGESTIONS_WS!r} migrated to include Open / Click through.")
+        # Re-read header after first migration, then chain the next.
+        vals = ws.get_all_values()
+        migrate_drafts_add_message_id(ws, [c.strip() for c in vals[0]])
+        print(f"{SUGGESTIONS_WS!r} migrated to current schema (Open/Click + gmail_message_id).")
         return
 
     sys.stderr.write(
         f"{SUGGESTIONS_WS!r} row 1 does not match expected headers.\n"
         f"Expected (new): {SUGGESTIONS_HEADERS}\n"
+        f"Or pre-msg-id (15 cols): {SUGGESTIONS_HEADERS_PRE_MSG_ID}\n"
         f"Or legacy (13 cols): {SUGGESTIONS_HEADERS_LEGACY}\n"
         f"Found:    {first}\n"
         "Fix manually or rename the tab if this is a different sheet.\n"
