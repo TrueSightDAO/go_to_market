@@ -37,13 +37,13 @@ photos and run them through a vision rubric to confirm.
 
 Rejection on no signal (default ON; disable with ``--no-reject-no-signal``):
 when a row's site is crawled successfully but **no** keyword matches, the
-script promotes Status to ``AI: Photo rejected`` with an audit remark
+script promotes Status to ``AI: No fit signal`` (legacy ``AI: Photo rejected``) with an audit remark
 explaining "no site signal". The status name is preserved for back-compat
 with downstream filters; under the new model it means "site shows no
 qualifying keywords" rather than "photos didn't show fit".
 
 Retroactive rescue (``--rescue-rejected``, default ON): also re-evaluates
-``AI: Photo rejected`` rows by crawling their sites and promoting any whose
+``AI: No fit signal`` (legacy ``AI: Photo rejected``) rows by crawling their sites and promoting any whose
 Hosts Circles comes back as ``Yes``. Default-on so existing photo-rejected
 rows (which were never crawled by site keyword) get re-evaluated under the
 new criteria. Pass ``--no-rescue-rejected`` to opt out.
@@ -102,7 +102,17 @@ SCOPES = [
 HOSTS_CIRCLES_COL = "Hosts Circles"
 SUBMITTED_BY_CIRCLE = "detect_circle_hosting_retailers"
 PROMOTABLE_FROM_RESEARCH = "Research"
-PROMOTABLE_FROM_REJECTED = "AI: Photo rejected"
+# 2026-05-03 rename: was "AI: Photo rejected" — but the photo+Grok pipeline
+# is retired (PR #101) and the status is now produced exclusively by the
+# site-crawl-no-signal path. The old name was misleading. The legacy name
+# is still accepted on read so existing rows in the old state get
+# re-evaluated by the rescue path during the migration window.
+REJECTED_STATUS = "AI: No fit signal"
+LEGACY_REJECTED_STATUSES = ("AI: Photo rejected",)
+PROMOTABLE_FROM_REJECTED_STATUSES = (REJECTED_STATUS,) + LEGACY_REJECTED_STATUSES
+# Back-compat alias for any external import.
+PROMOTABLE_FROM_REJECTED = REJECTED_STATUS
+
 # Two promotion targets, picked at runtime based on whether the row has an
 # email already — see promote_row_to_enrichment().
 PROMOTION_TARGET_STATUS_ENRICH = "AI: Enrich with contact"
@@ -210,7 +220,7 @@ def reject_row_no_signal(
     *,
     dry_run: bool,
 ) -> bool:
-    """Mark ``rn`` as ``AI: Photo rejected`` because a successful site crawl
+    """Mark ``rn`` as ``AI: No fit signal`` because a successful site crawl
     found no qualifying circle / ceremony / cacao keywords.
 
     This replaces the photo+Grok rubric that ``hit_list_research_photo_review``
@@ -218,6 +228,12 @@ def reject_row_no_signal(
     direct signal: if the site doesn't say it hosts circles, photos won't
     confidently say it does either. ``--rescue-rejected`` still re-promotes
     such rows later if the site develops the keywords.
+
+    State name was renamed from legacy ``AI: Photo rejected`` to
+    ``AI: No fit signal`` on 2026-05-03 since the photo+Grok pipeline is
+    retired and the new state is grounded in site-crawl evidence, not
+    photos. The rescue path still accepts the legacy name for back-compat
+    (see ``LEGACY_REJECTED_STATUSES``).
     """
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     submitted_at = datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")
@@ -229,7 +245,7 @@ def reject_row_no_signal(
 
     if dry_run:
         print(
-            f"  [dry-run] row {rn} {shop!r}: would reject (no signal) -> AI: Photo rejected",
+            f"  [dry-run] row {rn} {shop!r}: would reject (no signal) -> {REJECTED_STATUS}",
             flush=True,
         )
         return True
@@ -239,7 +255,7 @@ def reject_row_no_signal(
         remark_ws,
         rn,
         shop,
-        "AI: Photo rejected",
+        REJECTED_STATUS,
         remark,
         SUBMITTED_BY_CIRCLE,
         submitted_at,
@@ -267,8 +283,9 @@ def promote_row_to_enrichment(
       - ``has_email=False`` → ``AI: Enrich with contact`` (Enrich runs to
         harvest the email, then promotes onward to Warm up prospect).
 
-    ``rescue=True`` indicates we're un-rejecting an AI: Photo rejected row
-    by site-crawl signal; the audit text reflects that.
+    ``rescue=True`` indicates we're un-rejecting a previously-rejected row
+    (current ``AI: No fit signal`` or legacy ``AI: Photo rejected``) by
+    site-crawl signal; the audit text reflects that.
     """
     target = PROMOTION_TARGET_STATUS_WARMUP if has_email else PROMOTION_TARGET_STATUS_ENRICH
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -277,7 +294,7 @@ def promote_row_to_enrichment(
     skip_note = "skip_enrich=true" if has_email else "skip_enrich=false"
     if rescue:
         remark = (
-            f"[circle-detect {stamp}] outcome=rescue_from_photo_rejection "
+            f"[circle-detect {stamp}] outcome=rescue_from_no_fit_signal "
             f"matched={matched_str} {skip_note}"
         )
     else:
@@ -291,7 +308,10 @@ def promote_row_to_enrichment(
         )
 
     if dry_run:
-        action = "rescue from AI: Photo rejected" if rescue else "promote from Research"
+        action = (
+            f"rescue from {REJECTED_STATUS} (or legacy)"
+            if rescue else "promote from Research"
+        )
         print(
             f"  [dry-run] row {rn} {shop!r}: would {action} -> {target}",
             flush=True,
@@ -342,20 +362,21 @@ def main() -> None:
     p.add_argument(
         "--no-promote",
         action="store_true",
-        help="Disable ALL promotion/rescue when Hosts Circles=Yes. Prevents Research → AI: Enrich with contact, and prevents rescue of AI: Photo rejected / AI: Enrich — manual / AI: Photo needs review rows.",
+        help="Disable ALL promotion/rescue when Hosts Circles=Yes. Prevents Research → AI: Enrich with contact, and prevents rescue of AI: No fit signal (or legacy AI: Photo rejected) / AI: Enrich — manual / AI: Photo needs review rows.",
     )
     p.add_argument(
         "--no-rescue-rejected",
         action="store_true",
-        help="Disable re-evaluation of AI: Photo rejected rows. Default is to "
-        "rescue: crawl their sites and promote any whose Hosts Circles comes "
-        "back as Yes. Default-on so existing photo-rejected rows (which were "
-        "never crawled by site keyword) get re-evaluated under the new criteria.",
+        help="Disable re-evaluation of AI: No fit signal (or legacy AI: Photo "
+        "rejected) rows. Default is to rescue: crawl their sites and promote "
+        "any whose Hosts Circles comes back as Yes. Default-on so legacy "
+        "rows (which were never crawled by site keyword) get re-evaluated "
+        "under the new criteria.",
     )
     p.add_argument(
         "--no-reject-no-signal",
         action="store_true",
-        help="Disable Research -> AI: Photo rejected when the site crawl "
+        help="Disable Research -> AI: No fit signal when the site crawl "
         "succeeds but finds no qualifying keywords. Default is to reject — "
         "this is the simplification that retires the photo+Grok rubric "
         "(which used to gate Research -> rejected). Pass this flag to keep "
@@ -450,12 +471,17 @@ def main() -> None:
                 promote_count += 1
                 if not args.dry_run:
                     time.sleep(max(0.0, args.sleep_write))
-            elif cur_status in (PROMOTABLE_FROM_REJECTED, PROMOTABLE_FROM_MANUAL, PROMOTABLE_FROM_NEEDS_REVIEW):
-                # Rescue dead-end rows: photo-rejected, enrichment-gave-up, or
-                # photo-needs-review. All three are stuck states where a clear
+            elif (
+                cur_status in PROMOTABLE_FROM_REJECTED_STATUSES
+                or cur_status == PROMOTABLE_FROM_MANUAL
+                or cur_status == PROMOTABLE_FROM_NEEDS_REVIEW
+            ):
+                # Rescue dead-end rows: no-fit-signal (current name) OR
+                # legacy AI: Photo rejected OR enrichment-gave-up OR
+                # photo-needs-review. All are stuck states where a clear
                 # circle-hosting signal on the website is strong enough to
                 # fast-track back into the pipeline.
-                if cur_status == PROMOTABLE_FROM_REJECTED and not rescue_rejected:
+                if cur_status in PROMOTABLE_FROM_REJECTED_STATUSES and not rescue_rejected:
                     pass  # user opted out of rejected rescue
                 else:
                     promote_row_to_enrichment(
@@ -466,10 +492,9 @@ def main() -> None:
                     if not args.dry_run:
                         time.sleep(max(0.0, args.sleep_write))
         elif not hits and reject_no_signal and cur_status == PROMOTABLE_FROM_RESEARCH and not args.no_promote:
-            # Site crawled OK + zero matches → mark as photo-rejected
-            # (the status name is preserved for back-compat with downstream
-            # filters; meaning under new model is "site shows no qualifying
-            # signals," which retires the photo+Grok rubric).
+            # Site crawled OK + zero matches → mark as AI: No fit signal
+            # (renamed from legacy "AI: Photo rejected" on 2026-05-03;
+            # both names are read in the rescue path for back-compat).
             reject_row_no_signal(ws, remark_ws, ri, shop, dry_run=args.dry_run)
             reject_count += 1
             if not args.dry_run:
@@ -502,8 +527,12 @@ def main() -> None:
                 swept_promote += 1
                 if not args.dry_run:
                     time.sleep(max(0.0, args.sleep_write))
-            elif status in (PROMOTABLE_FROM_REJECTED, PROMOTABLE_FROM_MANUAL, PROMOTABLE_FROM_NEEDS_REVIEW):
-                if status == PROMOTABLE_FROM_REJECTED and not rescue_rejected:
+            elif (
+                status in PROMOTABLE_FROM_REJECTED_STATUSES
+                or status == PROMOTABLE_FROM_MANUAL
+                or status == PROMOTABLE_FROM_NEEDS_REVIEW
+            ):
+                if status in PROMOTABLE_FROM_REJECTED_STATUSES and not rescue_rejected:
                     pass
                 else:
                     promote_row_to_enrichment(
