@@ -536,9 +536,12 @@ def run_one_shop(
                 print("--- Remarks (preview) ---")
                 print(remarks)
                 return
+            # 2026-05-03: write the renamed status. Was "AI: Photo rejected";
+            # now "AI: No fit signal" since the photo+Grok rubric is retired
+            # and the meaning is now "site shows no qualifying signals".
             append_dapp_remark_and_apply(
                 hit_ws, remark_ws, sheet_row, name,
-                "AI: Photo rejected", remarks,
+                "AI: No fit signal", remarks,
                 SUBMITTED_BY_GATE_SKIP, submitted_at, submission_id,
             )
             return
@@ -573,7 +576,14 @@ def run_one_shop(
         ctx = f"Shop: {name}. Address: {addr}, {city}, {state}. place_id: {place_id}."
         grok = grok_photo_rubric(paths, ctx)
         ai_status = (grok.get("recommended_hit_list_status") or "").strip()
-        if ai_status not in ("AI: Shortlisted", "AI: Photo rejected", "AI: Photo needs review"):
+        # 2026-05-03 rename: Grok's prompt still uses the legacy "AI: Photo
+        # rejected" label, so map it to the new canonical "AI: No fit signal"
+        # before writing. Other legacy labels stay as-is (this script is
+        # manual-only / debug after the cron retirement, so keeping the
+        # photo-review-specific labels is fine).
+        if ai_status == "AI: Photo rejected":
+            ai_status = "AI: No fit signal"
+        if ai_status not in ("AI: Shortlisted", "AI: No fit signal", "AI: Photo needs review"):
             ai_status = "AI: Photo needs review"
         photo_count = len(paths)
     else:

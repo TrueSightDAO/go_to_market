@@ -47,12 +47,24 @@ STATUSES: list[tuple[str, str]] = [
         "Machine thought storefront photos look on‑brand. You review; promote to Shortlisted or choose AI: Enrich with contact / reject paths.",
     ),
     (
+        "AI: No fit signal",
+        "Site was crawled, no qualifying keywords (cacao ceremony / women's "
+        "circle / sound bath / etc.) found. Replaces the legacy "
+        "'AI: Photo rejected' state from 2026-05-03 onward. Recoverable: a "
+        "future re-crawl that finds keywords promotes this row back to "
+        "AI: Enrich with contact via the rescue path.",
+    ),
+    (
         "AI: Photo rejected",
-        "Machine flagged photos as a weak fit (from imagery). You confirm Rejected / Not Appropriate or override if you disagree.",
+        "LEGACY (pre-2026-05-03): the old photo+Grok rubric flagged this row "
+        "as a weak fit from imagery. The rubric is retired; rows still in this "
+        "state get re-evaluated by the site-crawl rescue path (or migrate to "
+        "AI: No fit signal once crawled).",
     ),
     (
         "AI: Photo needs review",
-        "Machine could not decide from photos. You look at images and pick the next status.",
+        "LEGACY (pre-2026-05-03): the photo rubric couldn't decide. No "
+        "automation reaches this state any more; manual triage only.",
     ),
     (
         "AI: Enrich with contact",

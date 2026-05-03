@@ -82,7 +82,7 @@ Row **1** sets the header labels (e.g. `0 sends`, `1 send`, `2 sends`, …, `7+ 
 Rows with **Status = Research** are the default input for **`scripts/hit_list_research_photo_review.py`** (see also **`agentic_ai_context/WORKSPACE_CONTEXT.md`** — bullets under *Hit List — Status = Research*).
 
 1. **Places:** find + details + download up to **5** listing photos (`maxwidth` 1200). Requires **`GOOGLE_MAPS_API_KEY`** (server-usable key) in **`market_research/.env`**.
-2. **Vision:** **Grok** returns JSON → suggested status **`AI: Shortlisted`**, **`AI: Photo rejected`**, or **`AI: Photo needs review`** (`GROK_API_KEY`).
+2. **Vision:** **Grok** returns JSON → suggested status **`AI: Shortlisted`**, **`AI: No fit signal`** (renamed from legacy **`AI: Photo rejected`** on 2026-05-03; the script remaps Grok's old label automatically), or **`AI: Photo needs review`** (`GROK_API_KEY`). Note that the **cron path** that consumed this output is **retired** (PR #101); only manual `workflow_dispatch` triggers reach this code.
 3. **DApp Remarks:** append a row; column **Remarks** (D) is **plain text with blank lines** between sections (Location, Google Places review, bullet lists, model summary) so operators can enable **wrap** in Sheets and read it like mini memo.
 4. **Hit List:** status and **Sales Process Notes** updated in one pass (same semantics as **`physical_stores/process_dapp_remarks.py`**), and the new **DApp Remarks** row is marked **Processed**.
 
