@@ -123,6 +123,9 @@ data/hit_list.csv
 data/hit_list.csv.backup_*
 data/place_photos/
 
+# Local script outputs (one-shot HTML previews, batch artifacts, etc.)
+scripts/output/
+
 # Node.js
 node_modules/
 npm-debug.log*
