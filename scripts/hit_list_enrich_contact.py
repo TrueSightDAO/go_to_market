@@ -787,14 +787,40 @@ def main() -> None:
     fill_skipped = 0
     fill_resolved_notes = 0
     fill_cap = 0 if args.no_fill_gaps else max(0, args.fill_gaps_limit)
+    # Independent attempt cap so a queue of N gappy rows whose Place Details
+    # all return empty (rate-limit, NOT_FOUND, etc.) doesn't keep iterating
+    # all 666 rows trying to find one that fills. Default: 3x fill_cap so a
+    # legitimate run with some misses still completes.
+    fill_attempt_cap = max(fill_cap * 3, 50)
     if fill_cap > 0:
         idx_notes = i_notes  # 0-based Notes column
         print(
-            f"Fill-gap sweep: cap={fill_cap} resolve_missing_pid={bool(args.resolve_missing_place_id)}",
+            f"Fill-gap sweep: cap={fill_cap} (attempt-cap={fill_attempt_cap}) "
+            f"resolve_missing_pid={bool(args.resolve_missing_place_id)}",
             flush=True,
         )
+        # Imported lazily so this module loads even when places_cache isn't on path.
+        try:
+            from places_cache import is_rate_limited
+        except Exception:  # pragma: no cover
+            def is_rate_limited() -> bool:
+                return False
+        fill_attempts = 0
         for ri, raw_row in enumerate(rows[1:], start=2):
             if fill_done >= fill_cap:
+                break
+            if fill_attempts >= fill_attempt_cap:
+                print(
+                    f"  [fill] hit attempt-cap ({fill_attempt_cap}); bailing the rest of the sweep",
+                    flush=True,
+                )
+                break
+            if is_rate_limited():
+                print(
+                    "  [fill] places_cache circuit breaker tripped (Places API rate-limited); "
+                    "bailing the rest of the sweep",
+                    flush=True,
+                )
                 break
             if ri in contact_processed_rows:
                 continue
@@ -841,6 +867,7 @@ def main() -> None:
                 continue
 
             assert pid is not None
+            fill_attempts += 1
             place_res = place_details_full(mkey, pid)
             time.sleep(0.15)
             if not place_res:
