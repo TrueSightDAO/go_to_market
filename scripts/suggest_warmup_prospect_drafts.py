@@ -729,6 +729,7 @@ def create_reply_drafts_for_replied_prospects(
             notes,
             "0",
             "0",
+            msg_id,
         ]
         created_rows.append(row_data)
         n_created += 1
@@ -1306,6 +1307,7 @@ def main() -> None:
             notes,
             "0",
             "0",
+            msg_id,
         ]
         created_rows.append(row)
         n_made += 1

@@ -131,6 +131,7 @@ SUGGESTIONS_HEADERS = [
     "notes",
     "Open",
     "Click through",
+    "gmail_message_id",
 ]
 
 
@@ -1411,6 +1412,7 @@ def main() -> None:
             notes,
             "0",
             "0",
+            msg_id,
         ]
         created_rows.append(row)
         n_made += 1
