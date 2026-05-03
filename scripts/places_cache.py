@@ -236,8 +236,38 @@ def _write_cached_record(place_id: str, record: dict, prior_sha: str | None) -> 
     return False
 
 
+# Process-level circuit breaker: once the Places API tells us we're rate
+# limited (OVER_QUERY_LIMIT) or quota-blocked, stop hammering it for the
+# rest of this process. Otherwise a script with a long row queue will
+# burn through the entire queue making failed live calls — every miss
+# returning "" because the cache wasn't populated, then the next miss
+# hitting the same wall. Reset by restarting the process; until then
+# all cached_place_details() callers get an empty result without a live
+# call, and the caller can choose to bail or queue for later.
+_RATE_LIMITED = False
+
+
+def is_rate_limited() -> bool:
+    """True after any live Places call returned OVER_QUERY_LIMIT or REQUEST_DENIED.
+
+    Callers running long sweeps should check this between iterations and
+    bail out — there's no point continuing to attempt live calls once the
+    quota wall is up.
+    """
+    return _RATE_LIMITED
+
+
 def _live_place_details(api_key: str, place_id: str, fields: tuple[str, ...]) -> dict:
-    """Hit Places Details API; return the `result` dict or {} on non-OK."""
+    """Hit Places Details API; return the `result` dict or {} on non-OK.
+
+    On OVER_QUERY_LIMIT / REQUEST_DENIED, also flips the process-level
+    rate-limit circuit breaker so subsequent calls in the same process
+    return empty without re-hitting the API.
+    """
+    global _RATE_LIMITED
+    if _RATE_LIMITED:
+        return {}
+
     params = {
         "place_id": place_id,
         "fields": ",".join(fields),
@@ -254,13 +284,26 @@ def _live_place_details(api_key: str, place_id: str, fields: tuple[str, ...]) ->
         )
         return {}
     data = r.json()
-    if data.get("status") != "OK":
-        # Don't cache non-OK responses (NOT_FOUND, INVALID_REQUEST, etc.).
+    status = data.get("status")
+    if status == "OK":
+        return data.get("result") or {}
+    # Rate limit / quota wall: trip the circuit breaker so the rest of the
+    # process stops trying. The error is otherwise unbounded — without this,
+    # a script with N rows will make N failed live calls.
+    if status in ("OVER_QUERY_LIMIT", "REQUEST_DENIED", "RESOURCE_EXHAUSTED"):
+        _RATE_LIMITED = True
         sys.stderr.write(
-            f"places_cache: live status {data.get('status')!r} for {place_id}\n"
+            f"places_cache: live status {status!r} for {place_id} — "
+            f"tripping process-level rate-limit circuit breaker; subsequent "
+            f"cache misses in this process will return empty without a live call.\n"
         )
         return {}
-    return data.get("result") or {}
+    # Other non-OK (NOT_FOUND, INVALID_REQUEST, ZERO_RESULTS, etc.) — log and
+    # don't cache; let the caller skip this row and continue.
+    sys.stderr.write(
+        f"places_cache: live status {status!r} for {place_id}\n"
+    )
+    return {}
 
 
 def _record_satisfies(record: dict, needed: tuple[str, ...]) -> bool:
