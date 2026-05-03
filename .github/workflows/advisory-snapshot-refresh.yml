@@ -118,6 +118,13 @@ jobs:
           fetch-depth: 100
           token: ${{ secrets.ORACLE_ADVISORY_PUSH_TOKEN }}
 
+      - name: Checkout governor_chatbot_service
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/governor_chatbot_service
+          path: repos/governor_chatbot_service
+          fetch-depth: 100
+
       - name: Checkout ecosystem_change_logs (for BASE.md + archives + reminders)
         uses: actions/checkout@v4
         with:
