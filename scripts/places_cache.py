@@ -257,16 +257,35 @@ def is_rate_limited() -> bool:
     return _RATE_LIMITED
 
 
-def _live_place_details(api_key: str, place_id: str, fields: tuple[str, ...]) -> dict:
-    """Hit Places Details API; return the `result` dict or {} on non-OK.
+# Statuses Google returns that mean "definitive negative — Google has
+# nothing for this place_id, hitting again will return the same answer."
+# Cached as negative records so the next call short-circuits without a
+# live API hit.
+_NEGATIVE_STATUSES = ("NOT_FOUND", "ZERO_RESULTS", "INVALID_REQUEST")
 
-    On OVER_QUERY_LIMIT / REQUEST_DENIED, also flips the process-level
-    rate-limit circuit breaker so subsequent calls in the same process
-    return empty without re-hitting the API.
+# Statuses that mean "we hit the rate / quota wall." NOT cached because
+# the data might be available after quota refreshes. Tripping the
+# circuit breaker keeps the rest of this process from making more
+# wasted live calls.
+_RATE_LIMIT_STATUSES = ("OVER_QUERY_LIMIT", "REQUEST_DENIED", "RESOURCE_EXHAUSTED")
+
+
+def _live_place_details(api_key: str, place_id: str, fields: tuple[str, ...]) -> tuple[dict, str]:
+    """Hit Places Details API; return ``(result_dict, google_status)``.
+
+    Statuses:
+      - ``"OK"`` — result dict is non-empty (may have missing fields).
+      - One of ``_NEGATIVE_STATUSES`` — definitive: Google has nothing.
+        Result dict is ``{}``; caller should cache as a negative record.
+      - One of ``_RATE_LIMIT_STATUSES`` — rate-limited. Trips the
+        process-level circuit breaker so subsequent calls return empty
+        without hitting the API.
+      - ``""`` — transport failure (HTTP non-200, RequestException, etc.).
+        Caller should NOT cache; this is transient.
     """
     global _RATE_LIMITED
     if _RATE_LIMITED:
-        return {}
+        return {}, ""
 
     params = {
         "place_id": place_id,
@@ -277,33 +296,36 @@ def _live_place_details(api_key: str, place_id: str, fields: tuple[str, ...]) ->
         r = requests.get(PLACES_DETAILS_URL, params=params, timeout=30)
     except requests.RequestException as e:
         sys.stderr.write(f"places_cache: live call failed for {place_id}: {e}\n")
-        return {}
+        return {}, ""
     if r.status_code != 200:
         sys.stderr.write(
             f"places_cache: live HTTP {r.status_code} for {place_id}: {r.text[:200]}\n"
         )
-        return {}
+        return {}, ""
     data = r.json()
-    status = data.get("status")
+    status = data.get("status") or ""
     if status == "OK":
-        return data.get("result") or {}
-    # Rate limit / quota wall: trip the circuit breaker so the rest of the
-    # process stops trying. The error is otherwise unbounded — without this,
-    # a script with N rows will make N failed live calls.
-    if status in ("OVER_QUERY_LIMIT", "REQUEST_DENIED", "RESOURCE_EXHAUSTED"):
+        return (data.get("result") or {}), "OK"
+    if status in _RATE_LIMIT_STATUSES:
         _RATE_LIMITED = True
         sys.stderr.write(
             f"places_cache: live status {status!r} for {place_id} — "
             f"tripping process-level rate-limit circuit breaker; subsequent "
             f"cache misses in this process will return empty without a live call.\n"
         )
-        return {}
-    # Other non-OK (NOT_FOUND, INVALID_REQUEST, ZERO_RESULTS, etc.) — log and
-    # don't cache; let the caller skip this row and continue.
+        return {}, status
+    if status in _NEGATIVE_STATUSES:
+        # Definitive negative — caller will cache so we never re-pay.
+        sys.stderr.write(
+            f"places_cache: live status {status!r} for {place_id} — "
+            f"caching as negative record so future calls short-circuit.\n"
+        )
+        return {}, status
+    # Unknown status — log and don't cache; treat as transient.
     sys.stderr.write(
-        f"places_cache: live status {status!r} for {place_id}\n"
+        f"places_cache: live status {status!r} for {place_id} (unknown — not cached)\n"
     )
-    return {}
+    return {}, ""
 
 
 def _record_satisfies(record: dict, needed: tuple[str, ...]) -> bool:
@@ -316,37 +338,68 @@ def cached_place_details(
 ) -> dict:
     """Core lookup. Returns the Places Details `result` dict.
 
-    Cache-hit path: if a cached record exists and ``fields_requested`` covers
-    ``fields``, return cached ``result`` (no live call).
+    Cache-hit path:
+      - If cached record's ``google_status`` is a definitive negative
+        (NOT_FOUND / ZERO_RESULTS / INVALID_REQUEST), return ``{}`` immediately
+        — no live call, no re-pay.
+      - If cached ``fields_requested`` covers ``fields``, return cached
+        ``result`` (no live call).
 
-    Cache-miss path: fetch live for the union of cached + requested fields,
-    write back, return the fresh ``result``.
+    Cache-miss path:
+      - Fetch live for the union of cached + requested fields.
+      - Write back: a successful OK becomes a positive record; a definitive
+        negative status becomes a negative record so future calls
+        short-circuit; rate-limited / transport-failure responses are NOT
+        cached (might succeed later).
     """
     pid = (place_id or "").strip()
     if not pid:
         return {}
 
     cached_rec, sha = (None, None) if refresh else _fetch_cached_record(pid)
-    if cached_rec and _record_satisfies(cached_rec, fields):
-        return cached_rec.get("result") or {}
+    if cached_rec:
+        cached_status = cached_rec.get("google_status", "OK")
+        # Definitive-negative cache hit → don't bother the API again.
+        if cached_status in _NEGATIVE_STATUSES:
+            return {}
+        if cached_status == "OK" and _record_satisfies(cached_rec, fields):
+            return cached_rec.get("result") or {}
 
     # On a partial-coverage hit, fetch the union so we don't lose existing fields.
     union = tuple(sorted(set(fields) | set((cached_rec or {}).get("fields_requested") or [])))
 
-    fresh = _live_place_details(api_key, pid, union)
-    if not fresh:
-        # Live call failed; if we have any cache, return it as best-effort.
-        return (cached_rec or {}).get("result") or {}
+    fresh, status = _live_place_details(api_key, pid, union)
 
-    record = {
-        "place_id": pid,
-        "name": fresh.get("name", ""),
-        "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "fields_requested": list(union),
-        "result": fresh,
-    }
-    _write_cached_record(pid, record, sha)
-    return fresh
+    if status == "OK" and fresh:
+        record = {
+            "place_id": pid,
+            "name": fresh.get("name", ""),
+            "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "fields_requested": list(union),
+            "google_status": "OK",
+            "result": fresh,
+        }
+        _write_cached_record(pid, record, sha)
+        return fresh
+
+    if status in _NEGATIVE_STATUSES:
+        # Cache the definitive negative so the next call short-circuits.
+        # Only write if we don't already have a (better) cached record.
+        if not cached_rec:
+            negative_record = {
+                "place_id": pid,
+                "name": "",
+                "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "fields_requested": list(union),
+                "google_status": status,
+                "result": None,
+            }
+            _write_cached_record(pid, negative_record, sha)
+        return {}
+
+    # status is "" (transport / unknown) or rate-limited — DO NOT cache.
+    # If we have any positive cache, return it as best-effort.
+    return (cached_rec or {}).get("result") or {}
 
 
 def cached_place_details_lite(api_key: str, place_id: str, *, refresh: bool = False) -> dict:
