@@ -1,17 +1,24 @@
-# Automated Hit List "Research" photo review (Google Places + Grok vision).
-# Processes up to N shops per run to stay within reasonable time and API quotas.
+# Hit List "Research" photo review (Google Places + Grok vision).
 #
-# Required repository secrets (Settings → Secrets → Actions):
-#   GOOGLE_CREDENTIALS_JSON — same service account JSON as other market_research workflows (Sheets editor on Hit List)
-#   GOOGLE_MAPS_API_KEY — Places + Place Photos (must allow GitHub Actions egress IPs or be unrestricted for server use)
-#   GROK_API_KEY — xAI key with vision-capable model access (e.g. grok-4-1-fast-non-reasoning)
+# RETIRED FROM CRON 2026-05-03 — this pipeline is no longer the qualifier.
+# detect_circle_hosting_retailers.py (cron at :50 hourly) now handles
+# Research-row qualification cheaply via free site keyword crawl:
+#   - hits → AI: Warm-up needed (if email known) or AI: Enrich with contact
+#   - no hits + crawled OK → AI: Photo rejected (status name preserved for
+#     back-compat; meaning is "site shows no qualifying signals")
 #
-# Sheets / API quota: scheduled runs default to 20 shops/hour; use workflow_dispatch to override.
+# Photos no longer drive qualification. The site crawl already tells us
+# whether a row is a fit, and photos add minimal context to the warm-up
+# draft (see in-thread Buck's Spices reply for evidence).
 #
-# Hourly schedule processes rows with Status = Research only (see script). Overlap: one run
-# at a time per concurrency group so two hours do not double-write.
+# This workflow stays defined as workflow_dispatch only so the photo review
+# can be triggered manually if ever needed (e.g. spot-debugging Grok rubric
+# regressions on a specific shop). The cron schedule that was here
+# (`0 * * * *` — Hourly) was the single largest Places API line item until
+# 2026-05-03 because it called Find Place + Place Details + up to 5 Place
+# Photos per shop at $7/1k each.
 
-name: Hit List Research photo review
+name: Hit List Research photo review (manual only — retired from cron)
 
 on:
   workflow_dispatch:
@@ -24,9 +31,6 @@ on:
         description: Optional shop name substring (bypasses Research-only filter)
         required: false
         default: ""
-  schedule:
-    # Every hour at :00 UTC — pick up new Research rows (up to default limit per run)
-    - cron: "0 * * * *"
 
 concurrency:
   group: hit-list-research-photo-review
