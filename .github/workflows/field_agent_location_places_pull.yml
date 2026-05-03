@@ -17,8 +17,12 @@ on:
         required: false
         default: "false"
   schedule:
-    # Every hour at :20 UTC (staggered from on-the-hour Hit List jobs)
-    - cron: "20 * * * *"
+    # Daily at 08:00 UTC — batch-process all field-agent GPS drops from the
+    # previous day. Hourly was wasteful: locations are bursty (only added when
+    # the DApp stores_nearby.html is used) and Nearby Search is the most
+    # expensive Places endpoint ($32/1k). Daily saves ~96% of CI minutes
+    # with no meaningful latency loss for a discovery pipeline.
+    - cron: "0 8 * * *"
 
 concurrency:
   group: field-agent-location-places-pull
