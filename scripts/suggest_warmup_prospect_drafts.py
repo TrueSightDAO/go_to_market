@@ -437,6 +437,17 @@ def promote_warmup_replies(
     status_col = status_i + 1
     n = 0
 
+    # Resolve the AI/Prospect Replied label id once. Used to tag the inbound
+    # message so the Gmail-side state matches the Hit List Status flip — see
+    # HIT_LIST_STATE_MACHINE.md "AI: Prospect replied" row. Best-effort: a
+    # label-create failure logs and lets the Status flip proceed anyway.
+    replied_label_id: str | None = None
+    if not dry_run:
+        try:
+            replied_label_id = smf.ensure_user_label_id(gsvc, REPLIED_GMAIL_LABEL)
+        except Exception as e:
+            print(f"  WARNING: could not resolve {REPLIED_GMAIL_LABEL!r} label: {e}")
+
     for r, row in enumerate(values[1:], start=2):
         if smf.cell(row, status_i) != HIT_STATUS_WARMUP:
             continue
@@ -478,6 +489,21 @@ def promote_warmup_replies(
                     except Exception as e:
                         print(f"  WARNING: DApp Remarks append failed for row {r}: {e}")
                 hit_ws.update_cell(r, status_col, HIT_STATUS_REPLIED)
+
+                # Tag the inbound message with AI/Prospect Replied so Gmail-side
+                # state matches Hit List. Idempotent — Gmail no-ops on re-add.
+                inbound_msg_id = reply.get("message_id") or ""
+                if replied_label_id and inbound_msg_id:
+                    try:
+                        gsvc.users().messages().modify(
+                            userId="me",
+                            id=inbound_msg_id,
+                            body={"addLabelIds": [replied_label_id]},
+                        ).execute()
+                        if verbose:
+                            print(f"  label   row {r} msg {inbound_msg_id}: +{REPLIED_GMAIL_LABEL!r}")
+                    except Exception as e:
+                        print(f"  WARNING: label apply failed for row {r} msg {inbound_msg_id}: {e}")
             n += 1
     return n
 
