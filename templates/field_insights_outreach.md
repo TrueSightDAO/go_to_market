@@ -54,7 +54,9 @@ match the store's profile or the prospect's reply.
 | Concern | Field-tested response |
 |---------|----------------------|
 | "Why consignment?" | Years of operation; consignment = deliberate partner onboarding for turbulent economy. |
-| "We already have a cacao supplier" | Different farms, different taste profiles — our cacao complements, doesn't compete. |
+| "We already have a cacao supplier" | Different farms, different taste profiles — our cacao complements, doesn't compete. Oscar's is deep European chocolate (buttery); Paulo's is smoky→floral. Multiple origins = more variety for their customers. |
+| "We import our own cacao directly" | Acknowledge their direct-trade model — it's impressive. Then frame as complementary: different farms, different regions, different taste experiences. This is a relationship play — don't push, plant the seed that variety adds value. |
+| "Brick & mortar is closed" | Ask if it's temporary or permanent. If temporary, ask when they plan to reopen and offer to follow up then. If permanent, close the row cleanly. |
 | "Allergies" | All cacao is lab-tested; offer to share lab reports. Field-tested: this defuses the conversation. |
 | "Payment reliability" | QR code traceability + transparent split. Demo the flow. |
 | "Is it produced in the US?" | Honest: Brazilian Amazon, name the farms. |
