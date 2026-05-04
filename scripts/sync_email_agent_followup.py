@@ -748,6 +748,52 @@ def pick_store_shop(target_rows: list[dict], to_email: str) -> tuple[str, str]:
     return "", ""
 
 
+def reconcile_drafts_status_to_sent(sa, sent_message_ids: set[str]) -> int:
+    """Flip Email Agent Drafts ``status`` from ``pending_review`` to ``sent``
+    for any row whose ``gmail_message_id`` is in ``sent_message_ids`` (the set
+    of all message ids logged as sent in Email Agent Follow Up after this run).
+
+    Why: Gmail-side label swap (review → sent) already happens in main(),
+    but the Email Agent Drafts row's ``status`` cell stays at
+    ``pending_review`` until the next ``suggest_warmup_prospect_drafts.py``
+    cron tick reconciles via Gmail-draft existence check. Closing that gap
+    here means every cron run keeps the sheet consistent with reality.
+
+    Idempotent — non-pending rows are skipped, no-op if nothing matches.
+    Returns the number of rows updated.
+    """
+    if not sent_message_ids:
+        return 0
+    sh = sa.open_by_key(SPREADSHEET_ID)
+    try:
+        ws = sh.worksheet(SUGGESTIONS_WS)
+    except gspread.WorksheetNotFound:
+        return 0
+    values = ws.get_all_values()
+    if len(values) < 2:
+        return 0
+    hdr = header_map(values[0])
+    i_status = hdr.get("status")
+    i_msg = hdr.get("gmail_message_id")
+    if i_status is None or i_msg is None:
+        return 0
+
+    status_col_a1 = gspread.utils.rowcol_to_a1(2, i_status + 1).rstrip("0123456789")  # column letter
+    cells_to_update: list[gspread.Cell] = []
+    for r_idx, row in enumerate(values[1:], start=2):
+        if cell(row, i_status) != "pending_review":
+            continue
+        mid = cell(row, i_msg)
+        if not mid or mid not in sent_message_ids:
+            continue
+        cells_to_update.append(gspread.Cell(r_idx, i_status + 1, "sent"))
+    if not cells_to_update:
+        return 0
+    # Single batch update keeps API calls low even when many rows drift.
+    ws.update_cells(cells_to_update, value_input_option="USER_ENTERED")
+    return len(cells_to_update)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync Gmail sent mail into Email Agent Follow Up.")
     parser.add_argument("--dry-run", action="store_true", help="Do not write to Sheets.")
@@ -956,6 +1002,16 @@ def main() -> None:
             swapped += 1
     if swapped:
         print(f"Label swaps completed: {swapped}")
+
+    # Reconcile Email Agent Drafts row status to match reality. Walks all
+    # pending_review rows whose gmail_message_id appears in Email Agent
+    # Follow Up (known_ids includes both pre-existing rows and the ones
+    # we just appended above) and flips them to ``sent``. Without this,
+    # rows drift indefinitely until suggest_warmup_prospect_drafts.py
+    # next runs its own Gmail-draft reconcile.
+    flipped = reconcile_drafts_status_to_sent(sa, known_ids)
+    if flipped:
+        print(f"Reconciled Email Agent Drafts: {flipped} row(s) pending_review → sent.")
 
 
 if __name__ == "__main__":
