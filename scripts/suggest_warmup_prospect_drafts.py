@@ -57,6 +57,8 @@ from email_agent_tracking import plain_text_to_html_for_email_agent
 from gmail_plain_body import extract_plain_body_from_payload
 from hit_list_dapp_remarks_sheet import append_dapp_remark_and_apply
 _WARMUP_REF = _REPO / "templates" / "warmup_outreach_reference.md"
+_FARM_TASTE_REF = _REPO / "templates" / "farm_taste_profiles.md"
+_FIELD_INSIGHTS_REF = _REPO / "templates" / "field_insights_outreach.md"
 _DEFAULT_PDF = _REPO / "retail_price_list" / "agroverse_wholesale_price_list_2026.pdf"
 _DEFAULT_PACKAGING_FRONT = _REPO / "retail_price_list" / "agroverse_packaging_front.jpeg"
 _DEFAULT_PACKAGING_BACK = _REPO / "retail_price_list" / "agroverse_packaging_back.jpeg"
@@ -199,6 +201,82 @@ def inbound_reply_details(
 
 # Backward-compatible alias
 inbound_from_partner_after = inbound_reply_details
+
+
+# ── auto-reply detection ────────────────────────────────────────────────────
+
+_AUTO_REPLY_PATTERNS: list[re.Pattern] = [
+    # Out-of-office / vacation
+    re.compile(r"\bout of (the )?office\b", re.IGNORECASE),
+    re.compile(r"\bout of town\b", re.IGNORECASE),
+    re.compile(r"\bon (vacation|leave|holiday)\b", re.IGNORECASE),
+    re.compile(r"\b(away from|not in) the office\b", re.IGNORECASE),
+    re.compile(
+        r"\bwill (return|be back) (on|after|in|by)\b", re.IGNORECASE
+    ),
+    # Auto-responders
+    re.compile(
+        r"\b(thank you for (contacting|reaching out|your (email|message|inquiry))"
+        r"|we (have )?received your (message|email|inquiry))\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(24[-– ]?48|48[-– ]?72) (hours|hrs)\b", re.IGNORECASE),
+    re.compile(r"\brespond within \d+ (hours|business days)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(due to (high|unexpected) (volume|demand)|"
+        r"experiencing (higher|a high) (than )?(normal|usual|expected) volume)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(calls? (will be|are) returned (in order|as soon|within)|"
+        r"leave a (voicemail|message))\b",
+        re.IGNORECASE,
+    ),
+    # Gmail vacation responder header pattern in body
+    re.compile(r"\b(auto[- ]?(reply|response|responder|generated)|vacation (responder|reply))\b", re.IGNORECASE),
+    # Very short no-effort reply (< 30 chars stripped, no question marks)
+]
+_AUTO_REPLY_MIN_WORDS = 4  # fewer words than this → almost certainly auto/non-reply
+_AUTO_REPLY_MIN_UNIQUE_WORDS = 3  # unique words (strips quoted original message noise)
+
+
+def is_auto_reply(body: str, subject: str = "") -> bool:
+    """Return True if the message looks like an auto-reply / out-of-office."""
+    if not body or not body.strip():
+        return True
+
+    # Check subject for auto-reply markers
+    subj_lower = subject.lower().strip()
+    for marker in ("auto:", "out of office:", "unavailable", "vacation:"):
+        if subj_lower.startswith(marker):
+            return True
+
+    # Strip quoted original message (common Gmail reply wrapper: "On Sun, May 3...")
+    stripped = body.strip()
+    on_wrote = re.search(r"^\s*>?\s*On .+ wrote:\s*$", stripped, re.MULTILINE)
+    if on_wrote:
+        stripped = stripped[: on_wrote.start()].strip()
+    # Also strip signature blocks that start with --
+    sig_cut = stripped.rfind("\n-- ")
+    if sig_cut > 0:
+        stripped = stripped[:sig_cut].strip()
+
+    # Very short or single-line non-question → not a real engagement
+    words = [w for w in stripped.split() if len(w) > 1]
+    unique = set(w.lower() for w in words)
+    has_question = "?" in stripped
+    if len(words) < _AUTO_REPLY_MIN_WORDS and not has_question:
+        return True
+    # Flat rejection with no engagement (e.g. "we are not interested, thanks")
+    if len(unique) < _AUTO_REPLY_MIN_UNIQUE_WORDS and not has_question:
+        return True
+
+    # Pattern match
+    for pat in _AUTO_REPLY_PATTERNS:
+        if pat.search(body):
+            return True
+
+    return False
 
 
 def find_warmup_thread_and_messages(
@@ -462,6 +540,34 @@ def promote_warmup_replies(
         after_ms = int(prev.timestamp() * 1000)
         reply = inbound_reply_details(gsvc, partner_email=em, after_ms=after_ms)
         if reply:
+            # Suppress auto-replies so they don't clutter the Prospect Replied state
+            if is_auto_reply(reply.get("body", ""), reply.get("subject", "")):
+                if verbose:
+                    print(f"  auto-reply row {r} {em}: detected, NOT promoting")
+                # Log as DApp Remarks for audit but don't flip status
+                if not dry_run and remarks_ws is not None:
+                    shop_name = smf.cell(row, shop_i) if shop_i is not None else ""
+                    try:
+                        append_dapp_remark_and_apply(
+                            hit_ws=hit_ws,
+                            remark_ws=remarks_ws,
+                            sheet_row=r,
+                            name=shop_name,
+                            ai_status=HIT_STATUS_WARMUP,  # keep current status
+                            remarks=(
+                                f"Auto-reply detected (not a real prospect reply). Not promoted.\n\n"
+                                f"Reply subject: {reply['subject']}\n"
+                                f"Reply date: {reply['date']}\n"
+                                f"Reply body:\n{reply['body']}"
+                            ),
+                            submitted_by="warmup_auto_reply_detected",
+                            submitted_at=reply['date'],
+                            submission_id=str(uuid.uuid4()),
+                        )
+                    except Exception as e:
+                        print(f"  WARNING: auto-reply DApp Remarks append failed for row {r}: {e}")
+                continue  # skip promotion for auto-replies
+
             if verbose:
                 print(f"  promote row {r} {em}: inbound after last send → {HIT_STATUS_REPLIED!r}")
             if not dry_run:
@@ -769,10 +875,22 @@ def create_reply_drafts_for_replied_prospects(
 
 
 def load_warmup_reference_text() -> str:
-    if not _WARMUP_REF.is_file():
+    return _load_file_text(_WARMUP_REF)
+
+
+def load_farm_taste_reference_text() -> str:
+    return _load_file_text(_FARM_TASTE_REF)
+
+
+def load_field_insights_reference_text() -> str:
+    return _load_file_text(_FIELD_INSIGHTS_REF)
+
+
+def _load_file_text(path: Path) -> str:
+    if not path.is_file():
         return ""
     try:
-        t = _WARMUP_REF.read_text(encoding="utf-8").strip()
+        t = path.read_text(encoding="utf-8").strip()
         if len(t) > 8000:
             t = t[:7999] + "…"
         return t
@@ -782,9 +900,21 @@ def load_warmup_reference_text() -> str:
 
 def grok_warmup_system_prompt() -> str:
     ref = load_warmup_reference_text()
+    farm = load_farm_taste_reference_text()
+    insights = load_field_insights_reference_text()
     ref_block = (
         f"Style reference (paraphrase only; do not copy; synthesize tone and structure):\n\n{ref}\n\n"
         if ref
+        else ""
+    )
+    farm_block = (
+        f"Farm & taste profile reference (use specific descriptors, never generic praise):\n\n{farm}\n\n"
+        if farm
+        else ""
+    )
+    insights_block = (
+        f"Field-tested qualitative insights from partner stores (reference when relevant):\n\n{insights}\n\n"
+        if insights
         else ""
     )
     return (
@@ -798,6 +928,14 @@ def grok_warmup_system_prompt() -> str:
         "- **Lead with mission impact:** purchases support **restoration of the Amazon rainforest**; **each bag "
         "plants a new tree**, **directly traceable** via the **unique QR code on that bag** (keep this accurate "
         "and prominent — at least one clear sentence early in the body).\n"
+        "- **Farm & taste story — reference the taste profiles above:** Agroverse sources from multiple "
+        "regenerative farms across the Brazilian Amazon (Oscar's in Bahia, Paulo's in Pará, etc.). "
+        "Each farm has a **distinct taste profile** — use the specific descriptors from the farm "
+        "reference, never generic “high-quality.” **Multiple farms = a feature retailers value**: "
+        "different taste profiles mean different customer experiences. When the store's profile "
+        "suggests ceremonial use, lead with Oscar's (deep European chocolate, buttery). When "
+        "apothecary/earthy, lead with Paulo's (smoky→floral). **Mention 1–2 farms, not all of them.** "
+        "Frame as: offering their customers variety.\n"
         "- **Commercial fit:** say Agroverse is **flexible** and happy with **either** a **consignment-friendly** "
         "retail path **or** **wholesale / bulk** — present them as **parallel options**, not as a contrast "
         "(avoid lines like “while others choose wholesale for margins” or any implication that bulk is mainly "
@@ -825,6 +963,8 @@ def grok_warmup_system_prompt() -> str:
         "  garyjob@agroverse.shop\n"
         "- Subject: specific, warm, not spammy; include shop name if known. Under ~90 characters.\n"
         + ref_block
+        + farm_block
+        + insights_block
     )
 
 
@@ -955,18 +1095,22 @@ def warmup_body_template(shop_name: str) -> str:
     shop = shop_name or "your shop"
     return (
         f"Hi —\n\n"
-        f"I’m Gary with Agroverse (farm-linked ceremonial cacao). I’m reaching out to {shop} because our model ties "
-        f"every sale to **Amazon rainforest restoration**: **each bag plants a new tree**, and the **unique QR code "
-        f"on that bag** links to **direct traceability** for that planting.\n\n"
+        f"I'm Gary with Agroverse. We work with regenerative cacao farms across the Brazilian Amazon — "
+        f"Oscar's Farm in Bahia (deep European-chocolate profile, buttery and smooth) and Paulo's Farm in "
+        f"the heart of the Pará Amazon (smoky, earthy, unfolding into delicate floral notes). Every "
+        f"bag sold plants a new tree, directly traceable via the unique QR code on each bag.\n\n"
         f"30-second proof of the restoration in motion: https://www.instagram.com/p/DJqW8TRtJK3/ — watch on "
         f"your phone, see the actual tree planting and the satellite imagery the QR code unlocks for customers.\n\n"
-        f"We’re **flexible on structure** — **either** **consignment-friendly** retail **or** **wholesale / bulk** "
-        f"works on our side; I’ve attached our **wholesale price list PDF** so you can skim SKUs and tiers, "
-        f"plus **two photos of the packaging** (front and back) so you can picture how it sits on shelf. "
+        f"We're **flexible on structure** — **either** **consignment-friendly** retail **or** **wholesale / bulk** "
+        f"works on our side; I've attached our **wholesale price list PDF** so you can skim SKUs and tiers, "
+        f"plus **two photos of the packaging** (front and back) so you can picture how it sits on shelf.\n\n"
+        f"I'm reaching out to {shop} because we believe offering different taste profiles "
+        f"creates a richer experience for your customers — each farm's cacao is distinct, and variety "
+        f"is what keeps a shelf interesting.\n\n"
         f"For partner-shop shelf photos and the current U.S. stockist list, see "
         f"https://agroverse.shop/wholesale — that's the visual companion to the PDF.\n\n"
-        f"No need to meet in person on my side; happy to answer by email or on a quick call if that’s easier. "
-        f"If you tell me which path you’d rather explore first (consignment vs bulk), I can point you to the "
+        f"No need to meet in person on my side; happy to answer by email or on a quick call if that's easier. "
+        f"If you tell me which path you'd rather explore first (consignment vs bulk), I can point you to the "
         f"lightest next step.\n\n"
         f"Thanks,\n"
         f"Gary\n"
