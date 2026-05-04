@@ -1,8 +1,14 @@
-# Gmail sent → "Email Agent Follow Up" tab + warm-up reply promotion.
+# Gmail sent → "Email Agent Follow Up" tab + warm-up reply promotion + orphan-draft reconcile.
 # Schedule: every hour (`cron: '0 * * * *'`).
 #   1. sync_email_agent_followup.py — refreshes Email Agent Follow Up from Gmail sent mail
+#      (also flips Email Agent Drafts row status pending_review → sent for any row whose
+#      gmail_message_id is in Follow Up — closes the manual-Gmail-send drift loop).
 #   2. suggest_warmup_prospect_drafts.py --reply-promotion-only — promotes AI: Warm up prospect →
-#      AI: Prospect replied when Gmail shows inbound from the prospect after the last logged send
+#      AI: Prospect replied when Gmail shows inbound from the prospect after the last logged send.
+#      Also tags the inbound message with the AI/Prospect Replied Gmail label.
+#   3. reconcile_orphan_reply_drafts.py — for any Gmail draft on a thread that already wears
+#      AI/Prospect Replied (operator hit Reply manually in Gmail UI), apply the label to the
+#      outbound draft + append an Email Agent Drafts row so the DApp Prospects tab surfaces it.
 # Code path: `scripts/sync_email_agent_followup.py` on the **default branch** — merge PRs that
 # change that script before expecting new columns (e.g. body_plain).
 # Optional one-time: run locally or add workflow_dispatch input `backfill_body_plain` to fill empty body_plain.
@@ -81,4 +87,15 @@ jobs:
             python scripts/suggest_warmup_prospect_drafts.py --reply-promotion-only --dry-run
           else
             python scripts/suggest_warmup_prospect_drafts.py --reply-promotion-only
+          fi
+
+      - name: Reconcile orphan reply drafts (manual Gmail Reply → AI/Prospect Replied label + sheet row)
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
+            python scripts/reconcile_orphan_reply_drafts.py --dry-run
+          else
+            python scripts/reconcile_orphan_reply_drafts.py
           fi
