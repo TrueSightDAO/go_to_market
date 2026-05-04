@@ -107,6 +107,21 @@ GROK_ENDPOINT = "https://api.x.ai/v1/chat/completions"
 DEFAULT_GROK_MODEL = "grok-3"
 DEFAULT_GROK_MAX_MESSAGES = 50
 DEFAULT_GROK_MAX_CONTEXT_CHARS = 120_000
+
+_FARM_TASTE_REF = _REPO / "templates" / "farm_taste_profiles.md"
+_FIELD_INSIGHTS_REF = _REPO / "templates" / "field_insights_outreach.md"
+
+
+def _load_ref_text(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        t = path.read_text(encoding="utf-8").strip()
+        if len(t) > 8000:
+            t = t[:7999] + "…"
+        return t
+    except OSError:
+        return ""
 PER_MESSAGE_BODY_CAP = 14_000
 
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
@@ -883,6 +898,18 @@ def fetch_conversation_history(
 
 
 def grok_system_prompt() -> str:
+    farm = _load_ref_text(_FARM_TASTE_REF)
+    insights = _load_ref_text(_FIELD_INSIGHTS_REF)
+    farm_block = (
+        f"Farm & taste profile reference (use specific descriptors, never generic praise):\n\n{farm}\n\n"
+        if farm
+        else ""
+    )
+    insights_block = (
+        f"Field-tested qualitative insights from partner stores (reference when relevant):\n\n{insights}\n\n"
+        if insights
+        else ""
+    )
     return (
         "You draft polished, send-ready follow-up emails for Gary at Agroverse — ceremonial cacao, "
         "retail / consignment (friendly terms). The merchant should need only light editing.\n"
@@ -890,12 +917,18 @@ def grok_system_prompt() -> str:
         '- Output **only** valid JSON: one object with keys "subject" and "body" (plain text, use \\n for newlines).\n'
         "- No markdown fences, no preamble, no placeholders like [Name] — use real details from context or a natural generic greeting (e.g. Hi —, or Hello —).\n"
         "- **In-person meetings / another store visit to meet:** Do **not** propose or invite an in-person meeting, a return visit to the shop to connect, "
-        "\"stopping by\" again, or \"circling back\" in person. Gary often passes through and is **not** reliably available to come back for a sit-down. "
+        "'stopping by' again, or 'circling back' in person. Gary often passes through and is **not** reliably available to come back for a sit-down. "
         "Prefer: **reply by email**, a **scheduled phone or video call**, or **delivery / logistics / paperwork** next steps — never frame the ask as meeting them on-site.\n"
         "- **Who to address:** If Hit List notes, DApp remarks, or the **email thread** show that **staff** provided the **owner**, **buyer**, **decision-maker**, "
         "or their **name** or **this email** as the right person to speak with, the message must speak **to that person** (salutation + body). "
         "Do **not** write as if the front-desk or staff contact is the primary reader when context clearly routes follow-up to **owner/buyer** (you may still "
         "thank staff briefly if natural).\n"
+        "- **Farm & taste story — reference the taste profiles above:** Agroverse sources from multiple "
+        "regenerative farms across the Brazilian Amazon. When relevant to the follow-up (samples were "
+        "dropped, taste was mentioned, store owner asked about products), name 1–2 specific farms with "
+        "their taste descriptors. Different farms = different taste profiles = variety customers value. "
+        "If the DApp Remarks mention a farm by name, use that farm. If samples of both Oscar's and "
+        "Paulo's were dropped, mention both and their distinct profiles.\n"
         "- **Body** structure: brief warm opening → 1–2 concrete sentences tying to **visit/DApp remarks** and/or **email thread** → "
         "one clear **call to action** (email reply with timing, **phone or video** call, samples, or paperwork — **never** in-person meetup) → "
         "short **signature block** on separate lines:\n"
@@ -905,6 +938,8 @@ def grok_system_prompt() -> str:
         "- Sound human and specific; weave in **DApp visit remarks** and thread facts when provided. Do not invent numbers, legal terms, or deals not in the context.\n"
         "- Subject: specific and scannable (shop name + short hook), not spammy. Under ~90 characters.\n"
         "- Length: about 120–220 words in body unless context demands shorter.\n"
+        + farm_block
+        + insights_block
     )
 
 
@@ -1049,8 +1084,14 @@ def draft_body_template(shop_name: str, snippets: list[str]) -> str:
     lines = [
         f"Hi —",
         "",
-        f"Following up on Agroverse ceremonial cacao and next steps for {shop} (consignment-friendly terms). "
-        f"I’m happy to answer questions by email or on a quick call — and to line up samples or simple paperwork — "
+        f"Following up on the ceremonial cacao samples and next steps for {shop} "
+        f"(consignment-friendly terms). The samples you tried are from two distinct farms: "
+        f"Oscar's Farm in Bahia (deep European chocolate, buttery and smooth — ceremonial-grade) "
+        f"and Paulo's Farm in the Pará Amazon (smoky, earthy, unfolding into delicate floral notes). "
+        f"Each farm's cacao has a unique taste profile, so customers get a different experience "
+        f"with each bag — variety is what keeps a shelf interesting.",
+        "",
+        f"I'm happy to answer questions by email or on a quick call — and to line up samples or simple paperwork — "
         f"without needing another in-person meeting on my side.",
         "",
     ]
