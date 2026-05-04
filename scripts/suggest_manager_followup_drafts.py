@@ -1074,6 +1074,116 @@ def draft_subject(shop_name: str) -> str:
     return f"Following up — {s} & Agroverse cacao"
 
 
+def _detect_and_log_followup_replies(
+    *,
+    gsvc: Any,
+    hit_ws: Any,
+    remarks_ws: Any,
+    log_ws: Any,
+    dry_run: bool,
+    verbose: bool,
+) -> int:
+    """Detect inbound replies to Manager Follow-up / Bulk Info Requested emails.
+
+    Checks Gmail for replies from each recipient after the last logged send.
+    Auto-replies are filtered. Real replies are logged to DApp Remarks.
+    Returns number of replies detected.
+    """
+    # Lazy import to avoid circular dependency (warmup imports this module)
+    from suggest_warmup_prospect_drafts import inbound_reply_details, is_auto_reply
+    import uuid as _uuid
+
+    if log_ws is None:
+        print("WARNING: Email Agent Follow Up missing — skip follow-up reply detection.")
+        return 0
+
+    last_sent = last_sent_utctime_per_to_email(log_ws)
+    values = hit_ws.get_all_values()
+    if len(values) < 2:
+        return 0
+    hdr = header_map(values[0])
+    status_i = hdr.get("Status")
+    email_i = hdr.get("Email")
+    shop_i = hdr.get("Shop Name")
+    if status_i is None or email_i is None:
+        return 0
+
+    n = 0
+    followup_statuses = {"Manager Follow-up", "Bulk Info Requested"}
+
+    for r, row in enumerate(values[1:], start=2):
+        status = cell(row, status_i).strip()
+        if status not in followup_statuses:
+            continue
+        em = normalize_email(cell(row, email_i))
+        if not em:
+            continue
+        prev = last_sent.get(em)
+        if prev is None:
+            if verbose:
+                print(f"  detect-skip row {r} {em}: no logged sent for follow-up")
+            continue
+        after_ms = int(prev.timestamp() * 1000)
+        reply = inbound_reply_details(gsvc, partner_email=em, after_ms=after_ms)
+        if not reply:
+            continue
+
+        if is_auto_reply(reply.get("body", ""), reply.get("subject", "")):
+            if verbose:
+                print(f"  detect-auto-reply row {r} {em}: auto-reply, not logging")
+            # Still log auto-replies for audit but mark clearly
+            if not dry_run and remarks_ws is not None:
+                shop_name = cell(row, shop_i) if shop_i is not None else ""
+                try:
+                    append_dapp_remark_and_apply(
+                        hit_ws=hit_ws,
+                        remark_ws=remarks_ws,
+                        sheet_row=r,
+                        name=shop_name,
+                        ai_status=status,
+                        remarks=(
+                            f"Auto-reply detected to follow-up email (not a real response).\n\n"
+                            f"Reply subject: {reply['subject']}\n"
+                            f"Reply date: {reply['date']}\n"
+                            f"Reply body:\n{reply['body']}"
+                        ),
+                        submitted_by="followup_auto_reply_detected",
+                        submitted_at=reply["date"],
+                        submission_id=str(_uuid.uuid4()),
+                    )
+                except Exception as e:
+                    print(f"  WARNING: auto-reply DApp Remarks append failed for row {r}: {e}")
+            continue
+
+        n += 1
+        shop_name = cell(row, shop_i) if shop_i is not None else ""
+        print(f"  FOLLOW-UP REPLY row {r} {em}: {reply.get('subject','')[:80]}")
+
+        if not dry_run and remarks_ws is not None:
+            try:
+                append_dapp_remark_and_apply(
+                    hit_ws=hit_ws,
+                    remark_ws=remarks_ws,
+                    sheet_row=r,
+                    name=shop_name,
+                    ai_status=status,
+                    remarks=(
+                        f"Prospect replied to follow-up email.\n\n"
+                        f"Reply subject: {reply['subject']}\n"
+                        f"Reply date: {reply['date']}\n"
+                        f"Reply body:\n{reply['body']}\n\n"
+                        f"Action: operator review recommended — consider reply draft or status update."
+                    ),
+                    submitted_by="followup_reply_detected",
+                    submitted_at=reply["date"],
+                    submission_id=str(_uuid.uuid4()),
+                )
+            except Exception as e:
+                print(f"  WARNING: follow-up reply DApp Remarks append failed for row {r}: {e}")
+
+    return n
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create Gmail follow-up drafts for Manager Follow-up leads.")
     parser.add_argument("--dry-run", action="store_true")
@@ -1140,6 +1250,14 @@ def main() -> None:
         default=DEFAULT_GROK_MAX_CONTEXT_CHARS,
         help="Max total characters of thread text sent to Grok.",
     )
+    parser.add_argument(
+        "--reply-promotion-only",
+        action="store_true",
+        help=(
+            "Only detect inbound replies to sent follow-up emails (Manager Follow-up + Bulk Info Requested). "
+            "Log to DApp Remarks; do not create any drafts. Use to catch replies between daily draft runs."
+        ),
+    )
     args = parser.parse_args()
 
     if args.max_drafts < 0:
@@ -1190,6 +1308,17 @@ def main() -> None:
         )
     latest_discard_utc = latest_discarded_utc_per_to_email(sugg_ws)
     now = datetime.now(timezone.utc)
+
+    if args.reply_promotion_only:
+        _detect_and_log_followup_replies(
+            gsvc=gsvc,
+            hit_ws=hit_ws,
+            remarks_ws=remarks_ws,
+            log_ws=log_ws,
+            dry_run=args.dry_run,
+            verbose=args.verbose,
+        )
+        return
 
     targets = load_hit_list_targets(hit_ws)
     if not targets:

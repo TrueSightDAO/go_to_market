@@ -99,3 +99,14 @@ jobs:
           else
             python scripts/reconcile_orphan_reply_drafts.py
           fi
+
+      - name: Detect follow-up replies (Manager Follow-up / Bulk Info Requested)
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
+            python scripts/suggest_manager_followup_drafts.py --reply-promotion-only --dry-run
+          else
+            python scripts/suggest_manager_followup_drafts.py --reply-promotion-only
+          fi
