@@ -333,6 +333,18 @@ def find_warmup_thread_and_messages(
 
 
 def grok_reply_system_prompt() -> str:
+    farm = load_farm_taste_reference_text()
+    insights = load_field_insights_reference_text()
+    farm_block = (
+        f"Farm & taste profile reference (use specific descriptors, never generic praise):\n\n{farm}\n\n"
+        if farm
+        else ""
+    )
+    insights_block = (
+        f"Field-tested qualitative insights from partner stores (reference when relevant):\n\n{insights}\n\n"
+        if insights
+        else ""
+    )
     return (
         "You draft a **reply** to a prospect who responded to Gary's warm-up email about "
         "Agroverse ceremonial cacao. The merchant should need only light editing before sending.\n"
@@ -346,6 +358,11 @@ def grok_reply_system_prompt() -> str:
         "- **Lead with mission impact** when relevant: purchases support **restoration of the Amazon "
         "rainforest**; **each bag plants a new tree**, **directly traceable** via the **unique QR code "
         "on that bag**.\n"
+        "- **Farm & taste story — reference the taste profiles above:** If the prospect's reply is "
+        "positive or asks questions, use the opportunity to **name 1–2 specific farms** with their "
+        "taste descriptors (e.g. Oscar's deep European chocolate profile, Paulo's smoky-to-floral "
+        "journey). Different taste profiles = variety their customers will appreciate. **Do not** "
+        "say one farm is better than another — present them as distinct experiences.\n"
         "- **Commercial fit:** Agroverse is **flexible** and happy with **either** a "
         "**consignment-friendly** retail path **or** **wholesale / bulk** — present them as "
         "**parallel options**, not as a contrast.\n"
@@ -354,6 +371,10 @@ def grok_reply_system_prompt() -> str:
         "- If they ask about **pricing**, **paste vs block**, **licensing**, **shelf fit**, "
         "**samples**, or **delivery**, answer honestly using Agroverse's actual offerings. "
         "Do not invent prices, SKUs, or terms not in the context.\n"
+        "- If they ask about **samples**: mention we're happy to send ceremonial cacao samples. "
+        "The cacao is **pre-grated** (scoop-and-stir — no grater, no tools, no learning curve for "
+        "their customer). We can send Oscar's (ceremonial-grade) and Paulo's (smoky/floral) so "
+        "they can taste the difference.\n"
         "- **Body** ~120–220 words unless the reply naturally needs more. "
         "End with a short signature block:\n"
         "  Gary\n"
@@ -361,6 +382,8 @@ def grok_reply_system_prompt() -> str:
         "  garyjob@agroverse.shop\n"
         "- Subject: prepend 'Re:' if the original subject is known; otherwise a natural reply subject. "
         "Keep it scannable and under ~90 characters.\n"
+        + farm_block
+        + insights_block
     )
 
 
@@ -766,8 +789,14 @@ def create_reply_drafts_for_replied_prospects(
                 subj = latest_subj if latest_subj.lower().startswith("re:") else f"Re: {latest_subj}"
                 body = (
                     f"Hi —\n\n"
-                    f"Thanks for getting back to me. I'd love to keep the conversation going — "
-                    f"happy to answer any questions or jump on a quick call whenever works for you.\n\n"
+                    f"Thanks for getting back to me. Happy to answer your questions — "
+                    f"our cacao comes from multiple regenerative farms across the Brazilian Amazon "
+                    f"(Oscar's Farm in Bahia — deep European chocolate, buttery and smooth; "
+                    f"Paulo's Farm in the Pará Amazon — smoky, earthy, unfolding into floral notes). "
+                    f"Different taste profiles mean different experiences for your customers, "
+                    f"and we're flexible on either consignment or wholesale.\n\n"
+                    f"Let me know how you'd like to move forward — happy to send samples, "
+                    f"talk pricing, or set up a quick call.\n\n"
                     f"Gary\n"
                     f"Agroverse | ceremonial cacao for retail\n"
                     f"garyjob@agroverse.shop\n"
@@ -778,8 +807,14 @@ def create_reply_drafts_for_replied_prospects(
             subj = latest_subj if latest_subj.lower().startswith("re:") else f"Re: {latest_subj}"
             body = (
                 f"Hi —\n\n"
-                f"Thanks for getting back to me. I'd love to keep the conversation going — "
-                f"happy to answer any questions or jump on a quick call whenever works for you.\n\n"
+                f"Thanks for getting back to me. Happy to answer your questions — "
+                f"our cacao comes from multiple regenerative farms across the Brazilian Amazon "
+                f"(Oscar's Farm in Bahia — deep European chocolate, buttery and smooth; "
+                f"Paulo's Farm in the Pará Amazon — smoky, earthy, unfolding into floral notes). "
+                f"Different taste profiles mean different experiences for your customers, "
+                f"and we're flexible on either consignment or wholesale.\n\n"
+                f"Let me know how you'd like to move forward — happy to send samples, "
+                f"talk pricing, or set up a quick call.\n\n"
                 f"Gary\n"
                 f"Agroverse | ceremonial cacao for retail\n"
                 f"garyjob@agroverse.shop\n"
