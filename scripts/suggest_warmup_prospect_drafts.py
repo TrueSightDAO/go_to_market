@@ -906,6 +906,7 @@ def create_reply_drafts_for_replied_prospects(
             "0",
             "0",
             msg_id,
+            thread_id,
         ]
         created_rows.append(row_data)
         n_created += 1
@@ -1484,6 +1485,7 @@ def main() -> None:
         draft_id = draft.get("id", "") or ""
         msg = draft.get("message") or {}
         msg_id = msg.get("id", "") or ""
+        thread_id = msg.get("threadId", "") or ""
 
         ids_to_apply = [lid for lid in (label_id, audience_label_id) if lid]
         if ids_to_apply and msg_id:
@@ -1522,6 +1524,7 @@ def main() -> None:
             "0",
             "0",
             msg_id,
+            thread_id,
         ]
         created_rows.append(row)
         n_made += 1

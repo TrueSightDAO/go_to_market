@@ -730,6 +730,7 @@ def fetch_sent_for_address(service, to_addr: str, max_results: int = 100) -> lis
                     "snippet": snippet.replace("\n", " ")[:500],
                     "to_email": to_addr.lower(),
                     "label_ids": full.get("labelIds") or [],
+                    "thread_id": full.get("threadId", "") or "",
                 }
             )
             if len(out) >= max_results:
@@ -957,6 +958,7 @@ def main() -> None:
                     open_ct,
                     click_ct,
                     sugg_id,
+                    m.get("thread_id", "") or "",
                 ]
             )
             new_msg_label_ids[mid] = m.get("label_ids") or []
