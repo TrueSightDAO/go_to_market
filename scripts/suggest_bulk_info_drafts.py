@@ -306,6 +306,7 @@ def main() -> None:
         draft_id = draft.get("id", "") or ""
         msg = draft.get("message") or {}
         msg_id = msg.get("id", "") or ""
+        thread_id = msg.get("threadId", "") or ""
 
         if label_id and msg_id:
             try:
@@ -338,6 +339,9 @@ def main() -> None:
             notes,
             "0",
             "0",
+            msg_id,
+            thread_id,
+            body,
         ]
         created_rows.append(row)
         n_made += 1
