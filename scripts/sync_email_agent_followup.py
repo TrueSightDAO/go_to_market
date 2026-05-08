@@ -1015,6 +1015,52 @@ def main() -> None:
     if flipped:
         print(f"Reconciled Email Agent Drafts: {flipped} row(s) pending_review → sent.")
 
+    # Auto-promote: when a reply is sent to an "AI: Prospect replied" store,
+    # promote it to "Manager Follow-up" so it appears in the Follow-ups tab.
+    if new_rows:
+        promoted = promote_prospect_replied_to_followup_(hit_ws, new_rows, targets, dry_run=args.dry_run)
+        if promoted:
+            print(f"Auto-promoted {promoted} row(s) 'AI: Prospect replied' → 'Manager Follow-up'.")
+
+
+def promote_prospect_replied_to_followup_(
+    hit_ws,
+    new_rows: list[list[str]],
+    targets: list[dict],
+    dry_run: bool = False,
+) -> int:
+    """For every newly synced sent message whose recipient is an
+    'AI: Prospect replied' store, update Hit List Status → 'Manager Follow-up'.
+    Returns number of rows promoted."""
+    sent_emails = {r[4].strip().lower() for r in new_rows if len(r) > 4 and r[4]}  # col 4 = to_email
+    if not sent_emails:
+        return 0
+
+    values = hit_ws.get_all_values()
+    hdr = values[0]
+    status_i = hdr.index("Status") if "Status" in hdr else None
+    email_i = hdr.index("Email") if "Email" in hdr else None
+    if status_i is None or email_i is None:
+        return 0
+
+    promoted = 0
+    cells_to_update: list[gspread.cell.Cell] = []
+    for r in range(1, len(values)):
+        if cell(values[r], status_i) != "AI: Prospect replied":
+            continue
+        to_email = cell(values[r], email_i).strip().lower()
+        if to_email in sent_emails:
+            cells_to_update.append(gspread.cell.Cell(r + 1, status_i + 1, "Manager Follow-up"))
+            promoted += 1
+
+    if cells_to_update and not dry_run:
+        hit_ws.update_cells(cells_to_update, value_input_option="USER_ENTERED")
+
+    if promoted:
+        for c in cells_to_update[:10]:
+            print(f"  → row {c.row} {cell(values[c.row - 1], email_i)}: AI: Prospect replied → Manager Follow-up")
+    return promoted
+
 
 if __name__ == "__main__":
     main()
