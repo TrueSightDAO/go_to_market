@@ -28,6 +28,7 @@ Usage:
   python3 scripts/hit_list_promote_status.py shortlisted-to-enrich --dry-run --limit 5
   python3 scripts/hit_list_promote_status.py human-shortlisted-to-enrich --limit 20
   python3 scripts/hit_list_promote_status.py email-to-warmup --limit 3
+  python3 scripts/hit_list_promote_status.py warmup-aged-out --dry-run --limit 3
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ import sys
 import time
 import uuid
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import gspread
@@ -63,6 +65,7 @@ STATUS_ENRICH = "AI: Enrich with contact"
 STATUS_EMAIL_FOUND = "AI: Email found"
 STATUS_WARMUP = "AI: Warm up prospect"
 STATUS_CONTACT_FORM = "AI: Contact Form found"
+STATUS_MANAGER_FOLLOWUP = "Manager Follow-up"
 
 PLACE_ID_IN_NOTES = re.compile(
     r"(?i)place[_\s-]*id\s*:\s*([A-Za-z0-9_-]{12,})",
@@ -307,6 +310,162 @@ def run_email_to_warmup(
     print("Done (email-to-warmup).", flush=True)
 
 
+def run_warmup_aged_out(
+    ws: gspread.Worksheet,
+    remark_ws: gspread.Worksheet,
+    header: list[str],
+    rows: list[list[str]],
+    remark_headers: list[str],
+    limit: int,
+    dry_run: bool,
+    age_days: int,
+) -> None:
+    i_status = col_idx(header, "Status")
+    i_shop = col_idx(header, "Shop Name")
+    i_email = col_idx(header, "Email")
+    i_notes = col_idx(header, "Notes")
+    width = len(header)
+    if len(rows) < 2:
+        print("No data rows.")
+        return
+
+    # Read Email Agent Follow Up tab for warmup timestamps
+    sh = ws.spreadsheet
+    fu_ws = sh.worksheet("Email Agent Follow Up")
+    fu_rows = gspread_retry(lambda: fu_ws.get_all_values())
+    if len(fu_rows) < 2:
+        print("Email Agent Follow Up has no data. Nothing to evaluate.")
+        return
+    fu_header = fu_rows[0]
+    try:
+        i_fu_email = fu_header.index("to_email")
+    except ValueError:
+        try:
+            i_fu_email = fu_header.index("Email")
+        except ValueError:
+            print("Email Agent Follow Up missing to_email/Email column — cannot match. Skipping.")
+            return
+    try:
+        i_fu_status = fu_header.index("status")
+    except ValueError:
+        print("Email Agent Follow Up missing status column. Skipping.")
+        return
+    try:
+        i_fu_last_send = fu_header.index("sent_at")
+    except ValueError:
+        try:
+            i_fu_last_send = fu_header.index("last_send_at")
+        except ValueError:
+            print("Email Agent Follow Up missing sent_at/last_send_at column. Skipping.")
+            return
+
+    # Build map: email -> list of (status, last_send_at)
+    now = datetime.now(timezone.utc)
+    cutoff = now.timestamp() - (age_days * 86400)
+
+    candidates: list[tuple[int, list[str], int, str]] = []  # (row, cells, warmup_count, last_date)
+    for ri, row in enumerate(rows[1:], start=2):
+        cells = row_cells(row, width)
+        if cells[i_status].strip() != STATUS_WARMUP:
+            continue
+        email = (cells[i_email] or "").strip().lower()
+        if not email:
+            continue
+
+        # Collect warmup sends for this email from Follow Up tab
+        warmup_timestamps: list[float] = []
+        followup_count = 0
+        for fu_row in fu_rows[1:]:
+            fu_cells = row_cells(fu_row, len(fu_header))
+            fu_e = (fu_cells[i_fu_email] or "").strip().lower()
+            if fu_e != email:
+                continue
+            fu_st = (fu_cells[i_fu_status] or "").strip().lower()
+            if fu_st == "warmup":
+                ts_str = (fu_cells[i_fu_last_send] or "").strip()
+                if ts_str:
+                    try:
+                        # Try ISO format first
+                        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                        warmup_timestamps.append(ts.timestamp())
+                    except (ValueError, TypeError):
+                        # Try email-date format (e.g. "Wed, 5 Nov 2025 12:54:03 -0800")
+                        try:
+                            ts = parsedate_to_datetime(ts_str)
+                            if ts:
+                                warmup_timestamps.append(ts.timestamp())
+                        except (ValueError, TypeError):
+                            pass
+            elif fu_st in ("follow-up", "follow_up", "followup"):
+                followup_count += 1
+
+        warmup_count = len(warmup_timestamps)
+        if warmup_count < 1:
+            continue  # AU >= 1 guard
+        if followup_count > 0:
+            continue  # AV == 0 guard
+
+        most_recent = max(warmup_timestamps)
+        if most_recent > cutoff:
+            continue  # not old enough
+
+        last_date = datetime.fromtimestamp(most_recent, tz=timezone.utc).strftime("%Y-%m-%d")
+        candidates.append((ri, cells, warmup_count, last_date))
+        if len(candidates) >= max(1, limit):
+            break
+
+    if not candidates:
+        print(
+            f"No rows with Status={STATUS_WARMUP!r} meeting aged-out criteria "
+            f"(AU>=1, AV==0, last warmup > {age_days}d). limit={limit}",
+            flush=True,
+        )
+        return
+
+    print(
+        f"Promoting {len(candidates)} row(s) → {STATUS_MANAGER_FOLLOWUP!r} "
+        f"(aged out after {age_days}d no reply). dry_run={dry_run}",
+        flush=True,
+    )
+
+    submitted_at = datetime.now(timezone.utc).strftime("%m/%d/%Y %H:%M:%S")
+
+    for ri, cells, wc, last_date in candidates:
+        shop = cells[i_shop].strip()
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        remarks = (
+            f"auto-promoted to {STATUS_MANAGER_FOLLOWUP} after {age_days}d no reply "
+            f"(warmups={wc}, last={last_date})"
+        )
+        live = current_status(ws, ri, i_status + 1)
+        if live != STATUS_WARMUP:
+            print(f"  skip row {ri} {shop!r}: status now {live!r}", flush=True)
+            continue
+        live_email = (ws.cell(ri, i_email + 1).value or "").strip()
+        if not live_email:
+            print(f"  skip row {ri} {shop!r}: Email now empty", flush=True)
+            continue
+        print(f"  row {ri} {shop!r} warmups={wc} last={last_date}", flush=True)
+        if dry_run:
+            continue
+        append_dapp_remark_and_apply(
+            ws,
+            remark_ws,
+            ri,
+            shop,
+            STATUS_MANAGER_FOLLOWUP,
+            remarks,
+            SUBMITTED_BY,
+            submitted_at,
+            str(uuid.uuid4()),
+            hit_headers=header,
+            remark_headers=remark_headers,
+        )
+        time.sleep(1.0)
+
+    print("Done (warmup-aged-out).", flush=True)
+
+
 def _add_shortlist_to_enrich_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--limit", type=int, default=15, help="Max rows per run (default 15).")
     parser.add_argument(
@@ -359,6 +518,17 @@ def main() -> None:
         help="Only rows whose Shop Name contains this substring (case-insensitive).",
     )
 
+    p_wa = sub.add_parser(
+        "warmup-aged-out",
+        help=f"{STATUS_WARMUP} → {STATUS_MANAGER_FOLLOWUP} (aged out, no reply)",
+    )
+    p_wa.add_argument("--limit", type=int, default=10, help="Max rows per run (default 10).")
+    p_wa.add_argument("--dry-run", action="store_true", help="Print plan only; no sheet writes.")
+    p_wa.add_argument(
+        "--age-days", type=int, default=14,
+        help="Minimum days since last warmup before promotion (default 14).",
+    )
+
     args = p.parse_args()
     gc = gspread_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
@@ -371,7 +541,7 @@ def main() -> None:
     header = rows[0]
     remark_headers = gspread_retry(lambda: remark_ws.row_values(1))
 
-    shop_filter = (args.shop or "").strip() or None
+    shop_filter = (getattr(args, "shop", "") or "").strip() or None
 
     if args.cmd in ("shortlisted-to-enrich", "human-shortlisted-to-enrich"):
         if args.require_website and args.skip_contact_guardrail:
@@ -404,6 +574,17 @@ def main() -> None:
             args.limit,
             args.dry_run,
             shop_filter,
+        )
+    elif args.cmd == "warmup-aged-out":
+        run_warmup_aged_out(
+            ws,
+            remark_ws,
+            header,
+            rows,
+            remark_headers,
+            args.limit,
+            args.dry_run,
+            args.age_days,
         )
     else:
         p.error("Unknown command")

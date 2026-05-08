@@ -1,6 +1,7 @@
 # Hit List: guardrailed status promotions + DApp Remarks apply
 #   shortlisted-to-enrich — before enrich-contact hourly job
 #   email-to-warmup — lower cap (Gmail warmup draft pipeline)
+#   warmup-aged-out — after 14d no reply (initially gated, if: false)
 #
 # Does not touch AI: Contact Form found (manual follow-up only).
 #
@@ -85,3 +86,15 @@ jobs:
           EXTRA=""
           if [ "${DRY}" = "true" ]; then EXTRA="--dry-run"; fi
           python3 scripts/hit_list_promote_status.py email-to-warmup --limit "$LIMIT" $EXTRA
+
+      # TODO: flip `if: false` to enable this step after reviewing first dry-run output.
+      # The step gates the warmup-aged-out promotion until Gary confirms the dry-run results.
+      - name: Promote Warm up → Manager Follow-up (aged out)
+        if: false
+        env:
+          DRY: ${{ github.event.inputs.dry_run || '' }}
+        run: |
+          set -e
+          EXTRA=""
+          if [ "${DRY}" = "true" ]; then EXTRA="--dry-run"; fi
+          python3 scripts/hit_list_promote_status.py warmup-aged-out --limit 10 --age-days 14 $EXTRA
