@@ -67,6 +67,13 @@ STATUS_WARMUP = "AI: Warm up prospect"
 STATUS_CONTACT_FORM = "AI: Contact Form found"
 STATUS_MANAGER_FOLLOWUP = "Manager Follow-up"
 
+# Placeholder address written by hit_list_enrich_contact when a website crawl
+# returns no real address. Treat as "no email present" for promotion gating —
+# otherwise rows get promoted to AI: Warm up prospect with no working address,
+# the warmup draft script then can't send, and the row sits in the bucket
+# forever as an unactionable false-positive (see audit 2026-05-09).
+FILLER_EMAIL = "filler@godaddy.com"
+
 PLACE_ID_IN_NOTES = re.compile(
     r"(?i)place[_\s-]*id\s*:\s*([A-Za-z0-9_-]{12,})",
 )
@@ -250,6 +257,10 @@ def run_email_to_warmup(
         email = (cells[i_email] or "").strip()
         if not email:
             continue
+        if email.lower() == FILLER_EMAIL:
+            # Placeholder address — promotion would land in AI: Warm up prospect
+            # with no actionable email; warmup draft would fail.
+            continue
         if shop_filter and shop_filter.strip().lower() not in cells[i_shop].lower():
             continue
         candidates.append((ri, cells))
@@ -288,6 +299,9 @@ def run_email_to_warmup(
         live_email = (ws.cell(ri, i_email + 1).value or "").strip()
         if not live_email:
             print(f"  skip row {ri} {shop!r}: Email now empty", flush=True)
+            continue
+        if live_email.lower() == FILLER_EMAIL:
+            print(f"  skip row {ri} {shop!r}: Email is placeholder {FILLER_EMAIL!r}", flush=True)
             continue
         print(f"  row {ri} {shop!r} email={live_email!r}", flush=True)
         if dry_run:
