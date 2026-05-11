@@ -83,6 +83,7 @@ INVENTORY_MOVEMENT_SHEET_NAME = "Inventory Movement"
 QRS_COL_SALES_DATE = 7   # H — YYYYMMDD
 QRS_COL_CURRENCY = 8     # I — product / currency
 QRS_COL_STATUS = 9       # J — TOKENIZED / ACCOUNTED / PROCESSING / IGNORED / empty
+QRS_COL_REPORTER = 3     # D — reporter / submitter of the [SALES EVENT]
 QRS_COL_SOLD_BY = 15     # P — resolved store-manager display name
 
 # Inventory Movement column indices (0-based) — see tokenomics/SCHEMA.md.
@@ -261,6 +262,13 @@ def read_qr_code_sales(gc: gspread.Client) -> list[tuple[str, _Event]]:
         if status not in QRS_VALID_STATUSES:
             continue
         sold_by = (row[QRS_COL_SOLD_BY] if len(row) > QRS_COL_SOLD_BY else "").strip()
+        if not sold_by:
+            # Fall back to Reporter Name (col D) when Sold By (col P) is
+            # empty.  Many [SALES EVENT] rows have a populated Reporter Name
+            # but the GAS scanner hasn't resolved the store-manager display
+            # name into Sold By yet.  Dropping these rows caused Love Wisdom
+            # Power's 12 recorded sales to show as 0 in velocity metrics.
+            sold_by = (row[QRS_COL_REPORTER] if len(row) > QRS_COL_REPORTER else "").strip()
         if not sold_by:
             continue
         currency = (row[QRS_COL_CURRENCY] if len(row) > QRS_COL_CURRENCY else "").strip()
