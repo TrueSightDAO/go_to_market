@@ -261,13 +261,12 @@ def read_qr_code_sales(gc: gspread.Client) -> list[tuple[str, _Event]]:
         status = (row[QRS_COL_STATUS] if len(row) > QRS_COL_STATUS else "").strip().upper()
         if status not in QRS_VALID_STATUSES:
             continue
-        # Primary: Reporter Name (col D) — has existed since sheet creation and
-        # is always populated by the person submitting the [SALES EVENT].
-        # Sold By (col P) is a recent addition and often empty; use it as an
-        # override only when Reporter Name is unavailable.
-        sold_by = (row[QRS_COL_REPORTER] if len(row) > QRS_COL_REPORTER else "").strip()
+        # Primary: Sold By (col P) — the resolved store-manager display name.
+        # Fall back to Reporter Name (col D) when Sold By is empty (common
+        # on older rows where the GAS scanner hasn't populated col P yet).
+        sold_by = (row[QRS_COL_SOLD_BY] if len(row) > QRS_COL_SOLD_BY else "").strip()
         if not sold_by:
-            sold_by = (row[QRS_COL_SOLD_BY] if len(row) > QRS_COL_SOLD_BY else "").strip()
+            sold_by = (row[QRS_COL_REPORTER] if len(row) > QRS_COL_REPORTER else "").strip()
         if not sold_by:
             continue
         currency = (row[QRS_COL_CURRENCY] if len(row) > QRS_COL_CURRENCY else "").strip()
