@@ -60,6 +60,35 @@ def _read_sku_inventory_types(gc: gspread.Client) -> dict[str, str]:
     return mapping
 
 
+def _read_partner_inventory(gc: gspread.Client) -> dict[str, dict[str, float]]:
+    """Map partner_id → SKU → current units on hand from partners-inventory.json
+    or from the offchain asset location sheet."""
+    import json
+    inv_path = _REPO.parent / "agroverse-inventory" / "partners-inventory.json"
+    try:
+        with open(inv_path) as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+
+    out: dict[str, dict[str, float]] = {}
+    for pid, partner in data.get("partners", {}).items():
+        out[pid] = {}
+        for item in partner.get("items", []):
+            sku = item.get("sku", "")
+            qty = float(item.get("inventory", 0) or 0)
+            if sku and qty > 0:
+                out[pid][sku] = out[pid].get(sku, 0) + qty
+    return out
+
+
+def _weeks_of_stock(inventory: float, monthly_sales: float) -> float | None:
+    """Compute weeks of stock given current inventory and monthly sales rate."""
+    if monthly_sales <= 0:
+        return None  # No sales data → can't compute
+    return round(inventory / monthly_sales * 4.33, 1)
+
+
 def build_sell_through_report() -> dict:
     gc = inv._client()
 
@@ -83,10 +112,11 @@ def build_sell_through_report() -> dict:
 
     # SKU → Inventory Type lookup
     sku_to_type = _read_sku_inventory_types(gc)
+    partner_inventory = _read_partner_inventory(gc)
 
     # Per-inventory-type aggregation (USA only)
     by_type: dict[str, dict] = defaultdict(
-        lambda: {"sales_monthly": 0.0, "restocks_monthly": 0.0, "partners": set(), "skus": set()})
+        lambda: {"total_inventory": 0.0, "total_sales": 0.0, "partners": set(), "skus": set()})
 
     # Per-partner list
     partners_list: list[dict] = []
@@ -99,78 +129,71 @@ def build_sell_through_report() -> dict:
             continue
 
         partner_total_s = 0.0
-        partner_total_r = 0.0
+        partner_total_inv = 0.0
         skus = set(sales_by_partner.get(pid, {})) | set(restocks_by_partner.get(pid, {}))
         items: list[dict] = []
 
         for sku in skus:
             inv_type = sku_to_type.get(sku, "Unknown")
             s_stats = sales_by_partner.get(pid, {}).get(sku)
-            r_stats = restocks_by_partner.get(pid, {}).get(sku)
             s12 = s_stats.units_365d / 12.0 if s_stats else 0.0
-            r12 = r_stats.units_365d / 12.0 if r_stats else 0.0
+            cur_inv = partner_inventory.get(pid, {}).get(sku, 0.0)
 
             items.append({
                 "sku": sku,
                 "inventory_type": inv_type,
                 "sales_monthly": round(s12, 3),
-                "restocks_monthly": round(r12, 3),
+                "inventory_units": round(cur_inv, 0),
             })
 
             partner_total_s += s12
-            partner_total_r += r12
+            partner_total_inv += cur_inv
 
-            by_type[inv_type]["sales_monthly"] += s12
-            by_type[inv_type]["restocks_monthly"] += r12
+            by_type[inv_type]["total_sales"] += s12
+            by_type[inv_type]["total_inventory"] += cur_inv
             by_type[inv_type]["partners"].add(pid)
             by_type[inv_type]["skus"].add(sku)
 
-        sell_through = (partner_total_s / partner_total_r * 100) if partner_total_r > 0 else 0.0
+        wos = _weeks_of_stock(partner_total_inv, partner_total_s)
         partners_list.append({
             "partner_id": pid,
             "partner_name": meta.get("partner_name", pid),
             "location": location,
             "partner_type": meta.get("partner_type", "Consignment"),
+            "inventory_units": round(partner_total_inv, 0),
             "sales_monthly": round(partner_total_s, 3),
-            "restocks_monthly": round(partner_total_r, 3),
-            "sell_through_pct": round(sell_through, 1),
+            "weeks_of_stock": wos,
             "items": items,
         })
 
-    # Sort partners by sell-through descending
-    partners_list.sort(key=lambda p: p["sell_through_pct"], reverse=True)
+    # Sort partners by weeks-of-stock ascending (urgent restock first, overstocked last)
+    partners_list.sort(key=lambda p: p["weeks_of_stock"] if p["weeks_of_stock"] is not None else 99999)
 
     # By-type summary
     type_summary = {}
     for itype, data in by_type.items():
-        s = data["sales_monthly"]
-        r = data["restocks_monthly"]
-        rate = (s / r * 100) if r > 0 else 0.0
         type_summary[itype] = {
-            "sales_monthly": round(s, 3),
-            "restocks_monthly": round(r, 3),
-            "sell_through_pct": round(rate, 1),
+            "total_inventory": round(data["total_inventory"], 0),
+            "total_sales_monthly": round(data["total_sales"], 3),
             "partner_count": len(data["partners"]),
             "sku_count": len(data["skus"]),
         }
 
     # Overall
     total_s = sum(p["sales_monthly"] for p in partners_list)
-    total_r = sum(p["restocks_monthly"] for p in partners_list)
-    overall_rate = (total_s / total_r * 100) if total_r > 0 else 0.0
+    total_inv = sum(p["inventory_units"] for p in partners_list)
     with_sales = sum(1 for p in partners_list if p["sales_monthly"] > 0)
-    zero_sales = len(partners_list) - with_sales
+    low_stock = sum(1 for p in partners_list if p["weeks_of_stock"] is not None and p["weeks_of_stock"] < 4)
 
     return {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
         "source": "sync_sell_through_report",
         "summary": {
             "total_usa_partners": len(partners_list),
-            "partners_with_sales": with_sales,
-            "partners_zero_sales": zero_sales,
-            "overall_sell_through_pct": round(overall_rate, 1),
+            "active_partners": with_sales,
+            "total_inventory_units": round(total_inv, 0),
             "total_sales_monthly": round(total_s, 3),
-            "total_restocks_monthly": round(total_r, 3),
+            "partners_low_stock": low_stock,
         },
         "by_inventory_type": type_summary,
         "partners": partners_list,
