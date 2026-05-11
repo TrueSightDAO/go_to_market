@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Draft Beer Hall **Message 1** (TLDR) and **Message 2** (Shipped + Community) by feeding
-the output of ``generate_beer_hall_preview.py`` to **Anthropic Claude**.
+the output of ``generate_beer_hall_preview.py`` to **BigModel GLM-4.6**.
 
 The Beer Hall WhatsApp send has been retired — digests are **archive-only** artifacts
 that feed the static ``beer_hall/feed/`` (read by truesight.me) and ``ADVISORY_SNAPSHOT.md``
@@ -26,8 +26,8 @@ Usage (from ``market_research/``)::
       --out-msg2 /tmp/msg2.txt \\
       --out-slug /tmp/slug.txt
 
-Requires ``ANTHROPIC_API_KEY`` in env. Default model is **Claude Sonnet 4.6**
-(``claude-sonnet-4-6``); override with ``--model``.
+Requires ``BIGMODEL_CN_API`` in env. Default model is **GLM-4.6**
+(``glm-4.6``); override with ``--model``.
 """
 
 from __future__ import annotations
@@ -130,18 +130,18 @@ def main() -> int:
     ap.add_argument("--out-slug", required=True, type=Path)
     ap.add_argument("--examples-dir", type=Path, default=None, help="Beer Hall archive dir for few-shot (default: ../ecosystem_change_logs/beer_hall/entries).")
     ap.add_argument("--examples-count", type=int, default=2)
-    ap.add_argument("--model", default="claude-sonnet-4-6", help="Anthropic model id (default claude-sonnet-4-6).")
+    ap.add_argument("--model", default="glm-4.6", help="BigModel model id (default glm-4.6).")
     ap.add_argument("--max-tokens", type=int, default=4000)
     args = ap.parse_args()
 
-    if "ANTHROPIC_API_KEY" not in os.environ:
-        sys.stderr.write("ANTHROPIC_API_KEY not set in environment.\n")
+    if "BIGMODEL_CN_API" not in os.environ:
+        sys.stderr.write("BIGMODEL_CN_API not set in environment.\n")
         return 2
 
     try:
-        import anthropic  # type: ignore
+        import openai  # type: ignore
     except ImportError:
-        sys.stderr.write("The 'anthropic' package is required. Install with: pip install anthropic\n")
+        sys.stderr.write("The 'openai' package is required. Install with: pip install openai\n")
         return 2
 
     preview_text = args.preview.read_text(encoding="utf-8")
@@ -154,19 +154,19 @@ def main() -> int:
         else "(No prior archives available for style reference — follow the system rules.)"
     )
 
-    client = anthropic.Anthropic()
-    resp = client.messages.create(
+    client = openai.OpenAI(
+        api_key=os.environ["BIGMODEL_CN_API"],
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+    )
+    resp = client.chat.completions.create(
         model=args.model,
         max_tokens=args.max_tokens,
-        system=_SYSTEM,
         messages=[
-            {
-                "role": "user",
-                "content": _USER_TEMPLATE.format(examples_block=examples_block, preview=preview_text),
-            }
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": _USER_TEMPLATE.format(examples_block=examples_block, preview=preview_text)},
         ],
     )
-    text = "".join(block.text for block in resp.content if getattr(block, "type", "") == "text").strip()
+    text = resp.choices[0].message.content.strip()
     sections = _extract_sections(text)
 
     for key in ("SLUG", "MESSAGE_1", "MESSAGE_2"):

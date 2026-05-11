@@ -6,7 +6,8 @@
 # NOTE: WhatsApp send via OpenClaw has been retired. This workflow does NOT post to WhatsApp.
 #
 # Required repository secrets (go_to_market / market_research clone):
-#   ANTHROPIC_API_KEY           — Anthropic API key for Claude (Sonnet 4.6 by default).
+#   ANTHROPIC_API_KEY           — DEPRECATED.
+#   BIGMODEL_CN_API              — BigModel API key (OpenAI-compatible, for draft_beer_hall_digest.py, GLM-4.6).
 #   GOOGLE_CREDENTIALS_JSON     — service account JSON (Sheets read — for telegram/DApp evidence blocks).
 #   ORACLE_ADVISORY_PUSH_TOKEN  — fine-grained PAT with Contents: Read+Write AND
 #                                 Pull requests: Read+Write on
@@ -101,7 +102,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install "anthropic>=0.34" "gspread>=5.12" "google-auth>=2.23"
+           pip install "openai>=1.0" "gspread>=5.12" "google-auth>=2.23"
 
       - name: Write Google credentials (for telegram/DApp evidence helpers)
         run: |
@@ -116,10 +117,10 @@ jobs:
           python3 scripts/generate_beer_hall_preview.py --no-stdout --output /tmp/beer_hall_preview.md
           ls -la /tmp/beer_hall_preview.md
 
-      - name: Draft Message 1 + Message 2 via Claude
+       - name: Draft Message 1 + Message 2 via BigModel GLM-4.6
         working-directory: repos/market_research
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BIGMODEL_CN_API: ${{ secrets.BIGMODEL_CN_API }}
         run: |
           python3 scripts/draft_beer_hall_digest.py \
             --preview /tmp/beer_hall_preview.md \
@@ -202,7 +203,7 @@ jobs:
 
           Companion PR on \`agentic_ai_context\` refreshes the ADVISORY_SNAPSHOT mirror.
 
-          🤖 Generated with [Claude Sonnet 4.6](https://www.anthropic.com/)")
+          🤖 Generated with [BigModel GLM-4.6](https://open.bigmodel.cn/)")
           echo "PR: $PR_URL"
           gh pr merge "$PR_URL" --merge --delete-branch
 
