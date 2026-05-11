@@ -75,7 +75,7 @@ def _read_partner_inventory(gc: gspread.Client) -> dict[str, dict[str, float]]:
     for pid, partner in data.get("partners", {}).items():
         out[pid] = {}
         for item in partner.get("items", []):
-            sku = item.get("sku", "")
+            sku = item.get("productId", "") or item.get("sku", "")
             qty = float(item.get("inventory", 0) or 0)
             if sku and qty > 0:
                 out[pid][sku] = out[pid].get(sku, 0) + qty
