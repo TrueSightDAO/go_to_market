@@ -261,14 +261,13 @@ def read_qr_code_sales(gc: gspread.Client) -> list[tuple[str, _Event]]:
         status = (row[QRS_COL_STATUS] if len(row) > QRS_COL_STATUS else "").strip().upper()
         if status not in QRS_VALID_STATUSES:
             continue
-        sold_by = (row[QRS_COL_SOLD_BY] if len(row) > QRS_COL_SOLD_BY else "").strip()
+        # Primary: Reporter Name (col D) — has existed since sheet creation and
+        # is always populated by the person submitting the [SALES EVENT].
+        # Sold By (col P) is a recent addition and often empty; use it as an
+        # override only when Reporter Name is unavailable.
+        sold_by = (row[QRS_COL_REPORTER] if len(row) > QRS_COL_REPORTER else "").strip()
         if not sold_by:
-            # Fall back to Reporter Name (col D) when Sold By (col P) is
-            # empty.  Many [SALES EVENT] rows have a populated Reporter Name
-            # but the GAS scanner hasn't resolved the store-manager display
-            # name into Sold By yet.  Dropping these rows caused Love Wisdom
-            # Power's 12 recorded sales to show as 0 in velocity metrics.
-            sold_by = (row[QRS_COL_REPORTER] if len(row) > QRS_COL_REPORTER else "").strip()
+            sold_by = (row[QRS_COL_SOLD_BY] if len(row) > QRS_COL_SOLD_BY else "").strip()
         if not sold_by:
             continue
         currency = (row[QRS_COL_CURRENCY] if len(row) > QRS_COL_CURRENCY else "").strip()
