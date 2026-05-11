@@ -63,6 +63,11 @@ jobs:
           python3 scripts/sync_partners_velocity.py --execute \
             --output agroverse-inventory/partners-velocity.json
 
+      - name: Compute sell-through report
+        run: |
+          python3 scripts/sync_sell_through_report.py --execute \
+            --output agroverse-inventory/sell-through-report.json
+
       - name: Commit and push agroverse-inventory if changed
         working-directory: agroverse-inventory
         env:
@@ -71,7 +76,7 @@ jobs:
           git remote set-url origin "https://x-access-token:${TARGET_TOKEN}@github.com/TrueSightDAO/agroverse-inventory.git"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git add partners-velocity.json
+          git add partners-velocity.json sell-through-report.json
           if git diff --staged --quiet; then
             echo "No changes to partners-velocity.json; skipping commit."
           else
