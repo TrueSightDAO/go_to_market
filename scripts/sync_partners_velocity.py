@@ -351,7 +351,7 @@ def aggregate_events(
         partner_ids = contributor_to_partners.get(actor)
         if not partner_ids:
             continue
-        sku = currency_to_sku.get(ev.currency)
+        sku = currency_to_sku.get(ev.currency) or currency_to_sku.get(inv._normalize_currency(ev.currency))
         if not sku:
             # Unknown currency → skip (consumer can't join to a SKU).
             continue

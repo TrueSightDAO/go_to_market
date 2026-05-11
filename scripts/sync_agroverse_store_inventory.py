@@ -106,6 +106,23 @@ def get_store_managers(sh: gspread.Spreadsheet) -> list[str]:
     return managers
 
 
+def _normalize_currency(raw: str) -> str:
+    """Strip batch-specific suffixes from a currency string so that
+    different CP tracking numbers / AGL labels don't prevent matching.
+
+    Examples:
+      ``...CP340993869BR San Francisco - AGL8`` → ``...CP340993869BR San Francisco``
+      ``...CP340993299BR  San Francisco``      → ``...CP340993299BR San Francisco``
+    """
+    import re
+    s = raw.strip()
+    # Collapse multiple spaces and tabs to a single space
+    s = re.sub(r"\s+", " ", s)
+    # Strip trailing " - AGL\d+" suffix (optional spaces around the dash)
+    s = re.sub(r"\s*-\s*AGL\s*\d+\s*$", "", s)
+    return s.strip()
+
+
 def get_currency_to_sku_mapping(sh: gspread.Spreadsheet) -> dict[str, str]:
     ws = sh.worksheet(CURRENCIES_SHEET_NAME)
     rows = _gspread_retry(lambda: ws.get_values("A2:M"))
@@ -117,6 +134,12 @@ def get_currency_to_sku_mapping(sh: gspread.Spreadsheet) -> dict[str, str]:
         sku = row[12].strip() if row[12] else ""
         if currency and sku:
             mapping[currency] = sku
+            # Also register the normalized form so that sale currencies with
+            # slight batch-suffix differences still resolve.
+            norm = _normalize_currency(currency)
+            if norm != currency:
+                # Don't overwrite an existing exact-match entry.
+                mapping.setdefault(norm, sku)
     return mapping
 
 
