@@ -274,3 +274,4 @@ Each subdirectory contains a comprehensive README.md that consolidates all relev
 *Last updated: November 2025*
 *This repository is organized by functional area for easy navigation and maintenance*
 *GitHub: [TrueSightDAO/go_to_market](https://github.com/TrueSightDAO/go_to_market)*
+# BigModel GLM-4.6 migration complete
