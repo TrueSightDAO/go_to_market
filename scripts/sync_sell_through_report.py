@@ -121,14 +121,17 @@ def build_sell_through_report() -> dict:
     # Per-partner list
     partners_list: list[dict] = []
 
-    # Trees-financed / sell-through accounting counts ONLY retail-distribution
-    # partner types — partners whose inventory leaving their facility represents
-    # an actual end-consumer sale (Consignment + Wholesale). Inventory leaving
-    # a warehouse Operator (e.g. Matheus in Ilhéus) or a Freight Provider
-    # (e.g. Omega Services) is in-transit movement, not sell-through, and
-    # double-counts trees if included. See agentic_ai_context/
-    # PARTNER_CHECK_IN_IMPLEMENTATION.md §"Dual-use" for the partner_type taxonomy.
-    RETAIL_PARTNER_TYPES = {"Consignment", "Wholesale"}
+    # Trees-financed / sell-through accounting excludes partner types that never
+    # sell to end consumers — Freight Provider (e.g. Omega Services / Isis) and
+    # Supplier. Includes Operator-type partners (e.g. Kiki's Cocoa) because some
+    # operators also handle online-fulfillment retail; their sales_monthly is
+    # populated from actual QR Code Sales events, so no double-counting in
+    # Trees/mo. Note: Operator partners' inventory_units MAY slightly
+    # over-count Trees in Pipeline if they hold both bulk-warehouse and
+    # retail-ready stock at the same physical location — see agentic_ai_context/
+    # OPEN_FOLLOWUPS.md for the finer-grained inventory-tag follow-up.
+    # Matheus (Ilhéus) is naturally caught by the existing USA location filter.
+    EXCLUDED_PARTNER_TYPES = {"Freight Provider", "Supplier"}
 
     all_ids = set(sales_by_partner) | set(restocks_by_partner)
     for pid in all_ids:
@@ -137,7 +140,7 @@ def build_sell_through_report() -> dict:
         if not _is_usa(location):
             continue
         ptype = meta.get("partner_type", "Consignment")
-        if ptype not in RETAIL_PARTNER_TYPES:
+        if ptype in EXCLUDED_PARTNER_TYPES:
             continue
 
         partner_total_s = 0.0
