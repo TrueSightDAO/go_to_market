@@ -78,7 +78,7 @@ jobs:
             python scripts/sync_email_agent_followup.py --backfill-body-plain --backfill-only
           fi
 
-      - name: Promote warm-up replies (AI: Warm up prospect → AI: Prospect replied)
+      - name: "Promote warm-up replies (AI: Warm up prospect → AI: Prospect replied)"
         env:
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
           INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
