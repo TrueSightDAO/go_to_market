@@ -117,7 +117,7 @@ jobs:
           python3 scripts/generate_beer_hall_preview.py --no-stdout --output /tmp/beer_hall_preview.md
           ls -la /tmp/beer_hall_preview.md
 
-       - name: Draft Message 1 + Message 2 via BigModel GLM-4.6
+      - name: Draft Message 1 + Message 2 via BigModel GLM-4.6
         working-directory: repos/market_research
         env:
           BIGMODEL_CN_API: ${{ secrets.BIGMODEL_CN_API }}
