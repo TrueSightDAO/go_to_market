@@ -532,6 +532,7 @@ def _notes_recent(ctx_root: Path, since_ts: float) -> list[str]:
 # Main ledger + Telegram/Submissions workbooks — see tokenomics/SCHEMA.md
 _MAIN_LEDGER_SPREADSHEET_ID = "1GE7PUq-UT6x2rBN-Q2ksogbWpgyuh2SaxJyG_uEK6PU"
 _TELEGRAM_SUBMISSIONS_SPREADSHEET_ID = "1qbZZhf-_7xzmDTriaJVWj6OZshyQsFkdsAV8-pyzASQ"
+_TELEGRAM_CHAT_LOGS_WS = "Telegram Chat Logs"
 _MONTHLY_STATISTICS_WS = "Monthly Statistics"
 _QR_CODE_SALES_WS = "QR Code Sales"
 _OFFCHAIN_BALANCE_WS = "off chain asset balance"
@@ -632,6 +633,124 @@ def _md_cell(val: object, *, max_len: int = 120) -> str:
     if len(s) > max_len:
         s = s[: max_len - 1] + "…"
     return s or "—"
+
+
+def _fetch_telegram_recent_activity_markdown(repo_root: Path, *, tail_n: int = 50) -> str:
+    """Real-time ecosystem signal: the last N rows of the Telegram Chat Logs tab
+    on the Telegram & Submissions spreadsheet.
+
+    Each row is an Edgar-routed event (CONTRIBUTION / PRACTICE / PARTNER CHECK-IN
+    / CURRENCY CONVERSION / etc.) or a free-form Telegram message. The col layout
+    matches what tokenomics/google_app_scripts/tdg_asset_management/capital_injection_processing.gs
+    treats as canonical:
+
+      col 0 Update ID    col 1 Chatroom ID    col 2 Chatroom Name
+      col 3 Message ID   col 4 Reporter       col 5 (reserved)
+      col 6 Message body (multi-line)
+
+    Output is a compact register: bracket-tag rollup (counts by event type), then
+    the latest ~15 rows with reporter + first-line excerpt. Goal is to give the
+    LLM a "pulse of the ecosystem this week" register that does NOT collapse into
+    the retailer sales pipeline — these are the actual events contributors are
+    emitting in real time across capoeira, partner check-ins, contributions,
+    inventory moves.
+
+    Never raises. Returns a markdown section with an explanation if auth or
+    network fails.
+    """
+    cred_path = repo_root / "google_credentials.json"
+    header = "---\n\n## Recent ecosystem activity (Telegram Chat Logs — last {n} rows)\n\n".format(n=tail_n)
+    explain = (
+        "_Real-time event stream across the DAO: each row is an Edgar-routed contribution, "
+        "practice event, partner check-in, inventory move, currency conversion, or free-form "
+        "message. Use this as the pulse of what is actually pulsing right now — not the funnel, "
+        "the actual signal._\n\n"
+    )
+    if not cred_path.is_file():
+        return header + explain + f"_(Skipped: missing service account file `{cred_path.name}`.)_\n\n"
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials as SACredentials
+    except ImportError as e:
+        return header + explain + f"_(Skipped: import error: `{e}`.)_\n\n"
+
+    try:
+        creds = SACredentials.from_service_account_file(str(cred_path), scopes=_SHEETS_SCOPES)
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(_TELEGRAM_SUBMISSIONS_SPREADSHEET_ID)
+        ws = sh.worksheet(_TELEGRAM_CHAT_LOGS_WS)
+        last_row = ws.row_count
+        rng_start = max(2, last_row - max(tail_n, 1) - 5)
+        cell_range = f"A{rng_start}:G{last_row}"
+        rows = ws.get(cell_range) or []
+    except Exception as e:
+        return header + explain + f"_(Skipped: sheet read failed: `{e}`.)_\n\n"
+
+    rows = [r for r in rows if r and len(r) >= 7 and (r[6] or "").strip()]
+    rows = rows[-tail_n:]
+    if not rows:
+        return header + explain + "_(No non-empty messages in the recent window.)_\n\n"
+
+    # Tag rollup
+    import collections
+    tag_re = re.compile(r"^\s*\[([A-Z][A-Z0-9 _-]+)\]")
+    tag_counts: collections.Counter = collections.Counter()
+    free_form = 0
+    for r in rows:
+        msg = (r[6] or "").strip()
+        m = tag_re.match(msg)
+        if m:
+            tag_counts[m.group(1).strip()] += 1
+        else:
+            free_form += 1
+
+    parts: list[str] = [header, explain]
+    if tag_counts or free_form:
+        parts.append("### Event-type rollup\n\n")
+        for tag, c in tag_counts.most_common(20):
+            parts.append(f"- `[{tag}]` × {c}\n")
+        if free_form:
+            parts.append(f"- _free-form (no bracket tag)_ × {free_form}\n")
+        parts.append("\n")
+
+    parts.append("### Latest entries\n\n")
+    detail_window = rows[-20:]
+    for r in detail_window:
+        reporter = (r[4] or "").strip() or "?"
+        msg = (r[6] or "").strip()
+        tag_match = tag_re.match(msg)
+        tag = ("[" + tag_match.group(1).strip() + "] ") if tag_match else ""
+        # Extract the most informative summary: tag line + the first 2 informative
+        # bullet lines (Type / Amount / Description for contributions; Program /
+        # Practice Type for practice events; Partner ID for check-ins; etc.).
+        body_lines = [ln.strip() for ln in msg.split("\n") if ln.strip()]
+        if tag_match:
+            body_lines = body_lines[1:]
+        # Strip bullet markers + cap each piece
+        excerpt_pieces: list[str] = []
+        for ln in body_lines[:4]:
+            piece = re.sub(r"^[\-\*]\s+", "", ln).strip()
+            if not piece:
+                continue
+            # Stop at digital signature / verification noise
+            if piece.startswith("My Digital Signature") or piece.startswith("Request Transaction"):
+                break
+            if piece.startswith("This submission was generated") or piece.startswith("Verify submission here"):
+                break
+            if piece.startswith("--------"):
+                break
+            if len(piece) > 90:
+                piece = piece[:89] + "…"
+            excerpt_pieces.append(piece)
+            if len(excerpt_pieces) >= 3:
+                break
+        excerpt = " · ".join(excerpt_pieces).replace("|", "\\|")
+        if not excerpt:
+            excerpt = "(no body)"
+        update_id = (r[0] or "").strip()
+        parts.append(f"- `{update_id[:32]}` · **{reporter}** · {tag}{excerpt}\n")
+    parts.append("\n")
+    return "".join(parts)
 
 
 def _fetch_sheet_sales_markdown(
@@ -1615,6 +1734,7 @@ def _build_markdown(
     sheet_sales_md: str = "",
     rem_md: str = "",
     ops_health_md: str = "",
+    telegram_activity_md: str = "",
 ) -> str:
     now = dt.datetime.now(dt.timezone.utc)
     parts: list[str] = []
@@ -1636,11 +1756,20 @@ def _build_markdown(
     parts.append(f"- Look-back: **{since_days}** calendar days (`{since_d.isoformat()}` → today UTC)\n")
     parts.append(f"- Curated clone set: **{len(REPOS)}** repos (same table as Beer Hall preview)\n\n")
 
-    # Operator-curated strategic frame. Placed before evidence so the LLM reads
-    # goals / metrics *first*, then interprets the activity below. Growth goals
-    # are auto-computed against live sheet data (GROWTH_GOALS.json). Pipeline
-    # metrics are auto-synced from the Holistic Hit List Pipeline Dashboard by
-    # tokenomics/google_app_scripts/pipeline_metrics_snapshot.
+    # Real-time ecosystem signal — placed BEFORE the operational funnel so the
+    # advisor sees what's actually pulsing across the DAO (contributions,
+    # practice events, partner check-ins, inventory moves) before being primed
+    # by the retailer sales pipeline. This counter-weights the historical bias
+    # toward "hill-climbing to retailers" by giving the LLM equal volume of
+    # signal from non-retail surfaces (capoeira, partner outreach, credentialing).
+    if telegram_activity_md:
+        parts.append(telegram_activity_md)
+
+    # Operator-curated strategic frame. Placed AFTER ecosystem activity so the
+    # advisor reads "what is alive right now" before "what we said we are
+    # aiming at". Growth goals are auto-computed against live sheet data
+    # (GROWTH_GOALS.json). Pipeline metrics auto-sync from the Holistic Hit
+    # List Pipeline Dashboard via tokenomics/google_app_scripts/pipeline_metrics_snapshot.
     parts.append(_render_goal_progress_block(ctx_root, _REPO / "google_credentials.json"))
     parts.append(_read_operator_block(
         eco_repo / "metrics" / "weekly.md",
@@ -2062,6 +2191,22 @@ def main() -> int:
         ),
     )
     ap.add_argument(
+        "--with-telegram-activity",
+        action="store_true",
+        help=(
+            "Append the latest N rows of the **Telegram Chat Logs** tab on the Telegram & Submissions "
+            "spreadsheet — real-time ecosystem signal (contributions, practice events, partner check-ins, "
+            "inventory moves) that counter-weights retailer-funnel bias in the advisor's reading. "
+            "Needs market_research/google_credentials.json."
+        ),
+    )
+    ap.add_argument(
+        "--telegram-activity-tail",
+        type=int,
+        default=50,
+        help="With --with-telegram-activity: number of trailing rows to summarize (default 50).",
+    )
+    ap.add_argument(
         "--sheet-sales-months",
         type=int,
         default=14,
@@ -2157,6 +2302,16 @@ def main() -> int:
             qr_scan_depth=max(50, args.sheet_sales_qr_scan),
         )
 
+    # Real-time ecosystem signal from the Telegram Chat Logs tab — the actual
+    # event stream contributors emit across capoeira / contributions / partner
+    # check-ins / inventory / currency conversion. Sits before the retailer
+    # funnel sections so the advisor sees non-retail signal at equal volume.
+    telegram_activity_md = ""
+    if args.with_telegram_activity:
+        telegram_activity_md = _fetch_telegram_recent_activity_markdown(
+            _REPO, tail_n=max(10, args.telegram_activity_tail),
+        )
+
     rem_md = ""
     open_rem_rows: list[dict[str, object]] | None = None
     rj = (args.reminders_json or "").strip()
@@ -2203,6 +2358,7 @@ def main() -> int:
         ctx_root=ctx_root,
         eco_repo=eco_repo,
         sheet_sales_md=sheet_sales_md,
+        telegram_activity_md=telegram_activity_md,
         rem_md=rem_md,
         ops_health_md=ops_health_md,
     )
