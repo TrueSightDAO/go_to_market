@@ -9,7 +9,7 @@
 #   GOOGLE_CREDENTIALS_JSON — contents of market_research/google_credentials.json
 #     (Google service account JSON for live Sheets fetch; growth goals + sales evidence).
 #
-# Script: scripts/generate_advisory_snapshot.py --github-api-publish --with-sheet-sales
+# Script: scripts/generate_advisory_snapshot.py --github-api-publish --with-sheet-sales --with-telegram-activity
 # (no --with-rem in CI — macOS rem CLI not available on Linux runners)
 #
 # Sibling DAO repos are checked out shallowly so `git log` evidence in the snapshot
@@ -151,4 +151,4 @@ jobs:
         env:
           TRUESIGHT_DAO_ORACLE_ADVISORY_PAT: ${{ secrets.ORACLE_ADVISORY_PUSH_TOKEN }}
         run: |
-          python3 scripts/generate_advisory_snapshot.py --github-api-publish --with-sheet-sales
+          python3 scripts/generate_advisory_snapshot.py --github-api-publish --with-sheet-sales --with-telegram-activity
