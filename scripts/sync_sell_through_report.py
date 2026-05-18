@@ -62,13 +62,39 @@ def _read_sku_inventory_types(gc: gspread.Client) -> dict[str, str]:
 
 def _read_partner_inventory(gc: gspread.Client) -> dict[str, dict[str, float]]:
     """Map partner_id → SKU → current units on hand from partners-inventory.json
-    or from the offchain asset location sheet."""
+    or from the offchain asset location sheet.
+
+    Path resolution handles two layouts:
+      - LOCAL dev: ~/Applications/market_research/ and ~/Applications/agroverse-inventory/
+        are siblings, so `_REPO.parent / "agroverse-inventory"` is correct.
+      - CI: the publish-partners-velocity workflow checks out agroverse-inventory
+        INTO market_research at `./agroverse-inventory/`, so the sibling path
+        doesn't exist; the in-workspace path does.
+
+    Without this, CI silently writes a sell-through report with every
+    inventory_units == 0 because the lookup map ends up empty. (Diagnosed
+    2026-05-18 from a published sell-through-report.json showing 0s
+    across all 17 partners despite real inventory in partners-inventory.json.)
+    """
     import json
-    inv_path = _REPO.parent / "agroverse-inventory" / "partners-inventory.json"
+    import sys
+    inv_candidates = [
+        _REPO.parent / "agroverse-inventory" / "partners-inventory.json",  # local: sibling dir
+        _REPO / "agroverse-inventory" / "partners-inventory.json",          # CI: in-workspace subdir
+    ]
+    inv_path = next((p for p in inv_candidates if p.is_file()), None)
+    if inv_path is None:
+        sys.stderr.write(
+            "[warn] partners-inventory.json not found in either layout; "
+            f"checked: {[str(p) for p in inv_candidates]}. "
+            "Sell-through inventory_units will be 0 across all partners.\n"
+        )
+        return {}
     try:
         with open(inv_path) as f:
             data = json.load(f)
-    except Exception:
+    except Exception as e:
+        sys.stderr.write(f"[warn] failed to read {inv_path}: {e}\n")
         return {}
 
     out: dict[str, dict[str, float]] = {}
