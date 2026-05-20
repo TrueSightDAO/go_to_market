@@ -76,7 +76,11 @@ def extract_address_from_html(html):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--sheet', required=True, help='Main Ledger spreadsheet ID')
-    ap.add_argument('--partners-tab', dest='partners_tab', default='Agroverse Partners')
+    ap.add_argument('--partners-tab', dest='partners_tab', default=None,
+                    help='Partners tab name (legacy). When omitted, looks up by --partners-gid.')
+    ap.add_argument('--partners-gid', dest='partners_gid', type=int, default=1983902109,
+                    help='Partners tab gid (stable across renames). Default is the current '
+                         'Main Ledger partners tab; only override for testing alternate workbooks.')
     ap.add_argument('--base-url', default='https://agroverse.shop/partners/')
     ap.add_argument('--refresh-existing', action='store_true')
     ap.add_argument('--only', help='Comma-separated partner_id list to limit updates')
@@ -106,7 +110,13 @@ def main():
         return 1
 
     sh = gc.open_by_key(args.sheet)
-    ws = sh.worksheet(args.partners_tab)
+    if args.partners_tab:
+        ws = sh.worksheet(args.partners_tab)
+    else:
+        ws = sh.get_worksheet_by_id(args.partners_gid)
+        if ws is None:
+            print(f'Partners tab not found by gid {args.partners_gid}', file=sys.stderr)
+            return 1
 
     rows = ws.get_all_values()
     if not rows:

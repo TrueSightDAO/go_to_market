@@ -40,7 +40,13 @@ MAIN_SPREADSHEET_ID = "1GE7PUq-UT6x2rBN-Q2ksogbWpgyuh2SaxJyG_uEK6PU"
 SKUS_SHEET_NAME = "Agroverse SKUs"
 CURRENCIES_SHEET_NAME = "Currencies"
 CONTRIBUTORS_SHEET_NAME = "Contributors contact information"
-PARTNERS_SHEET_NAME = "Agroverse Partners"
+PARTNERS_SHEET_NAME = "Agroverse Partners"  # display name only; the gid below is the stable key
+# Look up the partners tab by gid (stable) — the display name is queued for
+# rename to "DAO Partners" (see agentic_ai_context/OPEN_FOLLOWUPS.md) since
+# rows now include Operator/Supplier/Freight Provider entries beyond just
+# Agroverse retail. Other gid lookups in this file should follow this
+# pattern as they migrate.
+PARTNERS_SHEET_GID = 1983902109
 OFFCHAIN_ASSET_LOCATION_SHEET_NAME = "offchain asset location"
 SHIPMENT_LEDGER_SHEET_NAME = "Shipment Ledger Listing"
 BALANCE_SHEET_NAME = "Balance"
@@ -287,7 +293,9 @@ def calculate_sku_inventory(
 def read_partners_by_contributor(sh: gspread.Spreadsheet) -> dict[str, list[str]]:
     """Map contributor_contact_id -> [partner_id, ...] from Agroverse Partners."""
     try:
-        ws = sh.worksheet(PARTNERS_SHEET_NAME)
+        ws = sh.get_worksheet_by_id(PARTNERS_SHEET_GID)
+        if ws is None:
+            return {}
     except Exception:
         return {}
     rows = _gspread_retry(lambda: ws.get_all_values())
