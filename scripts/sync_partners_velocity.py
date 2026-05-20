@@ -200,7 +200,11 @@ def read_partner_metadata(sh: gspread.Spreadsheet) -> dict[str, dict[str, str]]:
     unset / unknown values default to `Consignment` per the 2026-04-27
     operator-defined default.
     """
-    ws = sh.worksheet(inv.PARTNERS_SHEET_NAME)
+    ws = sh.get_worksheet_by_id(inv.PARTNERS_SHEET_GID)
+    if ws is None:
+        raise SystemExit(
+            f"Partners sheet (gid {inv.PARTNERS_SHEET_GID}) not found in workbook"
+        )
     rows = inv._gspread_retry(lambda: ws.get_all_values())
     if not rows:
         return {}
