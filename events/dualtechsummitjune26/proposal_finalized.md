@@ -1,8 +1,8 @@
 # Dual Tech Summit 2026 — Agroverse cacao activation (FINALIZED)
 
-**Status:** FINALIZED v1.0 — consolidated plan-of-record for Gary's review
+**Status:** FINALIZED v1.1 — plan-of-record, updated 2026-05-24 with Ken's confirmation
 **Date:** 2026-05-24
-**Trigger:** Ken offered to make Agroverse ceremonial cacao available at the event.
+**Trigger & confirmation:** Gary offered to bring **two flasks of cacao + cups** (2026-05-23); Ken confirmed same day — *"Yes, of course. Love to have you there."* Gary's read: Ken will likely provide a table to set up on.
 
 **Event:** SVH Capital Presents — Dual Tech Summit 2026
 **When:** June 26, 2026 *(date per event slug + 3 of 4 proposals; **confirm with Ken**)*
@@ -29,6 +29,8 @@ Four LLM proposals were drafted for this activation, then each cross-reviewed th
 ---
 
 ## 1. Recommendation in one paragraph
+
+> **Confirmed setup (Gary ↔ Ken, 2026-05-23):** Gary offered *"two flasks of cacao and some cups to offer there"*; Ken replied *"Yes, of course. Love to have you there."* The format is **locked: a two-flask pour-and-taste**, almost certainly from **a table Ken provides** — not retail bags handed out, not a booth, not a sales table. This *is* the "err on the side of minimal" activation all four proposals converged on; everything below is sized to it.
 
 Show up as Ken's guest with something real — **not** a retail activation, a booth, or a sales target. The synthesis of all four proposals: **lead with taste, resolve with provenance.** Hand someone a small cup of single-estate cacao (Kimi's "grounding ritual" for people who spend the day orchestrating agents); when they ask "what's this?", the answer is a **cryptographically verifiable supply chain** they can scan and check (Claude's "provenance is a dual-use problem"; DeepSeek's "Purple Cow at a defense summit"). Publicize it the way we always do: the artifact carries the message, one truesight.me methodology essay seeds the narrative beforehand, we capture permission rather than sell, **no full-list newsletter blast**, and the real story ships *after* — only if earned. No discounts, no urgency, no announcement genre.
 
@@ -74,11 +76,11 @@ No booth. Position cacao as the break beverage where people already pause:
 | ClawCamp workshop block | "This is what we drink before we build" — coordinate with ClawCamp hosts to serve at session start |
 | Closing reception | Wind-down; a slow exit instead of rushed goodbyes |
 
-### 4.2 Format *(Kimi §4.2 + DeepSeek §4.1)*
-- **Serve hot, small cups (4–6 oz).** A tasting, not a meal. Pre-grated cacao in a dispenser → no prep friction (DeepSeek).
-- **Both origins available** — default Oscar's (more accessible), offer Paulo's as the adventurous option (Kimi).
-- **Molinillo / whisk** — the preparation is part of the ritual (Kimi).
-- **3–5 retail bags (200g) on display** with QR visible, so people can handle the packaging and scan (DeepSeek §4.1).
+### 4.2 Format — two flasks, pre-brewed *(matches Gary's offer to Ken)*
+- **Two thermal flasks of ceremonial cacao, brewed in advance and kept hot**, poured into small cups (4–6 oz). The flasks hold heat → **no on-site kettle/dispenser needed**; just confirm the venue is fine with us pouring.
+- **Two origins, one per flask** if both are available — e.g. Oscar's (buttery Bahia, the accessible default) and Paulo's (smoky Pará, the adventurous one). Let people choose (Kimi).
+- **Realistic yield:** two flasks ≈ a few dozen 4–6 oz tastings — an intimate pour, not mass sampling. That *is* the smallest-viable-audience scale (§2).
+- **1–2 retail bags (200g) on the table for handling/scanning** — not handed out; they're the physical provenance artifact people can pick up and scan (DeepSeek §4.1).
 
 ### 4.3 The one-line story Gary says when asked "what's this?" *(DeepSeek §4.3 — punchy and accurate)*
 
@@ -89,6 +91,8 @@ If they ask about the AI agents: *"Same pattern they're teaching in the ClawCamp
 **Tree-planting framing — political-literacy guardrail (Kimi, via `RETAILER_ONBOARDING_PLAYBOOK.md` §14, Brasil Kiss lesson):** lead with indigenous inclusion and land restoration in the Xingu corridor, **not** a raw "plant a tree" line.
 
 ### 4.4 QR strategy — two codes, one durable destination
+
+Since we're **pouring, not handing out bags**, the codes live on a small **table placard/card** beside the flasks, optionally on **cup stickers** (OpenAI), and on the **1–2 display bags** people can pick up. Two codes:
 
 | QR | Destination | Source |
 |---|---|---|
@@ -143,31 +147,30 @@ A pre-event "come to a defense summit" send to the wellness list is **wrong-audi
 
 ---
 
-## 8. Materials & logistics *(DeepSeek §6 + Kimi §4.3)*
+## 8. Materials & logistics *(sized to the two-flask offer)*
 
 | Item | Source | Notes |
 |---|---|---|
-| Ceremonial cacao — Oscar's (Bahia) | Existing inventory / Kirsten | ~100–150 servings |
-| Ceremonial cacao — Paulo's (Pará) | Existing inventory | ~50–75 servings for variety |
-| Hot water / kettle / thermos | Venue or bring | Confirm American Legion / War Memorial kitchen + power access |
-| Compostable cups (4–6 oz) | Stock / quick order | |
-| Molinillo / frother | Agroverse kit | Preparation as ritual |
-| Farm cards (minimal) | Print | Farm name, region, QR to farm page — no price, no "buy now" |
-| 3–5 retail bags (200g) w/ QR | Inventory; log `[INVENTORY MOVEMENT]` | For handling/scanning display |
-| QR prints (traceability + opt-in) | `AGROVERSE_QR_CODE_BATCH_GENERATION.md` pipeline | Batch `DTS-2026-06-26` |
-| Table tent / cup stickers | OpenAI copy templates (§ below) | Keep curatorial, not slogan-y |
+| **Two flasks ceremonial cacao — pre-brewed, kept hot** | Inventory / Kirsten prep | e.g. Oscar's (Bahia) + Paulo's (Pará); ≈ a few dozen 4–6 oz pours total |
+| Compostable cups (4–6 oz) + napkins | Stock / quick order | The "some cups" of Gary's offer |
+| "Scan to verify" table placard (farm names + QR) | Print — OpenAI copy | Sits on Ken's table; no booth, no backdrop |
+| 1–2 retail bags (200g) w/ serialized QR | Inventory; display/scan only (not handed out) | Physical provenance artifact |
+| Optional cup stickers w/ opt-in QR | OpenAI template; batch `DTS-2026-06-26` | Permission capture |
+| QR prints (traceability + opt-in) | `AGROVERSE_QR_CODE_BATCH_GENERATION.md` pipeline | Generated after the dry run |
+| Molinillo / frother | Agroverse kit | Only if re-whisking on site — flasks may suffice |
 
-**On-the-ground:** Gary present; 1–2 people during peak breaks; 30 min setup/cleanup. Coordinate cacao service with the ClawCamp block.
+**On-the-ground:** Gary pours; Ken provides the table. Light setup (flasks, cups, placard) — **no kettle** (flasks arrive hot). Coordinate timing with the ClawCamp block.
 
 ---
 
-## 9. Cost *(DeepSeek §8)*
+## 9. Cost *(sized to two flasks)*
 
 | Item | Estimate |
 |---|---|
-| Cacao (3–5 retail bags + servings, from inventory) | ~$85–$140 retail value; cost basis lower |
-| QR prints / cards | Near zero (existing pipeline) |
-| Hot-water setup (if venue doesn't provide) | ~$30 kettle + cups |
+| Cacao for two flasks + 1–2 display bags (from inventory) | Low — cost basis only; a few dozen servings |
+| Cups + napkins | ~$10–$20 |
+| Placard / cards / stickers | Near zero (existing pipeline) |
+| Kettle / hot-water setup | $0 — not needed (flasks pre-brewed) |
 | Gary's time | 1 day (attendance already planned) |
 
 No new tooling, no paid sponsorship. Agroverse is already a listed past Orbis86 partner.
@@ -202,13 +205,15 @@ No new tooling, no paid sponsorship. Agroverse is already a listed past Orbis86 
 
 ---
 
-## 12. Open questions / asks for Ken *(merged across all four)*
+## 12. Open questions / asks for Ken *(updated after Ken's 2026-05-23 yes)*
 
-1. **Confirm date** (June 26, 2026?) **and venue** (War Memorial Veterans Building vs American Legion Post 1/599).
-2. **Kitchen/power access** — hot water, counter space, outlets? Who coordinates on site?
-3. **ClawCamp scheduling overlap** — can we serve at the workshop block start? Who's the ClawCamp point person?
-4. **Ken's expected scope** — "bring a thermos and pour" vs a more visible presence?
-5. **Inventory** — how much Oscar's / Paulo's paste is on hand in SF? Does Kirsten prep blocks in advance?
+**Resolved:** offer confirmed; scope = a two-flask pour + cups (not a booth, not retail). Remaining:
+
+1. **Confirm date** (June 26, 2026?) **and venue** (War Memorial Veterans Building per Luma vs Kimi's "American Legion Post 1/599").
+2. **The table** — Gary's read is Ken provides one. Confirm: a small table for two flasks + cups + placard, near the breaks?
+3. **Pouring** — flasks arrive pre-brewed and hot (no kettle); just confirm the venue is fine with us pouring cacao at the table.
+4. **ClawCamp overlap** — can we pour at the workshop block start? Who's the ClawCamp point person?
+5. **Flask origins** — which two go in the flasks (Oscar's + Paulo's?), and does Kirsten pre-brew?
 6. **Program mention** — is a 60-second invite at a break available (ask only; no pressure)?
 
 ---

@@ -2,6 +2,7 @@
 
 **Companion to:** `proposal_finalized.md` (plan-of-record)
 **Event:** June 26, 2026 *(confirm)* · War Memorial Veterans Building, SF *(confirm)*
+**Format (confirmed 2026-05-23):** two flasks of cacao + cups, poured at a table Ken provides. Not retail, not a booth.
 **Today:** 2026-05-24 (~T-4.5 weeks)
 **Lead:** Claude (infra + narrative) · **On the ground:** Gary · **Strategy:** DeepSeek · **Post-event essay:** Kimi · **Follow-up drafts:** Grok · **Asset templates:** OpenAI
 
@@ -29,15 +30,17 @@ Post-event: leads → Hit List → Grok follow-up;  field-dispatch newsletter
 
 ## Phase 0 — Confirm with Ken (now → ~May 31, T-4wk)  · Owner: Gary
 
+**✅ Already confirmed (2026-05-23):** Gary offered two flasks of cacao + cups; Ken replied *"Yes, of course. Love to have you there."* Attendance and format are locked. Remaining confirmations:
+
 | # | Task | Output | Blocks |
 |---|---|---|---|
-| 0.1 | Confirm **date** (June 26?) and **venue** (War Memorial vs American Legion) | Locked event facts | All printed materials, essay, page |
-| 0.2 | Confirm **kitchen/power/hot-water** access + on-site contact | Logistics go/no-go | Format (hot serve vs sealed bags) |
-| 0.3 | Confirm **scope** — pour-and-mingle vs visible presence; ClawCamp block timing + point person | Staffing plan | Placement (§4.1) |
+| 0.1 | Confirm **date** (June 26?) and **venue** (War Memorial per Luma vs Kimi's "American Legion") | Locked event facts | All printed materials, essay, page |
+| 0.2 | Confirm **the table** Ken provides (size, location near breaks) + that pouring is fine | Setup plan | Placard/table layout |
+| 0.3 | Confirm **ClawCamp block timing** + point person | Pour timing | Placement (§4.1) |
 | 0.4 | Ask (no pressure) about a 60-sec program mention at a break | Yes/no | Optional |
-| 0.5 | Confirm **inventory** on hand (Oscar's / Paulo's); does Kirsten pre-prep blocks? | Quantity plan | Materials order |
+| 0.5 | Decide **which two origins** go in the flasks (Oscar's + Paulo's?); does Kirsten pre-brew? | Flask plan | Prep |
 
-**Exit criteria:** date, venue, beverage permission, and rough quantity are known. → unblocks Phase 1–2.
+**Exit criteria:** date, venue, table, and the two flask origins are known. → unblocks Phase 1–2.
 
 ---
 
@@ -89,16 +92,17 @@ Post-event: leads → Hit List → Grok follow-up;  field-dispatch newsletter
 | # | Task | Owner | Output |
 |---|---|---|---|
 | 4.1 | **Newsletter (no full-list blast):** personal 1:1 notes to in-network folks; segmented/local send only if cleanly possible; or piggyback on a scheduled send; else skip | Gary (+ Claude/Kimi draft) | Permission-respecting touches |
-| 4.2 | Print QR codes, farm cards, table tent, cup stickers | Gary | Physical materials |
-| 4.3 | Pull 3–5 retail bags from inventory; log `[INVENTORY MOVEMENT]` | Gary | Stock + ledger entry |
-| 4.4 | Pack kit: cacao, kettle/thermos, cups, molinillo, napkins, bins | Gary | Event kit |
-| 4.5 | Final venue confirm with Ken (placement, power, ClawCamp timing) | Gary | Locked logistics |
+| 4.2 | Print the "scan to verify" placard + cup stickers (after dry run) | Gary | Physical materials |
+| 4.3 | Pull cacao for two flasks + 1–2 display bags; log `[INVENTORY MOVEMENT]` | Gary | Stock + ledger entry |
+| 4.4 | Day-of: pre-brew the two flasks; pack cups, napkins, placard, display bags | Gary / Kirsten | Event kit (no kettle needed) |
+| 4.5 | Final confirm with Ken (table location, ClawCamp timing) | Gary | Locked logistics |
 
 ---
 
 ## Phase 5 — Event day (June 26, T-0)  · Owner: Gary
 
-- **Taste first, provenance second.** Hand the cup → let them taste Oscar's/Paulo's → mention the QR/ledger only if they ask.
+- **Set up on Ken's table:** two flasks + cups + the "scan to verify" placard + 1–2 display bags. Light footprint, no backdrop.
+- **Taste first, provenance second.** Pour the cup → let them taste Oscar's/Paulo's → mention the QR/ledger only if they ask.
 - Serve at pause moments (§4.1); coordinate with ClawCamp block.
 - No booth, no pitch, no checkout. Capture permission via opt-in QR.
 - Note retail-interest conversations on the spot (name, what they tasted, next step).
@@ -131,7 +135,7 @@ Post-event: leads → Hit List → Grok follow-up;  field-dispatch newsletter
 
 ## Milestone checklist (one-glance)
 
-- [ ] **M0** — Ken confirms date, venue, beverage permission, quantity *(Gary)*
+- [x] **M0a** — Ken confirms attendance + two-flask format *(done 2026-05-23)*  ·  [ ] **M0b** — date, venue, table specifics *(Gary)*
 - [ ] **M1** — truesight.me essay drafted *(Claude)* + asset templates ready *(OpenAI)*
 - [ ] **M2** — Event page live + QR→signup→sheet pipeline wired *(Claude)*
 - [ ] **M3** — ✅ **Dry run passes** + essay published *(Claude)* ← gate
@@ -147,7 +151,7 @@ Post-event: leads → Hit List → Grok follow-up;  field-dispatch newsletter
 1. **Cacao Journeys page** — build the dedicated landing, or point the opt-in QR at the existing signup form? *(Recommended: build it — durable, on-brand, survives the event.)*
 2. **Newsletter** — segment Bay Area vs everyone, or personal 1:1 only? *(Recommended: 1:1 + skip full-list pre-event.)*
 3. **Essay author for the post-event reflection** — Claude or Kimi? *(No rush; decide after the event based on the angle.)*
-4. **Scale** — pour hot (needs kitchen/power) vs sealed bags only (simpler, lower risk)? *(Depends on M0 venue answer.)*
+4. ~~**Scale** — pour hot vs sealed bags?~~ **Resolved (2026-05-23):** two flasks pre-brewed + cups, poured at Ken's table. No kettle, no bag handout.
 
 ---
 
