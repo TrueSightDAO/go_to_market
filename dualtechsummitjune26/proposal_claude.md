@@ -2,7 +2,7 @@
 
 **Author:** Claude (Anthropic) — Agentic AI CMO consult (Seth Godin lens)
 **Date:** 2026-05-24
-**Status:** DRAFT v0.1 — for Gary's review
+**Status:** DRAFT v0.2 — for Gary's review *(v0.2 adds §5 pre-event site + newsletter actions)*
 **Trigger:** Ken offered to make Agroverse ceremonial cacao available at the event.
 
 **Event:** SVH Capital Presents — Dual Tech Summit 2026
@@ -68,7 +68,34 @@ Its audience is wellness consumers; a defense summit is not a Cacao Journey or a
 
 ---
 
-## 5. Non-negotiables (from how we've always operated)
+## 5. Pre-event actions — what goes live before the day
+
+The pre-event job is to **seed the narrative and make verification credible**, not to drum up attendance. Most of our list can't and won't attend a defense-tech summit in SF — so "come see us" is the wrong move on a wellness channel. Here's what each surface does *before* June.
+
+### 5.1 truesight.me — the pre-event home (publish ~T-1 week)
+This is where the pre-event asset lives, because this is the audience that finds the dual-use/provenance story remarkable.
+- **Publish the methodology essay (§4.2) *before* the event** — it seeds the narrative and gives us a single URL to point people to at the venue (on the placard, in conversation, in any DM). Don't hold it for after.
+- **Polish the QR landing destination.** The defense/cyber crowd *will* scan and scrutinize. Whatever the QR resolves to (farm page → shipment → on-chain record) must look current, verifiable, and tamper-evident. A broken or thin landing page kills the entire "you can verify this" claim. Treat this as a release gate, not a nicety.
+- Optional: a one-line "we're field-testing this at Dual Tech Summit" inside the essay — as narrative, never as a banner announcement.
+
+### 5.2 agroverse.shop — light touch only
+The wellness-consumer audience isn't attending; don't force a hero announcement (the site refuses the announcement genre anyway).
+- **Make sure the farm / verification pages the QR lands on are current** — same release gate as §5.1, from the consumer side.
+- At most, a quiet line on an existing surface (e.g. `/wholesale` stockist/events area) — *not* a new homepage banner, *not* a Bean-to-Bliss post. The agroverse story, if there is one, is an **after** piece.
+- **No pre-event agroverse.shop blog post.**
+
+### 5.3 Newsletter — do NOT blast the full list pre-event
+A pre-event "come to a defense summit" send to the wellness list is both **wrong-audience** and the **announcement genre we forbid** (`AGROVERSE_NEWSLETTER_WORKFLOW.md` §7). The full-list newsletter moment is the **post-event story** (§4.4), only if earned. Pre-event, choose from these instead — in order of preference:
+
+1. **Personal, individual messages (preferred).** Direct 1:1 notes from Gary to specific people in his network who'd genuinely want to be *in that room* — founders, investors, crypto/DAO/defense-curious contacts. Our workflow explicitly carves out the personal network from group blasts; this is exactly that case. Warm, specific, one human to another.
+2. **Segmented touch (only if we can segment).** If we can isolate SF-local and/or tech/DAO-curious subscribers, a small targeted send framed as a *story* ("we're bringing a cacao you can cryptographically verify somewhere unexpected — here's why") respects anticipated / personal / relevant. Not the whole list.
+3. **Piggyback (only if a send is already scheduled).** If a newsletter is already going out for a real reason, a single quiet line + link to the truesight essay is acceptable. Don't spin up a dedicated send just for this.
+
+**Anti-patterns to avoid pre-event:** a dedicated full-list "event announcement," manufactured urgency ("RSVP now"), or treating the wellness list as a defense-summit RSVP funnel. Any of these decays the trust asset faster than silence.
+
+---
+
+## 6. Non-negotiables (from how we've always operated)
 
 - **No manufactured urgency, no discount pressure.** The cacao is an invitation and a demonstration, not a flash sale. "Limited time / X% off" betrays the register the list and partners respond to.
 - **Ken is the warm path.** He offered; that's permission-first. Show up as his guest / a long-time contributor — never as a vendor who bought a table.
@@ -78,7 +105,7 @@ Its audience is wellness consumers; a defense summit is not a Cacao Journey or a
 
 ---
 
-## 6. Deliverables
+## 7. Deliverables
 
 | # | Deliverable | Surface | Owner | Priority | Status |
 |---|---|---|---|---|---|
@@ -92,7 +119,7 @@ Its audience is wellness consumers; a defense summit is not a Cacao Journey or a
 
 ---
 
-## 7. Success metrics (permission-based, not units)
+## 8. Success metrics (permission-based, not units)
 
 - **Primary:** number of genuine conversations + QR scans + opt-ins captured.
 - **Secondary:** quality of replies / inbound interest in the provenance stack (Edgar/TrueChain), not chocolate sales.
@@ -101,20 +128,20 @@ Its audience is wellness consumers; a defense summit is not a Cacao Journey or a
 
 ---
 
-## 8. Timeline (event ~1 month out)
+## 9. Timeline (event ~1 month out)
 
 | When | Action |
 |---|---|
 | Now → T-3 wk | Confirm date/logistics with Ken; decide cacao quantity & format (bags vs. brewed servings). |
 | T-3 wk | Generate QR batch (#2); draft essay (#1) and placard (#3). |
 | T-2 wk | Gary review of essay + placard; print placard; finalize opt-in landing (#4). |
-| T-1 wk | Publish essay on truesight.me; pre-stage QR'd cacao. |
+| T-1 wk | Publish essay on truesight.me; **verify QR landing pages** as a release gate (§5.1); Gary sends **personal 1:1 notes** to in-network people who'd want to be in the room (§5.3); pre-stage QR'd cacao. |
 | Event day | Permission capture, conversations, "scan to verify" demo. Ken as host/warm intro. |
 | T+1 wk | Draft post-event newsletter (#5); send only if the room produced a real story. |
 
 ---
 
-## 9. Open questions for Gary
+## 10. Open questions for Gary
 
 1. **Confirmed date** — is it June 26, 2026 (slug) or another June date? Need Ken's confirmation.
 2. **Format** — branded bags handed out, or brewed ceremonial cacao served at a table? (Changes QR strategy and quantity.)
