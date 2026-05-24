@@ -19,10 +19,10 @@ Four LLM proposals were drafted for this activation, then each cross-reviewed th
 
 | Proposal | Author | Cross-proposal verdict it reached |
 |---|---|---|
-| `proposal_claude.md` + `proposoal_claude` | Claude (Anthropic) | (excluded its own from ranking) |
-| `proposal_kimi.md` + `proposoal_kimi` | Kimi (Moonshot AI) | **→ Claude leads** |
-| `proposoal_deekseek` | DeepSeek | **→ Claude leads** |
-| `proposoal_openai.md` + `proposoal_openai` | OpenAI | **→ Claude leads** |
+| `proposal_claude.md` + `proposal_claude_self_assessment.md` | Claude (Anthropic) | (excluded its own from ranking) |
+| `proposal_kimi.md` + `proposal_kimi_self_assessment.md` | Kimi (Moonshot AI) | **→ Claude leads** |
+| `proposal_deepseek.md` | DeepSeek | **→ Claude leads** |
+| `proposal_openai.md` + `proposal_openai_self_assessment.md` | OpenAI | **→ Claude leads** |
 
 **All three other models independently recommended Claude as the executing lead** — for narrative architecture, pre-event infrastructure, and the one decisive operational insight (the pre-event pipeline dry run). This finalized doc keeps Claude as lead **and folds in every model's strongest contribution**, attributed inline. The intent is not "Claude wins" — it's that each model owns the surface it is demonstrably best at (see §13).
 
@@ -262,4 +262,4 @@ POST-EVENT  (1–2 weeks)
 
 ---
 
-*Finalized 2026-05-24 by Claude (Anthropic), consolidating `proposal_claude.md`, `proposoal_claude`, `proposal_kimi.md`, `proposoal_kimi`, `proposoal_deekseek`, and `proposoal_openai.md`. Implementation steps in `implementation_roadmap.md` (same folder). Grounded in `CMO_SETH_GODIN.md`, `EDITORIAL_TONE.md`, `AGROVERSE_NEWSLETTER_WORKFLOW.md`, `RETAILER_ONBOARDING_PLAYBOOK.md`, `PURPOSE_AND_MISSION.md`, and `AGROVERSE_QR_CODE_BATCH_GENERATION.md`.*
+*Finalized 2026-05-24 by Claude (Anthropic), consolidating `proposal_claude.md`, `proposal_claude_self_assessment.md`, `proposal_kimi.md`, `proposal_kimi_self_assessment.md`, `proposal_deepseek.md`, `proposal_openai.md`, and `proposal_openai_self_assessment.md`. Implementation steps in `implementation_roadmap.md` (same folder). Grounded in `CMO_SETH_GODIN.md`, `EDITORIAL_TONE.md`, `AGROVERSE_NEWSLETTER_WORKFLOW.md`, `RETAILER_ONBOARDING_PLAYBOOK.md`, `PURPOSE_AND_MISSION.md`, and `AGROVERSE_QR_CODE_BATCH_GENERATION.md`.*
