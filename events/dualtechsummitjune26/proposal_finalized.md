@@ -77,9 +77,9 @@ No booth. Position cacao as the break beverage where people already pause:
 | Closing reception | Wind-down; a slow exit instead of rushed goodbyes |
 
 ### 4.2 Format — two flasks, pre-brewed *(matches Gary's offer to Ken)*
-- **Two thermal flasks of ceremonial cacao, brewed in advance and kept hot**, poured into small cups (4–6 oz). The flasks hold heat → **no on-site kettle/dispenser needed**; just confirm the venue is fine with us pouring.
+- **Two thermal flasks of ceremonial cacao, brewed in advance and kept hot**, poured into small cups (3 oz). The flasks hold heat → **no on-site kettle/dispenser needed**; just confirm the venue is fine with us pouring.
 - **Two origins, one per flask** if both are available — e.g. Oscar's (buttery Bahia, the accessible default) and Paulo's (smoky Pará, the adventurous one). Let people choose (Kimi).
-- **Realistic yield:** two flasks ≈ a few dozen 4–6 oz tastings — an intimate pour, not mass sampling. That *is* the smallest-viable-audience scale (§2).
+- **Realistic yield:** two flasks ≈ a few dozen 3 oz tastings — an intimate pour, not mass sampling. That *is* the smallest-viable-audience scale (§2).
 - **1–2 retail bags (200g) on the table for handling/scanning** — not handed out; they're the physical provenance artifact people can pick up and scan (DeepSeek §4.1).
 
 ### 4.3 The one-line story Gary says when asked "what's this?" *(DeepSeek §4.3 — punchy and accurate)*
@@ -151,8 +151,8 @@ A pre-event "come to a defense summit" send to the wellness list is **wrong-audi
 
 | Item | Source | Notes |
 |---|---|---|
-| **Two flasks ceremonial cacao — pre-brewed, kept hot** | Inventory / Kirsten prep | e.g. Oscar's (Bahia) + Paulo's (Pará); ≈ a few dozen 4–6 oz pours total |
-| Compostable cups (4–6 oz) + napkins | Stock / quick order | The "some cups" of Gary's offer |
+| **Two flasks ceremonial cacao — pre-brewed, kept hot** | Inventory / Kirsten prep | e.g. Oscar's (Bahia) + Paulo's (Pará); ≈ a few dozen 3 oz pours total |
+| Compostable cups (3 oz) + napkins | Stock / quick order | The "some cups" of Gary's offer |
 | "Scan to verify" table placard (farm names + QR) | Print — OpenAI copy | Sits on Ken's table; no booth, no backdrop |
 | 1–2 retail bags (200g) w/ serialized QR | Inventory; display/scan only (not handed out) | Physical provenance artifact |
 | Optional cup stickers w/ opt-in QR | OpenAI template; batch `DTS-2026-06-26` | Permission capture |
