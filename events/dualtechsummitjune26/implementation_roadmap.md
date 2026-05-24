@@ -2,7 +2,7 @@
 
 **Companion to:** `proposal_finalized.md` (plan-of-record)
 **Event:** June 26, 2026 *(confirm)* · War Memorial Veterans Building, SF *(confirm)*
-**Format (confirmed 2026-05-23):** two flasks of cacao + cups, poured at a table Ken provides. Not retail, not a booth.
+**Format (confirmed 2026-05-23; contents 2026-05-24):** two flasks — **Oscar's ceremonial cacao + Paulo's cacao tea** — + 3 oz cups, poured at a table Ken provides. Not retail, not a booth.
 **Today:** 2026-05-24 (~T-4.5 weeks)
 **Lead:** Claude (infra + narrative) · **On the ground:** Gary · **Strategy:** DeepSeek · **Post-event essay:** Kimi · **Follow-up drafts:** Grok · **Asset templates:** OpenAI
 
@@ -38,7 +38,7 @@ Post-event: leads → Hit List → Grok follow-up;  field-dispatch newsletter
 | 0.2 | Confirm **the table** Ken provides (size, location near breaks) + that pouring is fine | Setup plan | Placard/table layout |
 | 0.3 | Confirm **ClawCamp block timing** + point person | Pour timing | Placement (§4.1) |
 | 0.4 | Ask (no pressure) about a 60-sec program mention at a break | Yes/no | Optional |
-| 0.5 | Decide **which two origins** go in the flasks (Oscar's + Paulo's?); does Kirsten pre-brew? | Flask plan | Prep |
+| 0.5 | Flasks = **Oscar's ceremonial cacao + Paulo's cacao tea** *(decided 2026-05-24)*; confirm Kirsten pre-brews both | Flask plan | Prep |
 
 **Exit criteria:** date, venue, table, and the two flask origins are known. → unblocks Phase 1–2.
 

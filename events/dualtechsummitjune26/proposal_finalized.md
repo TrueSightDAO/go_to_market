@@ -76,9 +76,9 @@ No booth. Position cacao as the break beverage where people already pause:
 | ClawCamp workshop block | "This is what we drink before we build" — coordinate with ClawCamp hosts to serve at session start |
 | Closing reception | Wind-down; a slow exit instead of rushed goodbyes |
 
-### 4.2 Format — two flasks, pre-brewed *(matches Gary's offer to Ken)*
-- **Two thermal flasks of ceremonial cacao, brewed in advance and kept hot**, poured into small cups (3 oz). The flasks hold heat → **no on-site kettle/dispenser needed**; just confirm the venue is fine with us pouring.
-- **Two origins, one per flask** if both are available — e.g. Oscar's (buttery Bahia, the accessible default) and Paulo's (smoky Pará, the adventurous one). Let people choose (Kimi).
+### 4.2 Format — two flasks, pre-brewed *(per Gary, 2026-05-24)*
+- **Two thermal flasks — Oscar's Farm ceremonial cacao (Bahia) + Paulo's cacao tea (Pará) — brewed in advance and kept hot**, poured into 3 oz cups. The flasks hold heat → **no on-site kettle needed**; just confirm the venue is fine with us pouring.
+- **Two registers, two farms:** Oscar's rich **ceremonial cacao** for the full thing; Paulo's lighter, caffeine-gentle **cacao-fruit tea** for a softer or second pour. Both trace to a named farm — let people choose.
 - **Realistic yield:** two flasks ≈ a few dozen 3 oz tastings — an intimate pour, not mass sampling. That *is* the smallest-viable-audience scale (§2).
 - **1–2 retail bags (200g) on the table for handling/scanning** — not handed out; they're the physical provenance artifact people can pick up and scan (DeepSeek §4.1).
 
@@ -151,7 +151,8 @@ A pre-event "come to a defense summit" send to the wellness list is **wrong-audi
 
 | Item | Source | Notes |
 |---|---|---|
-| **Two flasks ceremonial cacao — pre-brewed, kept hot** | Inventory / Kirsten prep | e.g. Oscar's (Bahia) + Paulo's (Pará); ≈ a few dozen 3 oz pours total |
+| **Flask 1 — Oscar's Farm ceremonial cacao (Bahia)**, pre-brewed + hot | Inventory / Kirsten prep | The rich ceremonial drink |
+| **Flask 2 — Paulo's cacao tea (Pará)**, pre-brewed + hot | Inventory / Kirsten prep | Lighter cacao-fruit infusion; ≈ a few dozen 3 oz pours across both |
 | Compostable cups (3 oz) + napkins | Stock / quick order | The "some cups" of Gary's offer |
 | "Scan to verify" table placard (farm names + QR) | Print — OpenAI copy | Sits on Ken's table; no booth, no backdrop |
 | 1–2 retail bags (200g) w/ serialized QR | Inventory; display/scan only (not handed out) | Physical provenance artifact |
@@ -213,7 +214,7 @@ No new tooling, no paid sponsorship. Agroverse is already a listed past Orbis86 
 2. **The table** — Gary's read is Ken provides one. Confirm: a small table for two flasks + cups + placard, near the breaks?
 3. **Pouring** — flasks arrive pre-brewed and hot (no kettle); just confirm the venue is fine with us pouring cacao at the table.
 4. **ClawCamp overlap** — can we pour at the workshop block start? Who's the ClawCamp point person?
-5. **Flask origins** — which two go in the flasks (Oscar's + Paulo's?), and does Kirsten pre-brew?
+5. **Flasks** — Oscar's ceremonial cacao + Paulo's cacao tea (decided 2026-05-24); confirm Kirsten pre-brews both.
 6. **Program mention** — is a 60-second invite at a break available (ask only; no pressure)?
 
 ---
