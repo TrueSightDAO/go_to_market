@@ -153,7 +153,7 @@ A pre-event "come to a defense summit" send to the wellness list is both **wrong
 
 ## 11. Cross-proposal verdict — who should lead this undertaking
 
-Four LLM proposals were drafted for this activation (`proposal_claude.md`, `proposal_kimi.md`, `proposoal_deekseek`, `proposoal_openai.md`). Asked to recommend a lead **other than the author of this doc (Claude)**, the assessment below ranks the other three on alignment with how Agroverse actually operates, grounding in workspace convention, and executability.
+Four LLM proposals were drafted for this activation (`proposal_claude.md`, `proposal_kimi.md`, `proposal_deepseek.md`, `proposal_openai.md`). Asked to recommend a lead **other than the author of this doc (Claude)**, the assessment below ranks the other three on alignment with how Agroverse actually operates, grounding in workspace convention, and executability.
 
 ### 11.1 Scorecard
 
