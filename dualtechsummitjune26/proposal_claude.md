@@ -151,4 +151,40 @@ A pre-event "come to a defense summit" send to the wellness list is both **wrong
 
 ---
 
+## 11. Cross-proposal verdict — who should lead this undertaking
+
+Four LLM proposals were drafted for this activation (`proposal_claude.md`, `proposal_kimi.md`, `proposoal_deekseek`, `proposoal_openai.md`). Asked to recommend a lead **other than the author of this doc (Claude)**, the assessment below ranks the other three on alignment with how Agroverse actually operates, grounding in workspace convention, and executability.
+
+### 11.1 Scorecard
+
+| Axis | Kimi | DeepSeek | OpenAI | Claude (this doc) |
+|---|---|---|---|---|
+| Reframe fit (right audience + register) | ✅ "grounding ritual for people who orchestrate agents" | ✅ strong CMO framing | ⚠️ generic event marketing | ✅ provenance-as-dual-use |
+| **Pre-event newsletter** (the hard rule) | ✅ **no full-list blast**; personal / ClawCamp / piggyback | ⚠️ full-list send at T-7 | ❌ **T-7 blast + T-2 reminder to non-openers** | ✅ no full-list blast |
+| Grounding in real conventions | ✅ cites real `event-details-registration/` precedent + Brasil Kiss lesson | ✅ canonical farm naming, Hit List states | ⚠️ `[City]` placeholders, no venue | ✅ |
+| Operational completeness | ✅ post-event loop, DApp Remark, past-tense page update | ✅✅ best logistics / cost / risk register | ⚠️ asset-heavy, lighter ops | ⚠️ lighter on logistics |
+| Factual accuracy | ⚠️ **venue wrong** (says American Legion) | ✅ War Memorial | ⚠️ venue unspecified | ✅ War Memorial |
+
+### 11.2 Recommendation: **Kimi leads**
+
+- Nails the hardest part — the **no-pre-event-blast** newsletter discipline — with the correct alternatives (personal 1:1s, ClawCamp's already-permissioned channels, piggyback on a scheduled send, the real story *after*). Straight out of `AGROVERSE_NEWSLETTER_WORKFLOW.md` §7.
+- **Best-grounded:** knew the actual `event-details-registration/` page pattern on agroverse.shop (cited a real prior event) and pulled the Brasil Kiss political-literacy lesson from `RETAILER_ONBOARDING_PLAYBOOK.md` §14. Lived familiarity, not generic competence.
+- Its core narrative — *cacao as the grounding ritual for builders who keep humans in the loop* — is remarkable to **this specific room** (ClawCamp / agent orchestration) and errs on the side of minimal ("no booth, no banner").
+
+### 11.3 Runner-up: **DeepSeek** — fold its logistics in
+
+DeepSeek is strongest on pure execution: its checklist, cost table, and risk register are the most actionable of the four. Recommended structure: **Kimi leads; merge DeepSeek's §6 checklist / §8 cost / §9 risk register into Kimi's plan.** DeepSeek's one miss is the same temptation the others share — a full-list pre-event newsletter send, which Kimi correctly avoids.
+
+### 11.4 Not recommended: **OpenAI**
+
+Least aligned: a T-7 full-list blast *plus* a T-2 "reminder to non-openers," a homepage hero banner, and RSVP/urgency language — exactly the announcement/interruption genre both sites refuse. Strong digital-marketing mechanics (UTM, schema.org), wrong house style for this audience and channel.
+
+### 11.5 Fix required regardless of owner
+
+**Venue discrepancy.** Kimi lists *American Legion SF Post 1/599*; the Luma page (and DeepSeek + this doc) say *War Memorial Veterans Building, 401 Van Ness Ave*. The authoritative event page says War Memorial — whoever owns this confirms with Ken and corrects Kimi's draft.
+
+*(Verdict authored by Claude; the author excluded its own proposal from the ranking per the brief.)*
+
+---
+
 *Prepared as an Agentic AI CMO consult. Grounded in `CMO_SETH_GODIN.md`, `EDITORIAL_TONE.md`, `AGROVERSE_NEWSLETTER_WORKFLOW.md`, `PURPOSE_AND_MISSION.md`, and the `AGROVERSE_QR_CODE_BATCH_GENERATION` provenance workflow. Companion event precedent: `expo_west_2026_agroverse_schedule.md`.*
