@@ -1,6 +1,6 @@
 # Provenance is a dual-use problem
 
-*Draft v0.1 for truesight.me/blog — by Gary Teh, long time contributor*
+*Draft v0.2 for truesight.me/blog — by Gary Teh, long time contributor*
 *(checklist item 1.1 — angle + register draft for Gary's review; publish at T-1 week, before the summit)*
 
 ---
@@ -29,23 +29,17 @@ This is the part worth saying plainly: the provenance is not a story we tell abo
 
 "Dual-use" usually describes a technology born in the commercial world that turns out to serve defense, or the reverse. The summit is organized around exactly that crossing.
 
-Provenance is dual-use in a quieter direction. The verification discipline that a defense supply chain needs — signed records, custody you can audit, origin you can prove — is the same discipline a regenerative one needs to pay the right farmer, plant the real tree, and tell no lies about either. The cup is the demonstration that the discipline travels. Point it at a missile component and you get assurance. Point it at a cacao bean and you get something closer to trust between strangers, which is the only thing a small farm in the Amazon and a buyer in San Francisco have ever had to work with.
+Provenance is dual-use in a quieter direction. The verification discipline that a defense or logistics supply chain needs — signed records, custody you can audit, origin you can prove — is the same discipline a regenerative one needs to pay the right farmer, plant the real tree, and tell no lies about either.
+
+That is the idea worth sharing in that room, more than the cacao itself: a system built to track a *cacao bag* is, underneath, a system for tracking the flow of *anything* through many hands — components, materiel, parts whose origin and chain of custody have to hold up. We happened to build it for beans, because beans are what we move. Point the same signed-ledger, chain-of-custody machinery at a different supply chain and very little changes but the label on the thing being tracked. Dual-use here isn't a pivot we'd have to make later; it's already the shape of the tool. The cup is just the friendliest possible way to hold it in your hand.
 
 There is a second crossing in the room, and it is why the venue fits. The summit's workshop teaches people to orchestrate agents — to route work through systems of small, coordinated programs. The cacao on the table is routed by the same kind of patterns: the [inventory events](https://truesight.me), the restock signals, the partner records that move a harvest from Ilhéus to a table in the War Memorial building are largely handled by agents reading from one shared ledger. The drink in the cup is, in a literal sense, the output of an agent-orchestrated supply chain. It is a reasonable thing to hand someone who has spent the morning building one.
 
-## Why we are not selling anything
+## The cup is the conversation starter
 
-It would be easy to turn this into a sales motion. It would also be a mistake, and naming why is the point of writing this down.
+Hand someone a cup, let them taste it, and the QR is there if they want to follow it home — to a named farm, a real tree, a chain that holds. If a few people walk away turning over how that same plumbing would map onto whatever *they* move, that is the most we'd hope for: a working example of a dual-use idea, passed hand to hand with a good drink.
 
-The people in that room are not our retail audience. Pitching them ceremonial cacao as a wellness product would be a category error, and pressing a discount on them would spend the one thing the table is actually there to build. We are not measuring units. We are measuring whether a roomful of people who build verifiable systems will pick up a cup, scan it, and find that the claim holds. If they do, a few of them will remember — not the chocolate, but the fact that a regenerative supply chain met their standard for proof. That is the whole return.
-
-So the table has no price on it. It has a farmer's name, a place, a taste, and one invitation to verify. The first move is always the cup. The provenance is for whoever asks.
-
-## What we are actually testing
-
-Quietly, this is a field test of a claim we make often and should be willing to put in front of skeptics: that a small operation can carry the same standard of evidence as a large one, and that the standard is not a burden but the thing that lets it be trusted at a distance. A defense-tech summit is an unusually honest place to test it. The people there will not be charmed by the story. They will scan the code.
-
-We think it will hold. If it does, the more interesting work begins after the flasks are empty — writing down what the room asked, what surprised us, and where the proof was thinner than we'd like. Provenance is not a feature you finish. It is a discipline you keep, one cup, one signed row, one tree at a time.
+Provenance isn't a feature you finish. It's a discipline you keep — one cup, one signed row, one tree at a time — and a pattern that travels a lot further than the thing it was built to track.
 
 ---
 
