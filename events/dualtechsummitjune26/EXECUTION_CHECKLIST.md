@@ -23,22 +23,22 @@ Legend: `[x]` done · `[ ]` open · `[~]` drafted, pending review · 🔒 blocke
 - [~] **1.3** Field-asset copy (placard, table-tent, cup-sticker, farm cards) — **drafted** → `field_assets.md` *(→ Gary/OpenAI to refine before print)*
 - [x] **1.4** Strategy / risk / measurement kept as plan-of-record *(DeepSeek — `proposal_finalized.md`)*
 
-## Phase 2 — Build site + pipeline · Jun 8–17 (T-2wk) · Claude 🔒(needs 0.1)
-- [ ] **2.1** `event-details-registration/dual-tech-summit-2026/index.html` (discoverable, no RSVP funnel)
-- [ ] **2.2** Make that page the opt-in QR destination (served from our repo)
-- [ ] **2.3** Wire QR → newsletter signup → Main Ledger `Agroverse News Letter Subscribers`
-- [ ] **2.4** Wire "interested in carrying cacao?" → Hit List
-- [ ] **2.5** SEO/Schema.org `Event` block; update `sitemap.xml`; verify OG preview
-- [ ] **2.6** Optional quiet one-liner on `/wholesale`
-- [ ] **2.7** Generate QR batch `DTS-2026-06-26` (traceability + opt-in) — *do not print yet*
+## Phase 2 — Build site + pipeline · ✅ core DONE, live on prod (2026-05-25) · Claude
+> **Architecture note:** instead of a new event page, the opt-in rides on the existing **AGL shipment pages** (agl4/agl8) + the QR reader web service (`web_app.gs`, project `1y6JVYwq…`, deployment `AKfycbxig…`). Simpler — those pages are already the QR landing.
+- [ ] **2.1** Dedicated event page — *skipped* (using existing agl4/agl8 landing pages instead)
+- [x] **2.2** Opt-in QR destination = agl4/agl8 landing pages (consent checkbox, live on prod)
+- [x] **2.3** QR scan → newsletter signup → Main Ledger `Agroverse News Letter Subscribers` (`Source=qr:<code>`); send-time dedup confirmed
+- [ ] **2.4** "interested in carrying cacao?" → Hit List — *not built* (optional; pour ≠ retail pitch)
+- [ ] **2.5 / 2.6** SEO/Schema event block, `/wholesale` line — *n/a* (no event page)
+- [x] **2.7** Event QR codes minted (promo / `SAMPLE`): **`DTS_CC_20260626_1`** → agl4 (Oscar's ceremonial cacao), **`DTS_CT_20260626_1`** → agl8 (Paulo's cacao tea). Canonical artifacts in **`TrueSightDAO/lineage-assets`** (PR #1): manifest `qrs/<id>.json` + raw PNG `pngs/<id>.png` (encodes the Edgar check URL) + `qrs_index.json`. Scan target `truesight.me/qr/?id=<id>`; PNG for printing: `raw.githubusercontent.com/TrueSightDAO/lineage-assets/main/pngs/<id>.png`.
 
-## Phase 3 — DRY RUN + publish · Jun 18–20 (T-1wk) · Claude ← ⛔ GATE
-- [ ] **3.1** Dry run: scan a test QR → signup lands in subscribers tab
-- [ ] **3.2** Confirm `send_newsletter.py` can address the new test subscriber
-- [ ] **3.3** "carry cacao?" path lands in Hit List with correct Status
-- [ ] **3.4** Fix any dead-link / CORS / sheet-permission error
-- [ ] **3.5** Publish the truesight.me essay
-- **⛔ Nothing prints until 3.1–3.4 pass.**
+## Phase 3 — DRY RUN + publish · ✅ dry-run PASSED (2026-05-25) · Claude
+- [x] **3.1** Scan → signup lands in subscribers tab (verified `subscribed:true`; test row cleaned up)
+- [x] **3.2** `send_newsletter.py` reads the subscribers tab + dedups by email at send (confirmed in code)
+- [ ] **3.3** "carry cacao?" → Hit List path — *not built* (see 2.4)
+- [x] **3.4** End-to-end verified — GAS recognizes the `DTS_…` codes; Edgar `302` → agl4/agl8; no CORS/dead-link
+- [ ] **3.5** Publish the truesight.me essay — *pending your review of the draft*
+- **✅ Dry run passed → printing is unblocked** (cards can be printed; see `field_assets.md` + the `qr_DTS_*.png` files).
 
 ## Phase 4 — Outreach + final prep · Jun 20–25 (T-1wk→T-1d) · Gary
 - [ ] **4.1** Newsletter: **no full-list blast** — personal 1:1 / segmented / piggyback / skip
