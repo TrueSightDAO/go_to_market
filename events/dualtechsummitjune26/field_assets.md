@@ -60,11 +60,11 @@ Back:
 
 **Oscar's Farm — ceremonial cacao · Bahia, Brazil**
 > Deep, dark European chocolate — exceptionally buttery, a velvety mouthfeel, earth and wood underneath, a smooth low-acidity finish.
-> agroverse.shop/farms/oscar-bahia · `[provenance QR]`
+> agroverse.shop/farms/oscar-bahia · QR: **`DTS_CC_20260626_1`** → `lineage-assets/pngs/DTS_CC_20260626_1.png`
 
 **Paulo's Farm — cacao tea · Pará, the Amazon**
 > Brewed from the cacao fruit rather than the bean — bright, gently fruity, naturally low-stimulant. The softer pour, or a second cup after the ceremonial.
-> agroverse.shop/farms/paulo-la-do-sitio-para · `[provenance QR]`
+> agroverse.shop/farms/paulo-la-do-sitio-para · QR: **`DTS_CT_20260626_1`** → `lineage-assets/pngs/DTS_CT_20260626_1.png`
 
 ---
 
