@@ -1,11 +1,11 @@
 # Provenance is a dual-use problem
 
-*Draft v0.2 for truesight.me/blog — by Gary Teh, long time contributor*
+*Draft v0.3 for truesight.me/blog — by Gary Teh, long time contributor*
 *(checklist item 1.1 — angle + register draft for Gary's review; publish at T-1 week, before the summit)*
 
 ---
 
-Next month we are bringing two flasks of cacao to a defense-tech summit. Not a booth, not a pitch — two flasks and a stack of small cups, poured at a table between sessions. The room will be full of people who build for mission-critical environments: robotics, cyber, space, autonomy. The most interesting thing on the table will not be the chocolate.
+Next month we are bringing two flasks of cacao to a defense-tech summit, poured into small cups at a table between sessions. The room will be full of people who build for mission-critical environments: robotics, cyber, space, autonomy. The most interesting thing on the table will not be the chocolate.
 
 It will be the question printed next to it: *taste it, then trace it.*
 
