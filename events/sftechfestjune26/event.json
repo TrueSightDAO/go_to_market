@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "slug": "sftechfestjune26",
+  "name": "SF Tech Fest 2026",
+  "status": "planning",
+  "status_note": "Date/venue confirmed; Phase 0 host confirmations (snack table, self-serve, shoutout, passes) pending with Soniya.",
+  "date": "2026-06-12",
+  "end_date": "2026-06-12",
+  "start_time": "11:00",
+  "end_time": "17:00",
+  "timezone": "America/Los_Angeles",
+  "venue": "ICC, 525 Los Coches St, Milpitas, CA 95035",
+  "city": "Milpitas, CA",
+  "host": { "name": "Soniya", "org": "SF Tech Fest" },
+  "format": "Two flasks — Oscar's ceremonial cacao + Paulo's cacao tea — 3 oz cups, self-serve at the snack table.",
+  "products": ["Oscar's ceremonial cacao (Bahia)", "Paulo's cacao tea (Pará)"],
+  "qr_codes": [
+    { "id": "SFTF_CC_2026", "landing": "agl4", "product": "Oscar's ceremonial cacao", "status": "pending" },
+    { "id": "SFTF_CT_2026", "landing": "agl8", "product": "Paulo's cacao tea", "status": "pending" }
+  ],
+  "owner": "Gary",
+  "next_milestone": { "phase": 0, "due": "2026-06-05", "what": "Confirm snack table / self-serve / stage shoutout / passes with Soniya" },
+  "reminders": { "apple_reminder": true, "apple_calendar": "Work", "check_in_date": "2026-05-27" },
+  "docs": {
+    "checklist": "EXECUTION_CHECKLIST.md",
+    "proposal": "proposal.md",
+    "roadmap": "implementation_roadmap.md"
+  },
+  "links": {}
+}
