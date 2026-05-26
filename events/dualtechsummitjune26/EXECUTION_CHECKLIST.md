@@ -15,7 +15,7 @@ Legend: `[x]` done · `[ ]` open · `[~]` drafted, pending review · 🔒 blocke
 - [ ] **0.2** Confirm **the table** (size, location near breaks) + pouring is fine — 📞 Ken check-in
 - [ ] **0.3** Confirm **ClawCamp block timing** + point person — 📞 Ken check-in
 - [ ] **0.4** Ask (no pressure) about a 60-sec program mention at a break — 📞 Ken check-in
-- [~] **0.5** Flasks decided: **Oscar's ceremonial cacao + Paulo's cacao tea** *(2026-05-24)*; still confirm Kirsten pre-brews both
+- [x] **0.5** Flasks + pre-brew **confirmed by Kirsten** *(2026-05-24)* — **Oscar's ceremonial cacao + Paulo's cacao tea**; ingredients in transit from Brazil *(watch arrival vs. Jun 26)*
 
 > **Draft message to Ken** *(send ~May 27; venue already confirmed)*:
 >
