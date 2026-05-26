@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "description": "Index of Agroverse cacao event activations. Source of truth = each events/<slug>/event.json; regenerate with build_index.py. Convention doc: agentic_ai_context/EVENTS.md",
-  "generated_at": "2026-05-26T21:14:47Z",
+  "generated_at": "2026-05-26T21:18:16Z",
   "generated_by": "build_index.py",
   "count": 3,
   "events": [
@@ -55,7 +55,8 @@
       "docs": {
         "checklist": "EXECUTION_CHECKLIST.md",
         "proposal": "proposal.md",
-        "roadmap": "implementation_roadmap.md"
+        "roadmap": "implementation_roadmap.md",
+        "field_assets": "field_assets.md"
       },
       "links": {},
       "path": "sftechfestjune26"

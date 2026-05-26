@@ -24,7 +24,8 @@
   "docs": {
     "checklist": "EXECUTION_CHECKLIST.md",
     "proposal": "proposal.md",
-    "roadmap": "implementation_roadmap.md"
+    "roadmap": "implementation_roadmap.md",
+    "field_assets": "field_assets.md"
   },
   "links": {}
 }
