@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "slug": "dualtechsummitjune26",
+  "name": "Dual Tech Summit 2026",
+  "status": "planning",
+  "status_note": "Venue + Kirsten pre-brew confirmed; date/table/ClawCamp timing pending with Ken (check-in May 27).",
+  "date": "2026-06-26",
+  "end_date": "2026-06-26",
+  "start_time": null,
+  "end_time": null,
+  "timezone": "America/Los_Angeles",
+  "venue": "War Memorial Veterans Building, San Francisco, CA",
+  "city": "San Francisco, CA",
+  "host": { "name": "Ken", "org": "Orbis86 / ClawCamp (SVH Capital Dual Tech Summit)" },
+  "format": "Two flasks — Oscar's ceremonial cacao + Paulo's cacao tea — 3 oz cups, poured at a table Ken provides.",
+  "products": ["Oscar's ceremonial cacao (Bahia)", "Paulo's cacao tea (Pará)"],
+  "qr_codes": [
+    { "id": "DTS_CC_20260626_1", "landing": "agl4", "product": "Oscar's ceremonial cacao", "status": "minted" },
+    { "id": "DTS_CT_20260626_1", "landing": "agl8", "product": "Paulo's cacao tea", "status": "minted" }
+  ],
+  "owner": "Gary",
+  "next_milestone": { "phase": 0, "due": "2026-05-31", "what": "Confirm date / table / ClawCamp timing with Ken" },
+  "reminders": { "apple_reminder": true, "apple_calendar": "Work", "check_in_date": "2026-05-27" },
+  "docs": {
+    "checklist": "EXECUTION_CHECKLIST.md",
+    "proposal": "proposal_finalized.md",
+    "roadmap": "implementation_roadmap.md",
+    "field_assets": "field_assets.md"
+  },
+  "links": { "luma": "https://luma.com/dualtechsummitjune26" }
+}

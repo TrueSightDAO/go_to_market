@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "slug": "onsenglobalforumjune23",
+  "name": "Onsen Global Leaders Forum 2026",
+  "status": "planning",
+  "status_note": "Format set (≈20 sealed co-branded cacao-tea bags in a basket, no pour); Phase 0 pending with Tiffine (logo, table placement, registration).",
+  "date": "2026-06-23",
+  "end_date": "2026-06-23",
+  "start_time": "17:30",
+  "end_time": "19:30",
+  "timezone": "America/Los_Angeles",
+  "venue": "Japan Innovation Campus, Palo Alto, CA",
+  "city": "Palo Alto, CA",
+  "host": { "name": "Tiffine", "org": "Onsen Global" },
+  "format": "≈20 individually sealed cacao-tea bags in a small basket on the snack table, each label co-branded Onsen Global × Agroverse with a provenance QR. No flasks, no pour, no booth.",
+  "products": ["Paulo's cacao tea (Pará)"],
+  "qr_codes": [
+    { "id": "OGLF_CT_20260623_1", "landing": "agl8", "product": "Paulo's cacao tea", "status": "pending" }
+  ],
+  "owner": "Gary",
+  "next_milestone": { "phase": 0, "due": "2026-06-16", "what": "Confirm logo / table placement / registration with Tiffine" },
+  "reminders": { "apple_reminder": false, "apple_calendar": null, "check_in_date": null },
+  "docs": {
+    "checklist": "EXECUTION_CHECKLIST.md",
+    "proposal": "proposal.md",
+    "roadmap": "implementation_roadmap.md"
+  },
+  "links": {}
+}
