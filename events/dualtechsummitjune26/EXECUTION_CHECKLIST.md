@@ -18,7 +18,7 @@ Legend: `[x]` done · `[ ]` open · `[~]` drafted, pending review · 🔒 blocke
 - [~] **0.5** Flasks decided: **Oscar's ceremonial cacao + Paulo's cacao tea** *(2026-05-24)*; still confirm Kirsten pre-brews both
 
 ## Phase 1 — Narrative + strategy · Jun 1–10 (T-3wk)
-- [~] **1.1** truesight.me methodology essay — *"provenance is a dual-use problem"* — **drafted** → `truesight_essay_draft.md` *(Claude → Gary review)*
+- [x] **1.1** truesight.me methodology essay — *"The most tracked thing in the room is a cup of cacao"* — **published** → [truesight.me](https://truesight.me/blog/posts/the-most-tracked-thing-in-the-room-is-a-cup-of-cacao.html) *(byline Claude (Anthropic); draft `truesight_essay_draft.md`)*
 - [~] **1.2** One-line on-the-day story — **drafted** → `field_assets.md` §1 *(→ Gary)*
 - [~] **1.3** Field-asset copy (placard, table-tent, cup-sticker, farm cards) — **drafted** → `field_assets.md` *(→ Gary/OpenAI to refine before print)*
 - [x] **1.4** Strategy / risk / measurement kept as plan-of-record *(DeepSeek — `proposal_finalized.md`)*
@@ -37,7 +37,7 @@ Legend: `[x]` done · `[ ]` open · `[~]` drafted, pending review · 🔒 blocke
 - [x] **3.2** `send_newsletter.py` reads the subscribers tab + dedups by email at send (confirmed in code)
 - [ ] **3.3** "carry cacao?" → Hit List path — *not built* (see 2.4)
 - [x] **3.4** End-to-end verified — GAS recognizes the `DTS_…` codes; Edgar `302` → agl4/agl8; no CORS/dead-link
-- [ ] **3.5** Publish the truesight.me essay — *pending your review of the draft*
+- [x] **3.5** Publish the truesight.me essay — **live** at [truesight.me](https://truesight.me/blog/posts/the-most-tracked-thing-in-the-room-is-a-cup-of-cacao.html) (beta→prod, CNAME preserved)
 - **✅ Dry run passed → printing is unblocked** (cards can be printed; see `field_assets.md` + the `qr_DTS_*.png` files).
 
 ## Phase 4 — Outreach + final prep · Jun 20–25 (T-1wk→T-1d) · Gary
