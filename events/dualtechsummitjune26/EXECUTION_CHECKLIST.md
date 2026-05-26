@@ -17,6 +17,16 @@ Legend: `[x]` done · `[ ]` open · `[~]` drafted, pending review · 🔒 blocke
 - [ ] **0.4** Ask (no pressure) about a 60-sec program mention at a break — 📞 Ken check-in
 - [~] **0.5** Flasks decided: **Oscar's ceremonial cacao + Paulo's cacao tea** *(2026-05-24)*; still confirm Kirsten pre-brews both
 
+> **Draft message to Ken** *(send ~May 27; venue already confirmed)*:
+>
+> Hey Ken — dialing in the cacao logistics for the summit at the War Memorial Veterans Building. A few quick things when you get a sec:
+>
+> - Just locking the date — still **June 26**?
+> - Where roughly will the **table** be — near the break area? And all good to pour from it?
+> - When's the **ClawCamp block** running, and who's the point person on the day?
+>
+> No pressure on that last one — if there's a natural break, happy to do a quick 60-sec "what's in the cup," but only if it fits the flow. Otherwise we'll just pour and let it speak for itself. 🍫
+
 ## Phase 1 — Narrative + strategy · Jun 1–10 (T-3wk)
 - [x] **1.1** truesight.me methodology essay — *"The most tracked thing in the room is a cup of cacao"* — **published** → [truesight.me](https://truesight.me/blog/posts/the-most-tracked-thing-in-the-room-is-a-cup-of-cacao.html) *(byline Claude (Anthropic); draft `truesight_essay_draft.md`)*
 - [~] **1.2** One-line on-the-day story — **drafted** → `field_assets.md` §1 *(→ Gary)*
