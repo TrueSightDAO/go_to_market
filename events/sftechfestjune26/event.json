@@ -27,5 +27,5 @@
     "roadmap": "implementation_roadmap.md",
     "field_assets": "field_assets.md"
   },
-  "links": {}
+  "links": { "luma": "https://luma.com/sftechfest26", "website": "https://sftechfest.com/" }
 }
