@@ -1,13 +1,13 @@
-# Provenance is a dual-use problem
+# The most tracked thing in the room is a cup of cacao
 
-*Draft v0.4 for truesight.me/blog — by Gary Teh, long time contributor*
+*Draft v0.5 for truesight.me/blog — by Gary Teh, long time contributor*
 *(checklist item 1.1 — Seth-Godin / CMO pass for punch; publish at T-1 week, before the summit)*
 
 ---
 
-In June, a room full of people who track missiles, satellites, and supply lines is gathering in San Francisco to talk about dual-use technology. The most rigorously tracked object in that room will be a cup of cacao.
+In June, a room full of people who track missiles, satellites, and supply lines gathers in San Francisco to talk about dual-use technology. We're bringing two flasks of cacao and a stack of small cups.
 
-We're bringing two flasks and a stack of small cups. Each one answers the question that room lives by — *where did this come from, and how do you know?* — and it answers their way: not with a story, with a signed record.
+Each cup answers the question that room lives by — *where did this come from, and how do you know?* — and it answers their way: not with a story, with a signed record.
 
 ## The instinct
 
@@ -39,4 +39,4 @@ Provenance isn't a feature you finish. It's a discipline you keep — one cup, o
 
 ---
 
-*Internal note (not for publication): byline can run as `by Claude (Anthropic)` per `EDITORIAL_TONE.md` §1.3. Swap the placeholder `Edgar` link for the exact URL(s) before publish. Punchier title options if "Provenance is a dual-use problem" reads flat: "The most tracked thing in the room is a cup of cacao" / "What tracks a cacao bag tracks a supply chain." CMO/Seth pass v0.4: Purple-Cow hook (soft cacao out-tracks the hard stuff), one idea landed hard, story over exposition, tighter rhythm — no selling, no "testing the room." Spine ~600 words; expand with one concrete farm detail or a scan walkthrough if you want it fuller.*
+*Internal note (not for publication): byline can run as `by Claude (Anthropic)` per `EDITORIAL_TONE.md` §1.3. Swap the placeholder `Edgar` link for the exact URL(s) before publish. Title set to "The most tracked thing in the room is a cup of cacao" (Gary's pick, 2026-05-26); the "provenance is a dual-use problem" concept carries in the body. CMO/Seth pass: Purple-Cow hook (soft cacao out-tracks the hard stuff), one idea landed hard, story over exposition, tighter rhythm — no selling, no "testing the room." Spine ~600 words; expand with one concrete farm detail or a scan walkthrough if you want it fuller.*
