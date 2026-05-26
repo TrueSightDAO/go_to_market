@@ -1,7 +1,7 @@
 # Dual Tech Summit 2026 — Execution checklist
 
 **Companion to:** `proposal_finalized.md` (plan-of-record) · `implementation_roadmap.md` (phasing)
-**Event:** June 26, 2026 *(confirm)* · War Memorial Veterans Building, SF *(confirm)*
+**Event:** June 26, 2026 *(confirm date)* · War Memorial Veterans Building, SF *(venue confirmed 2026-05-26)*
 **Format:** two flasks — **Oscar's ceremonial cacao + Paulo's cacao tea** — in 3 oz cups, poured at a table Ken provides *(confirmed 2026-05-23; contents 2026-05-24)*
 **How to use:** check items as done; each phase is time-bounded. The **Ken check-in** column flags where a partner-host touch is due (see "Reminders" at the bottom for how those are tracked).
 
@@ -11,7 +11,7 @@ Legend: `[x]` done · `[ ]` open · `[~]` drafted, pending review · 🔒 blocke
 
 ## Phase 0 — Confirm with Ken · now → ~May 31 (T-4wk) · Gary
 - [x] **0.0** Offer made + accepted — two flasks + cups *(2026-05-23)*
-- [ ] **0.1** Confirm **date** (June 26?) + **venue** (War Memorial vs "American Legion") — 📞 Ken check-in
+- [ ] **0.1** Confirm **date** (June 26?) — 📞 Ken check-in · *venue = **War Memorial Veterans Building, SF** (confirmed 2026-05-26)*
 - [ ] **0.2** Confirm **the table** (size, location near breaks) + pouring is fine — 📞 Ken check-in
 - [ ] **0.3** Confirm **ClawCamp block timing** + point person — 📞 Ken check-in
 - [ ] **0.4** Ask (no pressure) about a 60-sec program mention at a break — 📞 Ken check-in
