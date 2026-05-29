@@ -104,7 +104,6 @@ ADVISORY_KEYWORDS = (
 # PROJECT_INDEX “pipelines” → local clone dirname under Applications/ (must exist to compare git).
 PIPELINE_TO_REPO: dict[str, str] = {
     "go_to_market": "market_research",
-    "openclaw": "agentic_ai_context",
     "TrueChain": "TrueChain",
     "oracle": "iching_oracle",
 }
@@ -1898,7 +1897,6 @@ def _canonical_context_urls() -> list[str]:
     return [
         f"{_RAW_CTX_BASE}/WORKSPACE_CONTEXT.md",
         f"{_RAW_CTX_BASE}/PROJECT_INDEX.md",
-        f"{_RAW_CTX_BASE}/OPENCLAW_WHATSAPP.md",
         f"{_RAW_CTX_BASE}/GOVERNANCE_SOURCES.md",
         f"{_RAW_CTX_BASE}/LEDGER_CONVERSION_AND_REPACKAGING.md",
         f"{_RAW_CTX_BASE}/CONTEXT_UPDATES.md",
