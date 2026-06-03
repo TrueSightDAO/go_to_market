@@ -48,12 +48,18 @@ Hosts Circles comes back as ``Yes``. Default-on so existing photo-rejected
 rows (which were never crawled by site keyword) get re-evaluated under the
 new criteria. Pass ``--no-rescue-rejected`` to opt out.
 
-Rescue of stuck rows: ``AI: Enrich — manual`` and ``AI: Photo needs review``
+Rescue of stuck rows: ``AI: Photo needs review``
 rows are also eligible for promotion if their website reveals circle-hosting
 signal. These are dead-end states where the row is waiting for human action;
 a clear circle keyword on the site is strong enough signal to fast-track them
 straight to ``AI: Warm up prospect`` (if email present) or
 ``AI: Enrich with contact`` (if not).
+
+Excluded from rescue: ``AI: Enrich — manual``. Once
+``hit_list_enrich_contact.py`` has processed a row and concluded "no email
+and no contact form," rescuing it back to ``AI: Enrich with contact`` creates a
+feedback loop (the enrich cron at :35 and the circle-detect cron at :50
+ping-pong the status every hour).
 
 Idempotent: only writes empty Hosts Circles cells unless ``--force``.
 
@@ -473,14 +479,15 @@ def main() -> None:
                     time.sleep(max(0.0, args.sleep_write))
             elif (
                 cur_status in PROMOTABLE_FROM_REJECTED_STATUSES
-                or cur_status == PROMOTABLE_FROM_MANUAL
                 or cur_status == PROMOTABLE_FROM_NEEDS_REVIEW
             ):
                 # Rescue dead-end rows: no-fit-signal (current name) OR
-                # legacy AI: Photo rejected OR enrichment-gave-up OR
-                # photo-needs-review. All are stuck states where a clear
-                # circle-hosting signal on the website is strong enough to
-                # fast-track back into the pipeline.
+                # legacy AI: Photo rejected OR photo-needs-review.
+                # NOT PROMOTABLE_FROM_MANUAL (AI: Enrich — manual) — once
+                # hit_list_enrich_contact.py has crawled the site and
+                # concluded "no email / no contact form", rescuing the row
+                # back to AI: Enrich with contact creates a feedback loop
+                # (enrich → manual → rescue → enrich → … every hour).
                 if cur_status in PROMOTABLE_FROM_REJECTED_STATUSES and not rescue_rejected:
                     pass  # user opted out of rejected rescue
                 else:
@@ -529,7 +536,6 @@ def main() -> None:
                     time.sleep(max(0.0, args.sleep_write))
             elif (
                 status in PROMOTABLE_FROM_REJECTED_STATUSES
-                or status == PROMOTABLE_FROM_MANUAL
                 or status == PROMOTABLE_FROM_NEEDS_REVIEW
             ):
                 if status in PROMOTABLE_FROM_REJECTED_STATUSES and not rescue_rejected:
