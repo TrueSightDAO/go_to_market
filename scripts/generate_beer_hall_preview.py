@@ -205,7 +205,7 @@ def main() -> int:
     parts.append(
         "_Draft manually from the evidence below. No GitHub URLs in Message 1. "
         "Opener line (required when posting for real):_\n\n"
-        "*OpenClaw × Cursor — daily state of the DAO (not a manual post from Gary)*\n\n"
+        "*Automated daily digest of the DAO*\n\n"
         "_TLDR bullets (plain language, DAO-relevant):_\n\n"
         "- …\n"
     )
