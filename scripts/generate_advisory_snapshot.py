@@ -1777,6 +1777,19 @@ def _build_markdown(
         "Refreshed by tokenomics `pipeline_metrics_snapshot` GAS.",
     ))
 
+    # Attention surfaces — the stable catalog of WHERE attention can go.
+    # At daily oracle readings the advisor maps the draw's quality onto 1–3
+    # of these surfaces (quality × staleness × mission-weight), checking each
+    # surface's named signal before recommending. Canonical:
+    # agentic_ai_context/ATTENTION_SURFACES.md (+ attention_surfaces.json).
+    parts.append(_read_operator_block(
+        ctx_root / "ATTENTION_SURFACES.md",
+        "## Attention surfaces (catalog for draw-time direction)",
+        "Stable catalog of the ecosystem's ten attention surfaces (signals, levers, staleness "
+        "hints, trigram affinities). The oracle advisor maps each daily draw onto 1–3 of these, "
+        "evidence-first.",
+    ))
+
     # Operations health — supply pipeline + cash float. Placed before
     # activity/log evidence so the oracle reads concrete stock/freight/cash
     # state ahead of narrative context. Source of truth for the structured
