@@ -28,15 +28,27 @@ Section 6 has the specific questions.
 
 ## 2. What Agroverse is (60-second version)
 
-- **Product:** Ceremonial-grade cacao, sourced direct from family farms in
-  Bahia and Pará, Brazil. Flagship SKU: **200 g bag, retails at USD $25**.
-  Secondary SKUs: caramelized cacao beans, cacao tea.
+- **Product:** Single-estate cacao, sourced direct from family farms in Bahia
+  and Pará, Brazil. We're going down the **single-estate / vintage route** —
+  like wine, every year is a new vintage, from the same farm or a newly
+  onboarded one, so the catalog naturally refreshes each harvest and bags are
+  inherently limited-run. Flagship SKU: **ceremonial-grade 200 g bag, retails
+  at USD $25**. Newly launched: **single-estate 50 g chocolate bars at USD
+  $10** — first production run (40+ bars) **completely sold out**. Secondary
+  SKUs: caramelized cacao beans, cacao tea. The portfolio is widening beyond
+  ceremonial cacao; ceremonial is the wedge, not the ceiling.
 - **Mission mechanics:** Agroverse is the commerce arm of
-  [TrueSight DAO](https://truesight.me). Every bag funds Amazon rainforest
-  regeneration — one bag → one tree financed, and every bag carries a **QR code
-  that traces back to the actual farm and shipment ledger** the cacao came
-  from. The entire supply chain is publicly ledgered (18 managed shipment /
-  program ledgers to date, AGL0–AGL15 plus program funds).
+  [TrueSight DAO](https://truesight.me). Every bag and bar funds Amazon
+  rainforest regeneration — one unit → one tree financed, and every unit
+  carries a **QR code that traces back to the actual farm and shipment
+  ledger** it came from. The entire supply chain is publicly ledgered (18
+  managed shipment / program ledgers to date, AGL0–AGL15 plus program funds).
+- **The QR is also a commerce + retention surface, not just provenance:**
+  during online events, attendees scan the QR to buy on the spot; after
+  purchase, customers register their email (if not already registered) to
+  receive **updates on their tree being planted**. Every sale therefore feeds
+  a zero-party email list with a built-in reason to open — a remarketing
+  asset most CPG brands have to manufacture.
 - **Store:** [agroverse.shop](https://agroverse.shop) — static site + Stripe
   checkout. No app. Orders ship from a San Francisco warehouse.
 - **Distribution today:** ~37 retail partners (apothecaries, metaphysical
@@ -84,20 +96,37 @@ never done is **pour paid traffic into the top of it**.
 
 ## 4. Unit economics & where the ad budget comes from
 
+**Ceremonial cacao (200 g bag):**
+
 | Lever | Value |
 |---|---|
-| Retail price (200 g bag) | $25.00 |
+| Retail price | $25.00 |
 | Retailer commission baked into that price | ~$8.00/bag (actual: $7.50 at our newest partner) |
 | Consignment cost price to retailers | $17.00/bag (shipping included) |
 | Observed DTC basket | 2–3 bags, $50–75 subtotal, customer pays shipping (~$8.60) |
 | Observed reorder cycle | ~5 months on a multi-bag basket (~1 bag/1.5 months consumed) |
 
-The core arbitrage: **on a DTC sale, the ~$8/bag that would have gone to a
-retailer is unspent**. On an observed 2–3 bag basket that's **$16–24 of
-first-order margin headroom available for CAC** — before counting repeat
-purchases. If the Shoreline pattern generalizes (~$200/yr per retained
+**Chocolate bar (50 g, new):**
+
+| Lever | Value |
+|---|---|
+| Retail price | $10.00 |
+| Cost price to us (incl. tree planting) | $6.00 |
+| Gross margin | $4.00/bar (40%) |
+| First run (40+ bars) | Sold out |
+
+The core arbitrage on the bags: **on a DTC sale, the ~$8/bag that would have
+gone to a retailer is unspent**. On an observed 2–3 bag basket that's
+**$16–24 of first-order margin headroom available for CAC** — before counting
+repeat purchases. If the Shoreline pattern generalizes (~$200/yr per retained
 customer), the LTV-justifiable CAC is meaningfully higher than the first-order
 headroom alone.
+
+The $10 bar adds a second shape: a **low-friction, impulse-priced entry
+offer** (sold out on its first run) that plants a tree, captures an email for
+tree-planting updates, and creates a natural upsell path into the $25
+ceremonial bag — potentially a better paid-ads landing offer than asking cold
+traffic for a $25+ first purchase.
 
 We don't yet know our blended margins well enough to commit to a target
 CAC/ROAS — that's one of the things we want your help framing (Section 6).
@@ -152,14 +181,19 @@ campaigns. Specifically:
    realistically need to start on Meta? Is founder-shot/UGC-style sufficient,
    or does this category need produced assets? How fast should we expect to
    iterate?
-6. **Landing experience.** Send traffic to existing product pages, or build
+6. **Entry offer / SKU strategy.** Would you lead paid traffic with the $10
+   bar (impulse price, 40% margin, tree + email capture, sold-out first run)
+   and upsell to the $25 ceremonial bag — or lead with the higher-AOV
+   ceremonial basket directly? Does the vintage / limited-run model (every
+   year a new harvest, inherently scarce) change how you'd structure offers?
+7. **Landing experience.** Send traffic to existing product pages, or build
    dedicated landers? Anything about our checkout flow you'd fix first
    (e.g. customer-paid shipping at $8.60 on a $25 item)?
-7. **Process & people.** What does the operating cadence look like (weekly
+8. **Process & people.** What does the operating cadence look like (weekly
    reviews? creative pipeline? budget reallocation rules)? At our stage, is
-   this in-house-founder-run, fractional specialist, or agency work — and
-   what would you watch for in each?
-8. **Failure modes.** What are the classic ways a sub-$5k/month DTC ads
+   this operator-run, fractional specialist, or agency work — and what would
+   you watch for in each?
+9. **Failure modes.** What are the classic ways a sub-$5k/month DTC ads
    program wastes its budget, and how do we pre-empt them?
 
 ---
