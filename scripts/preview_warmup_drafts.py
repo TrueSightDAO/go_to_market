@@ -224,7 +224,26 @@ def _lint(draft: dict, body: str, subject: str, hit: dict | None, dapp_count: in
         out.append((SEV_RED, "fallback_shop_name", "Body uses fallback 'your shop' (shop name was missing at gen time)"))
     em = draft.get("to_email", "")
     if em and GENERIC_INBOX_RE.match(em):
-        out.append((SEV_RED, "generic_inbox", f"Generic inbox ({em.split('@')[0]}@) — likely not read by decision maker"))
+        # Policy change 2026-06-05 (data-backed): a generic prefix on the
+        # shop's OWN domain is its primary contact channel, not a dead drop —
+        # The Way Home Shop converted to Partnered via info@thewayhomeshop.com,
+        # and Seagrape / Esalen / Good Vibrations replies all came from
+        # own-domain generic inboxes. Own-domain generic → blue (informational,
+        # auto-sendable). Generic on a freemail or unverifiable domain stays
+        # red (third-party domains are caught by email_domain_mismatch below).
+        em_dom = em.rsplit("@", 1)[-1].lower()
+        site_host = _website_host(hit.get("website", "")) if hit else ""
+        own_domain = bool(
+            site_host
+            and (em_dom == site_host
+                 or em_dom.endswith("." + site_host)
+                 or site_host.endswith("." + em_dom))
+        )
+        if own_domain:
+            out.append((SEV_BLUE, "generic_inbox_own_domain",
+                        f"Generic prefix on the shop's own domain ({em}) — primary contact channel"))
+        else:
+            out.append((SEV_RED, "generic_inbox", f"Generic inbox ({em.split('@')[0]}@) — likely not read by decision maker"))
     first_3_lines = "\n".join(body.splitlines()[:3])
     if GENERIC_SALUTATION_RE.search(first_3_lines):
         out.append((SEV_RED, "no_first_name", "Salutation is generic ('Hi there' / 'Hello team') — no first-name parse"))
