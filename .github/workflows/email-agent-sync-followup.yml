@@ -126,3 +126,20 @@ jobs:
           else
             python scripts/draft_prospect_reply_responses.py --execute
           fi
+
+      - name: Classify replies + auto-park unambiguous negatives
+        # soft_no_with_date -> Deferred / Revisit later (+ Follow Up Date),
+        # soft_no -> On Hold, hard_no -> Rejected; referral names -> Sales
+        # Process Notes. Only rows still in automated-outreach statuses are
+        # parked; every classification leaves a DApp Remarks audit row.
+        # See agentic_ai_context/WARMUP_AUTOSEND_PLAN.md (PR3).
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
+            python scripts/classify_warmup_replies.py
+          else
+            python scripts/classify_warmup_replies.py --execute
+          fi
