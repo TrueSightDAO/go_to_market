@@ -58,6 +58,10 @@ import suggest_manager_followup_drafts as smf  # noqa: E402  (creds + sheet help
 
 DRAFTS_WS = "Email Agent Drafts"
 AUTOSEND_NOTE = "auto-sent by send_clean_warmup_drafts"
+# Gmail label maintained on exactly the drafts the operator needs to look at —
+# the human review queue, self-updating each run. AI/Warm-up alone can't serve
+# as the queue because it also holds the clean tier the auto-sender will drain.
+REVIEW_QUEUE_LABEL = "AI/Needs Review"
 
 
 def _now_iso() -> str:
@@ -113,6 +117,40 @@ def _flip_rows_sent(ws, decisions: list[dict]) -> int:
     if cells:
         ws.update_cells(cells, value_input_option="RAW")
     return len(decisions)
+
+
+def _reconcile_review_label(service, skipped: list[dict]) -> None:
+    """Keep the AI/Needs Review Gmail label in sync with the flagged cohort:
+    add it to every skipped draft, strip it from anything that is no longer
+    in the queue (became clean, was sent, or was discarded). Diff-based, so
+    re-runs are cheap no-ops."""
+    label_id = smf.ensure_user_label_id(service, REVIEW_QUEUE_LABEL)
+    want = {d["message_id"] for d in skipped if d.get("message_id")}
+    have: set[str] = set()
+    page_token = None
+    while True:
+        resp = service.users().messages().list(
+            userId="me", labelIds=[label_id], maxResults=500, pageToken=page_token,
+        ).execute()
+        have |= {m["id"] for m in resp.get("messages") or []}
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    for mid in want - have:
+        try:
+            service.users().messages().modify(
+                userId="me", id=mid, body={"addLabelIds": [label_id]}).execute()
+        except HttpError as e:
+            sys.stderr.write(f"  WARNING: review-label add failed for {mid}: {e}\n")
+    for mid in have - want:
+        try:
+            service.users().messages().modify(
+                userId="me", id=mid, body={"removeLabelIds": [label_id]}).execute()
+        except HttpError as e:
+            sys.stderr.write(f"  WARNING: review-label remove failed for {mid}: {e}\n")
+    if want - have or have - want:
+        print(f"review label '{REVIEW_QUEUE_LABEL}': +{len(want - have)} "
+              f"-{len(have - want)} (queue now {len(want)})")
 
 
 def main(argv=None) -> int:
@@ -171,6 +209,8 @@ def main(argv=None) -> int:
     if not args.execute:
         print("\ndry-run (default) — pass --execute to send.")
         return 0
+
+    _reconcile_review_label(service, skipped)
 
     sent: list[dict] = []
     for d in to_send:
