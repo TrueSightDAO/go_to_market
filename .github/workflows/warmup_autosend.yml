@@ -1,0 +1,96 @@
+# Auto-send the linter-clean tier of AI/Warm-up Gmail drafts.
+#
+# Graduation of the human send-click for machine-checked first touches —
+# see agentic_ai_context/WARMUP_AUTOSEND_PLAN.md (assessment, guardrails,
+# rollback) and HIT_LIST_STATE_MACHINE.md § Operator review loop.
+#
+# Guardrails:
+#   - Scheduled runs are armed ONLY when repo variable WARMUP_AUTOSEND_ENABLED
+#     == 'true' (Settings → Secrets and variables → Actions → Variables).
+#     Unset/false = the workflow no-ops; drafts wait for human review as before.
+#   - Drip cadence: weekdays ~9am PT, default cap 12 sends per run
+#     (send_clean_warmup_drafts.py --max-sends).
+#   - Any red/yellow lint flag, or Hosts Circles=Yes, keeps a draft in the
+#     human review queue (preview_warmup_drafts.py).
+#   - Rollback: set WARMUP_AUTOSEND_ENABLED=false. No deploy needed.
+#
+# After sending, the same run invokes sync_email_agent_followup.py so the
+# Gmail label swap (AI/Warm-up → AI/Sent Warm-up) and the Email Agent Follow Up
+# log row land immediately instead of waiting for the hourly sync.
+#
+# Secrets: GOOGLE_CREDENTIALS_JSON, GMAIL_TOKEN_JSON
+
+name: Warm-up auto-send (clean tier)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — list the would-send cohort, no Gmail sends'
+        type: boolean
+        default: false
+      max_sends:
+        description: 'Cap sends this run'
+        type: string
+        default: '12'
+  schedule:
+    - cron: '5 17 * * 1-5'   # weekdays 17:05 UTC ≈ 9:05am PT
+
+concurrency:
+  group: warmup-autosend
+  cancel-in-progress: false
+
+jobs:
+  autosend:
+    name: Send clean warm-up drafts
+    runs-on: ubuntu-latest
+    # Scheduled runs require the arm switch; manual dispatch reflects explicit
+    # operator intent and runs regardless (still dry-run capable via input).
+    if: github.event_name == 'workflow_dispatch' || vars.WARMUP_AUTOSEND_ENABLED == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create Google credentials file
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: |
+          echo "$GOOGLE_CREDENTIALS_JSON" > google_credentials.json
+
+      - name: Send clean warm-up drafts
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+          INPUT_MAX_SENDS: ${{ github.event.inputs.max_sends }}
+        run: |
+          MAX="${INPUT_MAX_SENDS:-12}"
+          if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
+            python scripts/send_clean_warmup_drafts.py --max-sends "$MAX"
+          else
+            python scripts/send_clean_warmup_drafts.py --execute --max-sends "$MAX"
+          fi
+
+      - name: Reconcile labels + Follow Up log (immediate sync)
+        if: github.event.inputs.dry_run != 'true'
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+        run: |
+          python scripts/sync_email_agent_followup.py

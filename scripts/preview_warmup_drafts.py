@@ -52,7 +52,9 @@ PENDING_STATUS = "pending_review"
 HOSTS_CIRCLES_COL = "Hosts Circles"
 
 GENERIC_INBOX_RE = re.compile(
-    r"^(info|sales|hello|contact|admin|support|orders|hi|team|enquiry|enquiries|inquiry|inquiries)@",
+    r"^(info|sales|hello|contact|admin|support|orders|hi|team|enquiry|enquiries|inquiry|inquiries"
+    r"|compliance|billing|accounts|accounting|legal|privacy|webmaster|postmaster"
+    r"|noreply|no-reply|donotreply|office|reception|frontdesk|filler)@",
     re.IGNORECASE,
 )
 GENERIC_SALUTATION_RE = re.compile(
@@ -60,6 +62,31 @@ GENERIC_SALUTATION_RE = re.compile(
 )
 PLACEHOLDER_RE = re.compile(r"\{\{[^}]+\}\}|\[[A-Z_]{3,}\]")
 NON_LATIN_RE = re.compile(r"[Ѐ-ӿ一-鿿぀-ヿ؀-ۿ]")
+
+# Consumer mailbox providers — a shop legitimately using one of these tells us
+# nothing about ownership, so the email_domain_mismatch rule only fires for
+# *custom* recipient domains that differ from the Hit List Website domain.
+FREEMAIL_DOMAINS = {
+    "gmail.com", "yahoo.com", "ymail.com", "hotmail.com", "outlook.com",
+    "live.com", "msn.com", "aol.com", "icloud.com", "me.com", "mac.com",
+    "proton.me", "protonmail.com", "pm.me", "mail.com", "gmx.com", "gmx.net",
+    "comcast.net", "att.net", "verizon.net", "sbcglobal.net", "qq.com",
+    "zoho.com", "fastmail.com", "hey.com",
+}
+
+
+def _website_host(url: str) -> str:
+    """Bare registrable host from a Hit List Website cell ('' on miss).
+    'https://www.seagrapeapothecary.com/about' -> 'seagrapeapothecary.com'."""
+    u = (url or "").strip()
+    if not u:
+        return ""
+    u = re.sub(r"^[a-z][a-z0-9+.-]*://", "", u, flags=re.IGNORECASE)
+    host = u.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0].strip().lower()
+    host = host.split("@")[-1].split(":")[0]  # drop userinfo / port
+    if host.startswith("www."):
+        host = host[4:]
+    return host
 
 SEV_RED = "red"
 SEV_YELLOW = "yellow"
@@ -97,6 +124,7 @@ def _load_hit_list_index(ws) -> tuple[dict, dict, int | None]:
     city_i = hdr.get("City")
     state_i = hdr.get("State")
     status_i = hdr.get("Status")
+    website_i = hdr.get("Website")
     aw_i = hdr.get(HOSTS_CIRCLES_COL)
 
     by_email: dict[str, dict] = {}
@@ -112,6 +140,7 @@ def _load_hit_list_index(ws) -> tuple[dict, dict, int | None]:
             "notes": smf.cell(row, notes_i) if notes_i is not None else "",
             "city_state": ", ".join(x for x in [city, state] if x),
             "status": smf.cell(row, status_i) if status_i is not None else "",
+            "website": smf.cell(row, website_i) if website_i is not None else "",
         }
         if em and em not in by_email:
             by_email[em] = payload
@@ -207,6 +236,21 @@ def _lint(draft: dict, body: str, subject: str, hit: dict | None, dapp_count: in
         out.append((SEV_RED, "body_too_short", f"Body is only {len(body)} chars — generation likely truncated"))
     if not body.strip():
         out.append((SEV_RED, "body_empty", "Body is empty (Gmail draft missing or fetch failed)"))
+    if em and hit is not None:
+        em_dom = em.rsplit("@", 1)[-1].lower()
+        site_host = _website_host(hit.get("website", ""))
+        if (
+            site_host
+            and em_dom not in FREEMAIL_DOMAINS
+            and em_dom != site_host
+            and not em_dom.endswith("." + site_host)
+            and not site_host.endswith("." + em_dom)
+        ):
+            out.append((
+                SEV_RED,
+                "email_domain_mismatch",
+                f"Recipient domain {em_dom} ≠ website domain {site_host} — may be an agency / third-party inbox",
+            ))
 
     if hit is not None:
         if not hit.get("city_state"):
