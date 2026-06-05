@@ -110,6 +110,10 @@ SESSION.headers.update(
 PLACE_ID_IN_NOTES = re.compile(
     r"(?i)place[_\s-]*id\s*:\s*([A-Za-z0-9_-]{12,})",
 )
+# Dead inboxes recorded by handle_warmup_bounces.py — never re-pick these.
+BOUNCED_EMAIL_IN_NOTES = re.compile(
+    r"(?i)bounced_email=([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})",
+)
 DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
 
 EMAIL_RE = re.compile(
@@ -695,6 +699,15 @@ def main() -> None:
 
         page_triples, combined = collect_fetched_pages(website, args.sleep_fetch, 12000)
         emails = regex_emails(combined)
+        # Exclude addresses that previously bounced (handle_warmup_bounces.py
+        # records them in Notes as "bounced_email=<addr>") so re-discovery
+        # cannot re-pick a known-dead inbox.
+        bounced = {m.lower() for m in BOUNCED_EMAIL_IN_NOTES.findall(notes or "")}
+        if bounced:
+            dropped = [e for e in emails if e.lower() in bounced]
+            emails = [e for e in emails if e.lower() not in bounced]
+            if dropped:
+                print(f"  row {rn} {shop!r}: excluded bounced address(es) {dropped}", flush=True)
 
         form_pages: list[tuple[str, str, str]] = []
         for u, html, plain in page_triples:

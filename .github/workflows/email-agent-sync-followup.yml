@@ -78,6 +78,21 @@ jobs:
             python scripts/sync_email_agent_followup.py --backfill-body-plain --backfill-only
           fi
 
+      - name: Handle bounces (clear dead emails, re-queue contact discovery)
+        # Delivery failures route the Hit List row back to AI: Enrich with
+        # contact (bounced address excluded from re-discovery via Notes
+        # marker) and discard any staged drafts to the dead inbox.
+        # See agentic_ai_context/WARMUP_AUTOSEND_PLAN.md (PR4).
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
+            python scripts/handle_warmup_bounces.py
+          else
+            python scripts/handle_warmup_bounces.py --execute
+          fi
+
       - name: "Promote warm-up replies (AI: Warm up prospect → AI: Prospect replied)"
         env:
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
