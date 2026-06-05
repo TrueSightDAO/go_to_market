@@ -3,7 +3,7 @@
 **For:** Hubert Yee (Growth / Performance Marketing / User Acquisition)
 **From:** Gary Teh, Agroverse / TrueSight DAO
 **Date:** June 5, 2026
-**Status:** DRAFT v1 — for discussion
+**Status:** Final — for discussion with Hubert
 
 ---
 
