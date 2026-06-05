@@ -167,7 +167,7 @@ campaigns. Specifically:
 ## 7. Appendix — links & sources
 
 - Store: <https://agroverse.shop>
-- Example product page: <https://agroverse.shop/product-page/>
+- Example product page: <https://agroverse.shop/product-page/ceremonial-cacao-fazenda-santa-ana-2023-200g>
 - Farm provenance example: <https://agroverse.shop/farms/oscar-bahia/index.html>
 - Partner network: <https://agroverse.shop/partners/>
 - DAO transparency: <https://truesight.me> (treasury, ledgers, stats)
