@@ -132,6 +132,36 @@ tree-planting updates, and creates a natural upsell path into the $25
 ceremonial bag — potentially a better paid-ads landing offer than asking cold
 traffic for a $25+ first purchase.
 
+### 4a. Cost structure behind those margins (from the DAO ledger)
+
+Every cost below is a live figure from the DAO's Main Ledger (`Currencies`,
+`Agroverse Cacao Processing Cost`, and `Agroverse Price Components` tabs) —
+the same publicly auditable books the treasury runs on. BRL converted at the
+ledger rate of 0.2323 USD/R$.
+
+| Component | Cost (USD) | Notes |
+|---|---|---|
+| Farm-gate cacao almonds (Bahia/Pará) | ~$16.60/kg (~$0.47/oz) | Bought direct from family farms at R$100/kg |
+| Ocean freight Brazil → US | ~$0.12/oz | Per-ounce allocation across a shipment |
+| Processing: almonds → nibs | ~$1.74–2.02/kg | Santos / CIC facilities, Bahia (R$7.5–8.7/kg) |
+| Processing: → finished bars | ~$9.30–11.30 per kg of bars | Bahia facilities (R$40–48.5/kg); US small-batch option ~$10/kg |
+| Kraft pouch packaging | ~$0.68–0.74/unit landed | Sourced via Alibaba, incl. shipping |
+| **Finished 200 g ceremonial bag, landed** | **$8.32–$9.29/unit** | Composite SKU cost as carried on the ledger |
+| **Finished 50 g chocolate bar, landed** | **~$2.05/unit** | Production + packaging; the $6 all-in figure in §4 adds tree planting, US fulfillment materials, and overhead allocation |
+| Tree planting | $1.50/tree | Seedling ~$0.93 + planting, Amazon reforestation |
+
+What this means for the ads math:
+
+- **200 g ceremonial bag:** $25 retail − ~$8.3–9.3 landed COGS ≈ **$16/unit
+  gross margin (~64%) on a DTC sale** before shipping and payment fees. The
+  ~$8 retailer commission quoted earlier is what we *give away* in the retail
+  channel; the underlying product margin is roughly twice that.
+- **50 g bar:** $10 retail − $6 all-in (incl. tree) = $4 contribution, with
+  room to improve as production batches scale (the make-cost itself is ~$2).
+- The supply chain is **fully self-operated** (farm → Bahia processing →
+  ocean freight → SF warehouse), so margins are structural, not negotiated —
+  there's no distributor or co-packer markup hiding in the stack.
+
 We don't yet know our blended margins well enough to commit to a target
 CAC/ROAS — that's one of the things we want your help framing (Section 6).
 
@@ -260,6 +290,9 @@ campaigns. Specifically:
 - DAO transparency: <https://truesight.me> (treasury, ledgers, stats)
 - Shipment ledgers: TrueSight DAO Main Ledger, "Shipment Ledger Listing" tab
   (18 managed ledgers, AGL0–AGL15 + program funds)
+- Cost structure: Main Ledger tabs "Currencies" (landed unit costs per SKU),
+  "Agroverse Cacao Processing Cost" (facility-level processing rates, Bahia),
+  "Agroverse Price Components" (cacao + freight per-ounce model)
 - Repeat-order evidence: agroverse.shop Stripe order notifications,
   Dec 25 2025 & May 29 2026 (customer details withheld here; available on
   request)
