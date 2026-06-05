@@ -44,11 +44,15 @@ specific questions.
   ledger** it came from. The entire supply chain is publicly ledgered (18
   managed shipment / program ledgers to date, AGL0–AGL15 plus program funds).
 - **The QR is also a commerce + retention surface, not just provenance:**
-  during online events, attendees scan the QR to buy on the spot; after
-  purchase, customers register their email (if not already registered) to
-  receive **updates on their tree being planted**. Every sale therefore feeds
-  a zero-party email list with a built-in reason to open — a remarketing
-  asset most CPG brands have to manufacture.
+  during online events, attendees scan the QR to buy on the spot. When a
+  customer pays via the QR flow, **email registration happens simultaneously
+  with the purchase** — we pull the email straight from Stripe checkout, so
+  there's no separate opt-in step and no drop-off between buying and joining
+  the list. Registered customers receive **updates on their tree being
+  planted**. Every sale therefore feeds a zero-party email list with a
+  built-in reason to open — a remarketing asset most CPG brands have to
+  manufacture, captured at 100% of checkout instead of via a post-purchase
+  form.
 - **Store:** [agroverse.shop](https://agroverse.shop) — static site + Stripe
   checkout. No app. Orders ship from a San Francisco warehouse.
 - **Distribution today:** ~37 retail partners (apothecaries, metaphysical
