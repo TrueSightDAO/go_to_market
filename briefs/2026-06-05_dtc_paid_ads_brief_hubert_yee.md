@@ -139,13 +139,62 @@ CAC/ROAS — that's one of the things we want your help framing (Section 6).
   practitioners, apothecary customers, conscious-consumption households.
   Observed at festivals: skews 35–65, values-driven, **heavily on Facebook**
   (and Instagram); not a TikTok-first demographic.
-- **Competitors:** ceremonial cacao brands (e.g. the larger Keith's/Cacao
-  Laboratory tier of the market) are **buying Google ads heavily** on
-  ceremonial-cacao search terms. Search volume for the category exists and is
-  being monetized — currently without us.
+- **Competitors:** ceremonial cacao brands (e.g. the larger Keith's/Ora tier
+  of the market) are **buying Google ads heavily** on ceremonial-cacao search
+  terms. Search volume for the category exists and is being monetized —
+  currently without us. Detail below.
 - **Our edge in creative:** real farms, real farmers, real trees, QR-verifiable
   impact, and an existing library of farm photography/video from Bahia. The
   story is filmable and ownable.
+
+### 5a. Competitive landscape (from our Feb–Apr 2026 research)
+
+We ran a structured competitor study (Playwright site crawls + DataForSEO
+keyword export; full reports in this repo under `ceremonial_cacao_seo/` and
+`output/dataforseo/`). The ad-relevant findings:
+
+**Top 5 US ceremonial-cacao competitors — what's driving their sales:**
+
+| Brand | Platform | Subscription | Free-ship threshold | Wholesale | Amazon presence |
+|---|---|---|---|---|---|
+| **Ceremonial Cacao / Ora Cacao** (ceremonial-cacao.com) | Shopify | ✓ | $95 | ✓ | None found |
+| Four Visions | BigCommerce | ✓ | — | — | None found |
+| Ma Cacao (Portland, OR) | Shopify | — | $100 | ✓ (+ stockists page) | None found |
+| Bar and Cocoa (curated retailer) | Shopify | ✓ | — | ✓ | None found |
+| Maya Moon Cacao | Shopify | — | — | ✓ | None found |
+
+- **Ora Cacao is the category leader** and the one to study: claims "1 million
+  cups sipped each year," runs subscribe-&-save, a $95 free-shipping
+  threshold, and messaging that overlaps ours almost word-for-word ("directly
+  traded with small organic family farms," "ethical, regenerative, organic").
+  They source from Belize / Colombia / Guatemala / Tanzania / Uganda — multi-
+  origin blends, **not single-estate vintages**, and **no per-unit tree
+  planting or on-pack provenance QR**. That's the daylight between us.
+- **Nobody in the top 5 is on Amazon marketplace** — the whole category is
+  own-site Shopify DTC. The paid-traffic battle is fought on search + social,
+  not marketplace shelf placement.
+- **3 of 5 run subscriptions** — the category has trained customers to expect
+  a replenishment offer, which matters for the LTV side of any CAC math (we
+  don't offer one yet).
+
+**Search demand (DataForSEO, US monthly volumes, Apr 2026 export):**
+
+| Cluster | Head term | Volume/mo |
+|---|---|---|
+| Ceremonial cacao | "ceremonial cacao" | 8,100 |
+| | "best ceremonial cacao" | 480 |
+| | "ceremonial cacao near me" | 390 (high CPC, local-pack heavy — we'd skip) |
+| Cacao nibs | "cacao nibs" | 33,100 |
+| | "organic cacao nibs" | ~1,900–2,900 |
+| Beans / origin | "raw cacao beans" | 3,600 |
+| | "cacao beans for sale" | 1,300 |
+| Wholesale (B2B) | "wholesale cacao" + variants | ~200/term |
+
+Two readings we'd like pressure-tested: (a) the **ceremonial-cacao head term
+(8,100/mo) is contested and competitors are already bidding it** — capture
+play, likely expensive; (b) the **nibs cluster (33k+/mo) is much bigger and
+adjacent** — we carry nibs SKUs, but it's a foods/commodity intent, not a
+ceremony intent, so conversion economics may be entirely different.
 
 **Brand guardrails** (these are firm):
 
@@ -212,3 +261,11 @@ campaigns. Specifically:
   request)
 - Remote-onboarding evidence: The Way Home Shop email thread,
   Apr 24 – May 13, 2026
+- Competitor research (this repo): `ceremonial_cacao_seo/brand_sales_drivers_report.md`,
+  `ceremonial_cacao_seo/positioning_summary.md`,
+  `ceremonial_cacao_seo/seo_keyword_strategy.md` (Feb–Mar 2026, Playwright
+  site crawls of top-5 brands)
+- Search-volume data (this repo):
+  `output/dataforseo/AGROVERSE_POSITIONING_NONBRAND_BUYER_INTENT.md`
+  (DataForSEO Keywords-for-Keywords export, Apr 2026, ~197 non-brand
+  buyer-intent terms after blocklist)
