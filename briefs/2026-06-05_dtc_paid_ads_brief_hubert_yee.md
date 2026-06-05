@@ -21,12 +21,12 @@ should be** — how to structure the test, what to measure, what it takes to set
 the process up properly — so we don't learn expensive lessons that are already
 well-known to practitioners.
 
-This is an advisory ask, not a pitch. Sections 2–5 give you the context;
-Section 6 has the specific questions.
+Sections 2–5 lay out the context and the numbers behind it; Section 6 has the
+specific questions.
 
 ---
 
-## 2. What Agroverse is (60-second version)
+## 2. Where Agroverse stands today (refresher)
 
 - **Product:** Single-estate cacao, sourced direct from family farms in Bahia
   and Pará, Brazil. We're going down the **single-estate / vintage route** —
