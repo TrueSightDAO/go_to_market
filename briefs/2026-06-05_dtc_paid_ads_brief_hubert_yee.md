@@ -196,11 +196,11 @@ keyword export; full reports in this repo under `ceremonial_cacao_seo/` and
 
 | Brand | Platform | Subscription | Free-ship threshold | Wholesale | Amazon presence |
 |---|---|---|---|---|---|
-| **Ceremonial Cacao / Ora Cacao** (ceremonial-cacao.com) | Shopify | ✓ | $95 | ✓ | None found |
-| Four Visions | BigCommerce | ✓ | — | — | None found |
-| Ma Cacao (Portland, OR) | Shopify | — | $100 | ✓ (+ stockists page) | None found |
-| Bar and Cocoa (curated retailer) | Shopify | ✓ | — | ✓ | None found |
-| Maya Moon Cacao | Shopify | — | — | ✓ | None found |
+| **Ceremonial Cacao / Ora Cacao** (ceremonial-cacao.com) | Shopify | ✓ | $95 | ✓ | **✓ — sells on Amazon.com** |
+| Four Visions | BigCommerce | ✓ | — | — | None found (Feb 2026 crawl) |
+| Ma Cacao (Portland, OR) | Shopify | — | $100 | ✓ (+ stockists page) | None found (Feb 2026 crawl) |
+| Bar and Cocoa (curated retailer) | Shopify | ✓ | — | ✓ | None found (Feb 2026 crawl) |
+| Maya Moon Cacao | Shopify | — | — | ✓ | None found (Feb 2026 crawl) |
 
 - **Ora Cacao is the category leader** and the one to study: claims "1 million
   cups sipped each year," runs subscribe-&-save, a $95 free-shipping
@@ -209,9 +209,13 @@ keyword export; full reports in this repo under `ceremonial_cacao_seo/` and
   They source from Belize / Colombia / Guatemala / Tanzania / Uganda — multi-
   origin blends, **not single-estate vintages**, and **no per-unit tree
   planting or on-pack provenance QR**. That's the daylight between us.
-- **Nobody in the top 5 is on Amazon marketplace** — the whole category is
-  own-site Shopify DTC. The paid-traffic battle is fought on search + social,
-  not marketplace shelf placement.
+- **The category is primarily own-site Shopify DTC**, but the leader has
+  expanded: **Ora is on Amazon.com** (the smaller four had no Amazon presence
+  in our Feb 2026 crawl). The paid-traffic battle is still fought mainly on
+  search + social — though Ora's marketplace move suggests the leader is
+  harvesting brand demand wherever it lands. (For context: we deliberately
+  wrote off Amazon as a channel — algorithm-driven brand flattening conflicts
+  with the provenance story.)
 - **3 of 5 run subscriptions** — the category has trained customers to expect
   a replenishment offer, which matters for the LTV side of any CAC math (we
   don't offer one yet).
