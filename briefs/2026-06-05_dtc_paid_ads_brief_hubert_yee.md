@@ -44,9 +44,10 @@ specific questions.
   ledger** it came from. The entire supply chain is publicly ledgered (18
   managed shipment / program ledgers to date, AGL0–AGL15 plus program funds).
 - **The QR is also a commerce + retention surface, not just provenance:**
-  during online events, attendees scan the QR to buy on the spot. When a
-  customer pays via the QR flow, **email registration happens simultaneously
-  with the purchase** — we pull the email straight from Stripe checkout, so
+  at offline events (festivals, markets, ceremony circles), attendees scan
+  the QR to buy on the spot. When a customer pays via the QR flow, **email
+  registration happens simultaneously with the purchase** — we pull the
+  email straight from Stripe checkout, so
   there's no separate opt-in step and no drop-off between buying and joining
   the list. Registered customers receive **updates on their tree being
   planted**. Every sale therefore feeds a zero-party email list with a
@@ -116,6 +117,7 @@ never done is **pour paid traffic into the top of it**.
 |---|---|
 | Retail price | $10.00 |
 | Cost price to us (incl. tree planting) | $6.00 |
+| — of which: set aside for tree planting | $5.00 |
 | Gross margin | $4.00/bar (40%) |
 | First run (40+ bars) | Sold out |
 
@@ -147,17 +149,20 @@ ledger rate of 0.2323 USD/R$.
 | Processing: → finished bars | ~$9.30–11.30 per kg of bars | Bahia facilities (R$40–48.5/kg); US small-batch option ~$10/kg |
 | Kraft pouch packaging | ~$0.68–0.74/unit landed | Sourced via Alibaba, incl. shipping |
 | **Finished 200 g ceremonial bag, landed** | **$8.32–$9.29/unit** | Composite SKU cost as carried on the ledger |
-| **Finished 50 g chocolate bar, landed** | **~$2.05/unit** | Production + packaging; the $6 all-in figure in §4 adds tree planting, US fulfillment materials, and overhead allocation |
-| Tree planting | $1.50/tree | Seedling ~$0.93 + planting, Amazon reforestation |
+| **Finished 50 g chocolate bar, landed** | **~$2.05/unit** | Production + packaging make-cost; the $6 all-in figure in §4 is dominated by the $5/unit tree-planting set-aside |
+| Tree-planting set-aside | **$5.00 per unit sold** | Reserved from every sale to fund the tree pledge |
+| Tree planting (execution cost) | $1.50/tree | Seedling ~$0.93 + planting, Amazon reforestation; the set-aside above funds execution plus program overhead |
 
 What this means for the ads math:
 
 - **200 g ceremonial bag:** $25 retail − ~$8.3–9.3 landed COGS ≈ **$16/unit
-  gross margin (~64%) on a DTC sale** before shipping and payment fees. The
-  ~$8 retailer commission quoted earlier is what we *give away* in the retail
-  channel; the underlying product margin is roughly twice that.
-- **50 g bar:** $10 retail − $6 all-in (incl. tree) = $4 contribution, with
-  room to improve as production batches scale (the make-cost itself is ~$2).
+  gross margin (~64%) on a DTC sale**; after the $5/unit tree-planting
+  set-aside, **~$11/unit (~44%)** before shipping and payment fees. The ~$8
+  retailer commission quoted earlier is what we *give away* in the retail
+  channel; the underlying product margin is well above it.
+- **50 g bar:** $10 retail − $6 all-in = $4 contribution. The $6 is mostly
+  the $5 tree set-aside — the physical make-cost is low, so unit economics
+  improve with production scale, not pledge dilution.
 - The supply chain is **fully self-operated** (farm → Bahia processing →
   ocean freight → SF warehouse), so margins are structural, not negotiated —
   there's no distributor or co-packer markup hiding in the stack.
@@ -191,11 +196,11 @@ keyword export; full reports in this repo under `ceremonial_cacao_seo/` and
 
 | Brand | Platform | Subscription | Free-ship threshold | Wholesale | Amazon presence |
 |---|---|---|---|---|---|
-| **Ceremonial Cacao / Ora Cacao** (ceremonial-cacao.com) | Shopify | ✓ | $95 | ✓ | None found |
-| Four Visions | BigCommerce | ✓ | — | — | None found |
-| Ma Cacao (Portland, OR) | Shopify | — | $100 | ✓ (+ stockists page) | None found |
-| Bar and Cocoa (curated retailer) | Shopify | ✓ | — | ✓ | None found |
-| Maya Moon Cacao | Shopify | — | — | ✓ | None found |
+| **Ceremonial Cacao / Ora Cacao** (ceremonial-cacao.com) | Shopify | ✓ | $95 | ✓ | **✓ — sells on Amazon.com** |
+| Four Visions | BigCommerce | ✓ | — | — | None found (Feb 2026 crawl) |
+| Ma Cacao (Portland, OR) | Shopify | — | $100 | ✓ (+ stockists page) | None found (Feb 2026 crawl) |
+| Bar and Cocoa (curated retailer) | Shopify | ✓ | — | ✓ | None found (Feb 2026 crawl) |
+| Maya Moon Cacao | Shopify | — | — | ✓ | None found (Feb 2026 crawl) |
 
 - **Ora Cacao is the category leader** and the one to study: claims "1 million
   cups sipped each year," runs subscribe-&-save, a $95 free-shipping
@@ -204,9 +209,13 @@ keyword export; full reports in this repo under `ceremonial_cacao_seo/` and
   They source from Belize / Colombia / Guatemala / Tanzania / Uganda — multi-
   origin blends, **not single-estate vintages**, and **no per-unit tree
   planting or on-pack provenance QR**. That's the daylight between us.
-- **Nobody in the top 5 is on Amazon marketplace** — the whole category is
-  own-site Shopify DTC. The paid-traffic battle is fought on search + social,
-  not marketplace shelf placement.
+- **The category is primarily own-site Shopify DTC**, but the leader has
+  expanded: **Ora is on Amazon.com** (the smaller four had no Amazon presence
+  in our Feb 2026 crawl). The paid-traffic battle is still fought mainly on
+  search + social — though Ora's marketplace move suggests the leader is
+  harvesting brand demand wherever it lands. (For context: we deliberately
+  wrote off Amazon as a channel — algorithm-driven brand flattening conflicts
+  with the provenance story.)
 - **3 of 5 run subscriptions** — the category has trained customers to expect
   a replenishment offer, which matters for the LTV side of any CAC math (we
   don't offer one yet).
