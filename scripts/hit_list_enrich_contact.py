@@ -110,9 +110,12 @@ SESSION.headers.update(
 PLACE_ID_IN_NOTES = re.compile(
     r"(?i)place[_\s-]*id\s*:\s*([A-Za-z0-9_-]{12,})",
 )
-# Dead inboxes recorded by handle_warmup_bounces.py — never re-pick these.
+# Addresses we must never re-pick: bounced_email= written by
+# handle_warmup_bounces.py (delivery failures), bad_email= written by
+# send_clean_warmup_drafts.py (positive wrongness evidence, e.g. a marketing
+# agency's inbox flagged by email_domain_mismatch).
 BOUNCED_EMAIL_IN_NOTES = re.compile(
-    r"(?i)bounced_email=([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})",
+    r"(?i)(?:bounced|bad)_email=([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})",
 )
 DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
 
