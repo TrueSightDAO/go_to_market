@@ -224,13 +224,14 @@ def _lint(draft: dict, body: str, subject: str, hit: dict | None, dapp_count: in
         out.append((SEV_RED, "fallback_shop_name", "Body uses fallback 'your shop' (shop name was missing at gen time)"))
     em = draft.get("to_email", "")
     if em and GENERIC_INBOX_RE.match(em):
-        # Policy change 2026-06-05 (data-backed): a generic prefix on the
-        # shop's OWN domain is its primary contact channel, not a dead drop —
-        # The Way Home Shop converted to Partnered via info@thewayhomeshop.com,
-        # and Seagrape / Esalen / Good Vibrations replies all came from
-        # own-domain generic inboxes. Own-domain generic → blue (informational,
-        # auto-sendable). Generic on a freemail or unverifiable domain stays
-        # red (third-party domains are caught by email_domain_mismatch below).
+        # Policy 2026-06-05, tightened same day per operator's reply-only
+        # principle: generic_inbox is NEVER red. Own-domain generic inboxes
+        # converted a partner (The Way Home Shop via info@) and produced
+        # multiple genuine replies; unverifiable ones are simply the shop's
+        # only listed address — sending to it is what a human would do, and
+        # the bounce handler is the safety net for dead inboxes. The only
+        # address-blocking signal is positive wrongness evidence, which
+        # email_domain_mismatch (red, below) carries on its own.
         em_dom = em.rsplit("@", 1)[-1].lower()
         site_host = _website_host(hit.get("website", "")) if hit else ""
         own_domain = bool(
@@ -243,7 +244,9 @@ def _lint(draft: dict, body: str, subject: str, hit: dict | None, dapp_count: in
             out.append((SEV_BLUE, "generic_inbox_own_domain",
                         f"Generic prefix on the shop's own domain ({em}) — primary contact channel"))
         else:
-            out.append((SEV_RED, "generic_inbox", f"Generic inbox ({em.split('@')[0]}@) — likely not read by decision maker"))
+            out.append((SEV_BLUE, "generic_inbox",
+                        f"Generic inbox ({em.split('@')[0]}@) — domain unverified; "
+                        "wrongness evidence is email_domain_mismatch's job"))
     first_3_lines = "\n".join(body.splitlines()[:3])
     if GENERIC_SALUTATION_RE.search(first_3_lines):
         out.append((SEV_RED, "no_first_name", "Salutation is generic ('Hi there' / 'Hello team') — no first-name parse"))

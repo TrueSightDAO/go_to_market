@@ -119,6 +119,146 @@ def _flip_rows_sent(ws, decisions: list[dict]) -> int:
     return len(decisions)
 
 
+REGEN_NOTE = "auto-discarded for regen by send_clean_warmup_drafts"
+REROUTABLE_STATUSES = {
+    "AI: Warm up prospect", "AI: Email found", "AI: Prospect replied",
+    "Manager Follow-up", "Followed Up",
+}
+
+
+def _prior_regen_recipients(drafts_ws) -> set[str]:
+    """to_emails that already burned their one automatic regen attempt."""
+    values = drafts_ws.get_all_values()
+    if len(values) < 2:
+        return set()
+    hdr = smf.header_map(values[0])
+    i_to, i_notes = hdr.get("to_email"), hdr.get("notes")
+    out: set[str] = set()
+    for row in values[1:]:
+        if REGEN_NOTE in smf.cell(row, i_notes):
+            em = smf.normalize_email(smf.cell(row, i_to))
+            if em:
+                out.add(em)
+    return out
+
+
+def _discard_for_regen(service, drafts_ws, regen: list[dict]) -> None:
+    """Delete flagged drafts so the suggester regenerates them next run.
+    One automatic attempt per recipient — _prior_regen_recipients gates the
+    second offense into the human review residue."""
+    if not regen:
+        return
+    from hit_list_dapp_remarks_sheet import gspread_retry
+    values = drafts_ws.get_all_values()
+    hdr = smf.header_map(values[0])
+    i_status, i_notes = hdr["status"], hdr.get("notes")
+    stamp = _now_iso()
+    cells: list[gspread.Cell] = []
+    for d in regen:
+        try:
+            service.users().drafts().delete(userId="me", id=d["draft_id"]).execute()
+        except HttpError as e:
+            if not smf.is_missing_draft_http_error(e):
+                sys.stderr.write(f"  WARNING: draft delete failed: {e}\n")
+                continue
+        r = d["sheet_row"]
+        cells.append(gspread.Cell(r, i_status + 1, "discarded"))
+        if i_notes is not None:
+            prior = smf.cell(values[r - 1], i_notes) if r - 1 < len(values) else ""
+            note = f"{REGEN_NOTE} {stamp} ({d['skip_reason']})"
+            cells.append(gspread.Cell(r, i_notes + 1, f"{prior} | {note}".strip(" |")))
+        print(f"discarded for regen: {d['shop_name']} <{d['to_email']}>")
+    if cells:
+        gspread_retry(lambda: drafts_ws.update_cells(cells, value_input_option="RAW"))
+
+
+def _remediate_wrong_addresses(service, hit_ws, drafts_ws, remarks_ws, wrong: list[dict]) -> None:
+    """Positive wrongness evidence (email_domain_mismatch): same treatment as
+    a bounce — bad_email Notes marker, Email cleared, staged draft discarded,
+    row re-queued to contact discovery. Mirrors handle_warmup_bounces.py."""
+    if not wrong:
+        return
+    import uuid
+    from datetime import datetime, timezone
+
+    from hit_list_dapp_remarks_sheet import append_dapp_remark_and_apply, gspread_retry
+    hit_values = gspread_retry(lambda: hit_ws.get_all_values())
+    hit_headers = hit_values[0]
+    hdr = {h: i for i, h in enumerate(hit_headers)}
+    by_email: dict[str, dict] = {}
+    for ri, row in enumerate(hit_values[1:], start=2):
+        em = smf.normalize_email(row[hdr["Email"]] if len(row) > hdr["Email"] else "")
+        if em and em not in by_email:
+            by_email[em] = {
+                "row": ri,
+                "shop": row[hdr["Shop Name"]] if len(row) > hdr["Shop Name"] else "",
+                "status": row[hdr["Status"]] if len(row) > hdr["Status"] else "",
+            }
+    dvalues = drafts_ws.get_all_values()
+    dhdr = smf.header_map(dvalues[0])
+    cells: list[gspread.Cell] = []
+    for d in wrong:
+        dead = d["to_email"]
+        hit = by_email.get(dead)
+        try:
+            service.users().drafts().delete(userId="me", id=d["draft_id"]).execute()
+        except HttpError as e:
+            if not smf.is_missing_draft_http_error(e):
+                sys.stderr.write(f"  WARNING: draft delete failed: {e}\n")
+        r = d["sheet_row"]
+        cells.append(gspread.Cell(r, dhdr["status"] + 1, "discarded"))
+        if dhdr.get("notes") is not None:
+            prior = smf.cell(dvalues[r - 1], dhdr["notes"]) if r - 1 < len(dvalues) else ""
+            note = f"discarded {_now_iso()}: wrong address ({d['skip_reason']})"
+            cells.append(gspread.Cell(r, dhdr["notes"] + 1, f"{prior} | {note}".strip(" |")))
+        if not hit or hit["status"] not in REROUTABLE_STATUSES:
+            print(f"wrong address (draft discarded; row untouched — "
+                  f"status {(hit or {}).get('status', 'no row')!r}): {d['shop_name']} <{dead}>")
+            continue
+        now_iso = datetime.now(timezone.utc).isoformat()
+        notes_now = gspread_retry(
+            lambda: hit_ws.cell(hit["row"], hdr["Notes"] + 1).value) or ""
+        if f"bad_email={dead}" not in notes_now:
+            gspread_retry(lambda: hit_ws.update_cell(
+                hit["row"], hdr["Notes"] + 1,
+                f"{notes_now.strip()}; bad_email={dead}".strip("; ")))
+        gspread_retry(lambda: hit_ws.update_cell(hit["row"], hdr["Email"] + 1, ""))
+        append_dapp_remark_and_apply(
+            hit_ws, remarks_ws, hit["row"], hit["shop"], "AI: Enrich with contact",
+            (f"[wrong-address {now_iso}] outcome=re_enrich; bad_email={dead}. "
+             f"Lint evidence: {d['skip_reason']}. Email cleared, draft discarded, "
+             "row re-queued for contact discovery."),
+            "send_clean_warmup_drafts", now_iso, f"wrongaddr-{uuid.uuid4()}",
+            hit_headers=hit_headers,
+        )
+        print(f"re-enriched: {d['shop_name']} <{dead}> (email cleared, bad_email marker)")
+    if cells:
+        gspread_retry(lambda: drafts_ws.update_cells(cells, value_input_option="RAW"))
+
+
+def _reconcile_missing_rows(drafts_ws, missing: list[dict]) -> None:
+    """Rows whose Gmail draft vanished (deleted out-of-band) are sheet
+    artifacts, not review items — flip them to discarded so the suggester
+    can regenerate on its next pass."""
+    if not missing:
+        return
+    from hit_list_dapp_remarks_sheet import gspread_retry
+    values = drafts_ws.get_all_values()
+    hdr = smf.header_map(values[0])
+    i_status, i_notes = hdr["status"], hdr.get("notes")
+    cells: list[gspread.Cell] = []
+    for d in missing:
+        r = d["sheet_row"]
+        cells.append(gspread.Cell(r, i_status + 1, "discarded"))
+        if i_notes is not None:
+            prior = smf.cell(values[r - 1], i_notes) if r - 1 < len(values) else ""
+            note = f"auto-reconciled {_now_iso()}: gmail draft missing"
+            cells.append(gspread.Cell(r, i_notes + 1, f"{prior} | {note}".strip(" |")))
+        print(f"stale row reconciled: {d['shop_name']} <{d['to_email']}>")
+    if cells:
+        gspread_retry(lambda: drafts_ws.update_cells(cells, value_input_option="RAW"))
+
+
 def _reconcile_review_label(service, skipped: list[dict]) -> None:
     """Keep the AI/Needs Review Gmail label in sync with the flagged cohort:
     add it to every skipped draft, strip it from anything that is no longer
@@ -159,9 +299,10 @@ def main(argv=None) -> int:
                     help="Actually send. Default is a dry-run listing.")
     ap.add_argument("--max-sends", type=int, default=12,
                     help="Cap sends per run (default 12 — drip cadence).")
-    ap.add_argument("--include-hosts-circles", action="store_true",
-                    help="Also auto-send Hosts Circles=Yes prospects "
-                         "(default: excluded — they keep human review).")
+    ap.add_argument("--exclude-hosts-circles", action="store_true",
+                    help="Hold Hosts Circles=Yes prospects for human review "
+                         "(default: they auto-send too — operator decision "
+                         "2026-06-05: human involvement starts at the reply).")
     args = ap.parse_args(argv)
 
     sa = smf.get_sheets_client()
@@ -177,19 +318,35 @@ def main(argv=None) -> int:
     pending = pw._load_pending_warmup_drafts(drafts_ws)
     pending.sort(key=lambda d: d.get("created_at") or "")  # oldest first
 
+    # Recipients whose draft was already auto-discarded once for regeneration:
+    # a second flagged draft for the same address means regen isn't converging
+    # — that residue is the only thing left for human eyes.
+    regen_seen = _prior_regen_recipients(drafts_ws)
+
     clean: list[dict] = []
-    skipped: list[dict] = []
+    wrong_addr: list[dict] = []   # positive wrongness evidence → re-enrich
+    regen: list[dict] = []        # body-quality reds → discard + regenerate
+    missing: list[dict] = []      # stale rows whose Gmail draft vanished
+    review: list[dict] = []       # repeat offenders only — the true residue
     for draft in pending:
         d = _classify(draft, service, by_email, by_store, dapp_counts)
-        if d["reds"] or d["yellows"]:
-            d["skip_reason"] = "; ".join(c for _s, c, _m in d["reds"] + d["yellows"])
-            skipped.append(d)
-        elif d["hosts_circles"] and not args.include_hosts_circles:
-            d["skip_reason"] = "hosts_circles (human review by default)"
-            skipped.append(d)
-        elif not d["body_len"]:
+        red_codes = {c for _s, c, _m in d["reds"]}
+        if not d["body_len"]:
             d["skip_reason"] = "gmail draft missing"
-            skipped.append(d)
+            missing.append(d)
+        elif "email_domain_mismatch" in red_codes:
+            d["skip_reason"] = "; ".join(sorted(red_codes))
+            wrong_addr.append(d)
+        elif red_codes or d["yellows"]:
+            d["skip_reason"] = "; ".join(c for _s, c, _m in d["reds"] + d["yellows"])
+            if d["to_email"] in regen_seen:
+                d["skip_reason"] += " (regen already attempted — human eyes)"
+                review.append(d)
+            else:
+                regen.append(d)
+        elif d["hosts_circles"] and args.exclude_hosts_circles:
+            d["skip_reason"] = "hosts_circles (excluded by flag)"
+            review.append(d)
         else:
             clean.append(d)
 
@@ -199,18 +356,29 @@ def main(argv=None) -> int:
     print(f"pending_review AI/Warm-up drafts: {len(pending)}")
     print(f"  clean tier: {len(clean)}  (sending {len(to_send)}, "
           f"{len(overflow)} deferred to next run by --max-sends)")
-    print(f"  kept for human review: {len(skipped)}")
-    for d in skipped:
-        print(f"    REVIEW  {d['shop_name'][:40]:40} <{d['to_email']}>  [{d['skip_reason']}]")
+    print(f"  wrong address → re-enrich: {len(wrong_addr)}; "
+          f"discard for regen: {len(regen)}; stale rows: {len(missing)}; "
+          f"human review: {len(review)}")
+    for d in wrong_addr:
+        print(f"    {'RE-ENRICH' if args.execute else 'WOULD RE-ENRICH':16} "
+              f"{d['shop_name'][:40]:40} <{d['to_email']}>  [{d['skip_reason']}]")
+    for d in regen:
+        print(f"    {'REGEN' if args.execute else 'WOULD REGEN':16} "
+              f"{d['shop_name'][:40]:40} <{d['to_email']}>  [{d['skip_reason']}]")
+    for d in review:
+        print(f"    {'REVIEW':16} {d['shop_name'][:40]:40} <{d['to_email']}>  [{d['skip_reason']}]")
     for d in to_send:
-        print(f"    {'SEND' if args.execute else 'WOULD SEND':10} "
+        print(f"    {'SEND' if args.execute else 'WOULD SEND':16} "
               f"{d['shop_name'][:40]:40} <{d['to_email']}>  created {d['created_at']}")
 
     if not args.execute:
         print("\ndry-run (default) — pass --execute to send.")
         return 0
 
-    _reconcile_review_label(service, skipped)
+    _remediate_wrong_addresses(service, hit_ws, drafts_ws, remarks_ws, wrong_addr)
+    _discard_for_regen(service, drafts_ws, regen)
+    _reconcile_missing_rows(drafts_ws, missing)
+    _reconcile_review_label(service, review)
 
     sent: list[dict] = []
     for d in to_send:
