@@ -81,6 +81,7 @@ REPOS: list[tuple[str, str]] = [
     ("agroverse_shop", "agroverse_shop_beta"),
     ("iching_oracle", "oracle"),
     ("Cypher-Defense", "Cypher-Defense"),
+    ("governor_chatbot_service", "governor_chatbot_service"),
 ]
 
 # Heuristic: CONTEXT_UPDATES lines mentioning these names (case-insensitive).
