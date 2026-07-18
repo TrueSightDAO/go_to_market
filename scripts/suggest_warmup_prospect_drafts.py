@@ -17,6 +17,11 @@ Gmail **drafts** for Hit List rows with Status = **AI: Warm up prospect** and Em
 - **Reply promotion:** By default, before drafting, promotes rows to **AI: Prospect replied** when Gmail shows
   an **inbound** message **from** the prospect **after** the latest logged **sent_at** for that address in
   **Email Agent Follow Up**.
+- **Auto-reply suppression is idempotent + auto-parks dead ends:** a detected auto-reply / out-of-office is
+  logged to DApp Remarks **once** (Gmail label ``AI/Auto-reply Logged`` marks it handled — no re-logging on
+  every hourly run). After ``--auto-reply-park-threshold`` distinct auto-reply-only cycles with zero genuine
+  reply (default **2**), the row is parked (Status -> ``On Hold``) instead of staying eligible for another
+  touch — see ``agentic_ai_context/plans/WARMUP_CONVERSION_IMPROVEMENT_PLAN.md`` PR1.
 
 Usage:
   cd market_research
@@ -71,9 +76,23 @@ DAPP_REMARKS_WS = smf.DAPP_REMARKS_WS
 
 HIT_STATUS_WARMUP = "AI: Warm up prospect"
 HIT_STATUS_REPLIED = "AI: Prospect replied"
+HIT_STATUS_ON_HOLD = "On Hold"
 PROTOCOL_VERSION = "PARTNER_OUTREACH_PROTOCOL v0.1 warmup_intro"
 REPLIED_GMAIL_LABEL = "AI/Prospect Replied"
 REPLY_PROTOCOL_VERSION = "PARTNER_OUTREACH_PROTOCOL v0.1 warmup_reply"
+
+# Idempotency marker for suppressed auto-replies (out-of-office / high-volume
+# auto-responders) — see WARMUP_CONVERSION_IMPROVEMENT_PLAN.md PR1. Without this,
+# the same underlying auto-reply gets re-detected and re-logged to DApp Remarks
+# on every hourly run for as long as the row stays in HIT_STATUS_WARMUP, since
+# nothing else about the row's state changes between runs.
+AUTO_REPLY_LOGGED_GMAIL_LABEL = "AI/Auto-reply Logged"
+AUTO_REPLY_SUBMITTED_BY = "warmup_auto_reply_detected"
+# After this many *distinct* auto-reply-only cycles with zero genuine reply,
+# park the row (Status -> On Hold) instead of drafting to it again — the
+# mailbox has demonstrated nobody reads it. Sanity-checked against real data
+# in the plan's pre-flight: both known dead ends already sit at exactly 2.
+DEFAULT_AUTO_REPLY_PARK_THRESHOLD = 2
 DEFAULT_MIN_DAYS = smf.DEFAULT_MIN_DAYS_SINCE_SENT
 BODY_PREVIEW_MAX = smf.BODY_PREVIEW_MAX
 GROK_ENDPOINT = smf.GROK_ENDPOINT
@@ -191,6 +210,9 @@ def inbound_reply_details(
                 "subject": subject,
                 "date": date_iso,
                 "body": body,
+                # Already present on the "full" resource above — free to expose,
+                # no extra API call. Used to detect messages already logged.
+                "label_ids": full.get("labelIds") or [],
             }
         scanned += len(resp.get("messages") or [])
         page_token = resp.get("nextPageToken")
@@ -527,6 +549,7 @@ def promote_warmup_replies(
     *,
     dry_run: bool,
     verbose: bool,
+    auto_reply_park_threshold: int = DEFAULT_AUTO_REPLY_PARK_THRESHOLD,
 ) -> int:
     """Set Hit List Status to AI: Prospect replied when inbound after last logged sent.
     Also appends a DApp Remarks row with the reply content for audit + template refinement."""
@@ -542,6 +565,7 @@ def promote_warmup_replies(
     status_i = hdr.get("Status")
     email_i = hdr.get("Email")
     shop_i = hdr.get("Shop Name")
+    sales_notes_i = hdr.get("Sales Process Notes")
     if status_i is None or email_i is None:
         return 0
     status_col = status_i + 1
@@ -552,11 +576,20 @@ def promote_warmup_replies(
     # HIT_LIST_STATE_MACHINE.md "AI: Prospect replied" row. Best-effort: a
     # label-create failure logs and lets the Status flip proceed anyway.
     replied_label_id: str | None = None
+    # Resolve the auto-reply idempotency label id once too — see
+    # AUTO_REPLY_LOGGED_GMAIL_LABEL above. Same best-effort semantics: if we
+    # can't resolve/create it, we fall back to logging every run (today's
+    # behavior) rather than blocking reply promotion entirely.
+    auto_reply_label_id: str | None = None
     if not dry_run:
         try:
             replied_label_id = smf.ensure_user_label_id(gsvc, REPLIED_GMAIL_LABEL)
         except Exception as e:
             print(f"  WARNING: could not resolve {REPLIED_GMAIL_LABEL!r} label: {e}")
+        try:
+            auto_reply_label_id = smf.ensure_user_label_id(gsvc, AUTO_REPLY_LOGGED_GMAIL_LABEL)
+        except Exception as e:
+            print(f"  WARNING: could not resolve {AUTO_REPLY_LOGGED_GMAIL_LABEL!r} label: {e}")
 
     for r, row in enumerate(values[1:], start=2):
         if smf.cell(row, status_i) != HIT_STATUS_WARMUP:
@@ -574,9 +607,40 @@ def promote_warmup_replies(
         if reply:
             # Suppress auto-replies so they don't clutter the Prospect Replied state
             if is_auto_reply(reply.get("body", ""), reply.get("subject", "")):
+                already_logged = bool(auto_reply_label_id) and auto_reply_label_id in (reply.get("label_ids") or [])
+                if already_logged:
+                    if verbose:
+                        print(f"  auto-reply row {r} {em}: already logged (label present), skipping")
+                    continue
+                # Distinct auto-reply-only cycles seen so far, from the existing Sales
+                # Process Notes audit trail (one line per past detection) — no extra
+                # read needed, the row is already in memory. Once this one logs, the
+                # count includes it; at/above threshold, park instead of leaving the
+                # row eligible for another touch.
+                prior_count = (
+                    smf.cell(row, sales_notes_i).count(f"| {AUTO_REPLY_SUBMITTED_BY}]")
+                    if sales_notes_i is not None else 0
+                )
+                streak = prior_count + 1
+                park = streak >= auto_reply_park_threshold
+                target_status = HIT_STATUS_ON_HOLD if park else HIT_STATUS_WARMUP
                 if verbose:
-                    print(f"  auto-reply row {r} {em}: detected, NOT promoting")
-                # Log as DApp Remarks for audit but don't flip status
+                    action = f"PARK -> {HIT_STATUS_ON_HOLD!r}" if park else "detected, NOT promoting"
+                    print(f"  auto-reply row {r} {em}: {action} (streak {streak}/{auto_reply_park_threshold})")
+                remarks_text = (
+                    f"Auto-reply detected (not a real prospect reply). Not promoted.\n\n"
+                    f"Reply subject: {reply['subject']}\n"
+                    f"Reply date: {reply['date']}\n"
+                    f"Reply body:\n{reply['body']}"
+                )
+                if park:
+                    remarks_text += (
+                        f"\n\nParked: {streak} auto-reply-only cycles with zero genuine reply — "
+                        f"excluded from further warm-up/follow-up touches "
+                        f"(threshold={auto_reply_park_threshold}). Mailbox shows no evidence of a "
+                        "human reader; re-enrich or re-open manually if that changes."
+                    )
+                # Log as DApp Remarks for audit; flips Status to On Hold only when parking.
                 if not dry_run and remarks_ws is not None:
                     shop_name = smf.cell(row, shop_i) if shop_i is not None else ""
                     try:
@@ -585,17 +649,18 @@ def promote_warmup_replies(
                             remark_ws=remarks_ws,
                             sheet_row=r,
                             name=shop_name,
-                            ai_status=HIT_STATUS_WARMUP,  # keep current status
-                            remarks=(
-                                f"Auto-reply detected (not a real prospect reply). Not promoted.\n\n"
-                                f"Reply subject: {reply['subject']}\n"
-                                f"Reply date: {reply['date']}\n"
-                                f"Reply body:\n{reply['body']}"
-                            ),
-                            submitted_by="warmup_auto_reply_detected",
+                            ai_status=target_status,
+                            remarks=remarks_text,
+                            submitted_by=AUTO_REPLY_SUBMITTED_BY,
                             submitted_at=reply['date'],
                             submission_id=str(uuid.uuid4()),
                         )
+                        if auto_reply_label_id and reply.get("message_id"):
+                            gsvc.users().messages().modify(
+                                userId="me",
+                                id=reply["message_id"],
+                                body={"addLabelIds": [auto_reply_label_id]},
+                            ).execute()
                     except Exception as e:
                         print(f"  WARNING: auto-reply DApp Remarks append failed for row {r}: {e}")
                 continue  # skip promotion for auto-replies
@@ -1195,6 +1260,16 @@ def main() -> None:
     p.add_argument("--reply-promotion-only", action="store_true", help="Only promote Warm up → Prospect replied.")
     p.add_argument("--skip-reply-promotion", action="store_true")
     p.add_argument(
+        "--auto-reply-park-threshold",
+        type=int,
+        default=DEFAULT_AUTO_REPLY_PARK_THRESHOLD,
+        help=(
+            "Distinct auto-reply-only cycles (no genuine reply) before a row is parked "
+            f"(Status -> {HIT_STATUS_ON_HOLD!r}) instead of drafted to again. Default "
+            f"{DEFAULT_AUTO_REPLY_PARK_THRESHOLD}."
+        ),
+    )
+    p.add_argument(
         "--create-reply-drafts",
         action="store_true",
         help="After promotion, auto-create contextual reply drafts for prospects who have replied.",
@@ -1263,6 +1338,7 @@ def main() -> None:
             remarks_ws,
             dry_run=args.dry_run,
             verbose=args.verbose,
+            auto_reply_park_threshold=args.auto_reply_park_threshold,
         )
         if promoted:
             print(f"Promoted {promoted} row(s) {HIT_STATUS_WARMUP!r} → {HIT_STATUS_REPLIED!r}.")
