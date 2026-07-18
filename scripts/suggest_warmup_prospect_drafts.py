@@ -1216,6 +1216,12 @@ def main() -> None:
         help="Cap reply drafts created; 0 = unlimited.",
     )
     p.add_argument(
+        "--auto-reply-park-threshold",
+        type=int,
+        default=2,
+        help="Number of distinct auto-reply cycles before parking the row to On Hold (default 2).",
+    )
+    p.add_argument(
         "--track-opens",
         action=argparse.BooleanOptionalAction,
         default=True,
