@@ -17,6 +17,9 @@ Gmail **drafts** for Hit List rows with Status = **AI: Warm up prospect** and Em
 - **Reply promotion:** By default, before drafting, promotes rows to **AI: Prospect replied** when Gmail shows
   an **inbound** message **from** the prospect **after** the latest logged **sent_at** for that address in
   **Email Agent Follow Up**.
+- **Auto-reply idempotency & parking:** Auto-replies are detected and logged to DApp Remarks at most once
+  (idempotency marker via ``AI/Auto-reply Logged`` Gmail label). After ``--auto-reply-park-threshold``
+  distinct auto-reply cycles (default 2), the row is parked to **On Hold** with a note.
 
 Usage:
   cd market_research
@@ -25,6 +28,7 @@ Usage:
   python3 scripts/suggest_warmup_prospect_drafts.py --use-grok
   python3 scripts/suggest_warmup_prospect_drafts.py --reply-promotion-only
   python3 scripts/suggest_warmup_prospect_drafts.py --skip-reply-promotion
+  python3 scripts/suggest_warmup_prospect_drafts.py --auto-reply-park-threshold 3
 """
 
 from __future__ import annotations
