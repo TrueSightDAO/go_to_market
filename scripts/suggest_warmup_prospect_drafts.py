@@ -1379,6 +1379,7 @@ def main() -> None:
             remarks_ws,
             dry_run=args.dry_run,
             verbose=args.verbose,
+            auto_reply_park_threshold=args.auto_reply_park_threshold,
         )
         if promoted:
             print(f"Promoted {promoted} row(s) {HIT_STATUS_WARMUP!r} → {HIT_STATUS_REPLIED!r}.")
