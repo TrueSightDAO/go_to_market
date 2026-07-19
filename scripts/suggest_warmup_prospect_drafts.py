@@ -17,6 +17,9 @@ Gmail **drafts** for Hit List rows with Status = **AI: Warm up prospect** and Em
 - **Reply promotion:** By default, before drafting, promotes rows to **AI: Prospect replied** when Gmail shows
   an **inbound** message **from** the prospect **after** the latest logged **sent_at** for that address in
   **Email Agent Follow Up**.
+- **Auto-reply idempotency & parking:** Auto-replies are detected and logged to DApp Remarks at most once
+  (idempotency marker via ``AI/Auto-reply Logged`` Gmail label). After ``--auto-reply-park-threshold``
+  distinct auto-reply cycles (default 2), the row is parked to **On Hold** with a note.
 
 Usage:
   cd market_research
@@ -25,6 +28,7 @@ Usage:
   python3 scripts/suggest_warmup_prospect_drafts.py --use-grok
   python3 scripts/suggest_warmup_prospect_drafts.py --reply-promotion-only
   python3 scripts/suggest_warmup_prospect_drafts.py --skip-reply-promotion
+  python3 scripts/suggest_warmup_prospect_drafts.py --auto-reply-park-threshold 3
 """
 
 from __future__ import annotations
@@ -73,6 +77,7 @@ HIT_STATUS_WARMUP = "AI: Warm up prospect"
 HIT_STATUS_REPLIED = "AI: Prospect replied"
 PROTOCOL_VERSION = "PARTNER_OUTREACH_PROTOCOL v0.1 warmup_intro"
 REPLIED_GMAIL_LABEL = "AI/Prospect Replied"
+AUTO_REPLY_LOGGED_GMAIL_LABEL = "AI/Auto-reply Logged"
 REPLY_PROTOCOL_VERSION = "PARTNER_OUTREACH_PROTOCOL v0.1 warmup_reply"
 DEFAULT_MIN_DAYS = smf.DEFAULT_MIN_DAYS_SINCE_SENT
 BODY_PREVIEW_MAX = smf.BODY_PREVIEW_MAX
@@ -519,6 +524,38 @@ def build_reply_message_raw(
     return base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
 
 
+def _parse_auto_reply_streak(notes: str) -> int:
+    """Parse ``auto_reply_streak=N`` from Hit List Notes column. Returns 0 if not found."""
+    if not notes:
+        return 0
+    m = re.search(r"auto_reply_streak=(\d+)", notes)
+    if m:
+        return int(m.group(1))
+    return 0
+
+
+def _set_auto_reply_streak_in_notes(
+    hit_ws: gspread.Worksheet,
+    row: int,
+    notes_i: int | None,
+    streak: int,
+) -> None:
+    """Update or append ``auto_reply_streak=N`` in the Notes cell."""
+    if notes_i is None:
+        return
+    notes_col = notes_i + 1
+    existing = smf.cell(hit_ws.row_values(row), notes_i) if row <= len(hit_ws.get_all_values()) else ""
+    if not existing:
+        existing = ""
+    # Replace existing streak marker or append
+    if re.search(r"auto_reply_streak=\d+", existing):
+        new_notes = re.sub(r"auto_reply_streak=\d+", f"auto_reply_streak={streak}", existing)
+    else:
+        suffix = f"auto_reply_streak={streak}"
+        new_notes = f"{existing}; {suffix}" if existing else suffix
+    hit_ws.update_cell(row, notes_col, new_notes)
+
+
 def promote_warmup_replies(
     hit_ws: gspread.Worksheet,
     log_ws: gspread.Worksheet | None,
@@ -527,9 +564,18 @@ def promote_warmup_replies(
     *,
     dry_run: bool,
     verbose: bool,
+    auto_reply_park_threshold: int = 2,
 ) -> int:
     """Set Hit List Status to AI: Prospect replied when inbound after last logged sent.
-    Also appends a DApp Remarks row with the reply content for audit + template refinement."""
+    Also appends a DApp Remarks row with the reply content for audit + template refinement.
+
+    Auto-reply handling (idempotent):
+    - Detects auto-replies via is_auto_reply().
+    - Uses the ``AI/Auto-reply Logged`` Gmail label as an idempotency marker so a suppressed
+      auto-reply is logged to DApp Remarks once, not once per hourly run.
+    - Tracks ``auto_reply_streak=N`` in the Hit List Notes column.
+    - When streak >= ``auto_reply_park_threshold``, flips Status to **On Hold**.
+    """
     if log_ws is None:
         print("WARNING: Email Agent Follow Up missing — skip reply promotion.")
         return 0
@@ -542,21 +588,24 @@ def promote_warmup_replies(
     status_i = hdr.get("Status")
     email_i = hdr.get("Email")
     shop_i = hdr.get("Shop Name")
+    notes_i = hdr.get("Notes")
     if status_i is None or email_i is None:
         return 0
     status_col = status_i + 1
     n = 0
 
-    # Resolve the AI/Prospect Replied label id once. Used to tag the inbound
-    # message so the Gmail-side state matches the Hit List Status flip — see
-    # HIT_LIST_STATE_MACHINE.md "AI: Prospect replied" row. Best-effort: a
-    # label-create failure logs and lets the Status flip proceed anyway.
+    # Resolve the AI/Prospect Replied label id once.
     replied_label_id: str | None = None
+    auto_reply_label_id: str | None = None
     if not dry_run:
         try:
             replied_label_id = smf.ensure_user_label_id(gsvc, REPLIED_GMAIL_LABEL)
         except Exception as e:
             print(f"  WARNING: could not resolve {REPLIED_GMAIL_LABEL!r} label: {e}")
+        try:
+            auto_reply_label_id = smf.ensure_user_label_id(gsvc, AUTO_REPLY_LOGGED_GMAIL_LABEL)
+        except Exception as e:
+            print(f"  WARNING: could not resolve {AUTO_REPLY_LOGGED_GMAIL_LABEL!r} label: {e}")
 
     for r, row in enumerate(values[1:], start=2):
         if smf.cell(row, status_i) != HIT_STATUS_WARMUP:
@@ -574,8 +623,29 @@ def promote_warmup_replies(
         if reply:
             # Suppress auto-replies so they don't clutter the Prospect Replied state
             if is_auto_reply(reply.get("body", ""), reply.get("subject", "")):
+                inbound_msg_id = reply.get("message_id") or ""
+                # Check if this message already has the AI/Auto-reply Logged label (idempotency)
+                already_logged = False
+                if inbound_msg_id and auto_reply_label_id:
+                    try:
+                        msg_full = gsvc.users().messages().get(
+                            userId="me", id=inbound_msg_id, format="full"
+                        ).execute()
+                        msg_label_ids = msg_full.get("labelIds") or []
+                        if auto_reply_label_id in msg_label_ids:
+                            already_logged = True
+                    except Exception as e:
+                        if verbose:
+                            print(f"  WARNING: could not check labels for msg {inbound_msg_id}: {e}")
+
+                if already_logged:
+                    if verbose:
+                        print(f"  auto-reply row {r} {em}: already logged (label present), skipping")
+                    continue
+
                 if verbose:
                     print(f"  auto-reply row {r} {em}: detected, NOT promoting")
+
                 # Log as DApp Remarks for audit but don't flip status
                 if not dry_run and remarks_ws is not None:
                     shop_name = smf.cell(row, shop_i) if shop_i is not None else ""
@@ -598,6 +668,46 @@ def promote_warmup_replies(
                         )
                     except Exception as e:
                         print(f"  WARNING: auto-reply DApp Remarks append failed for row {r}: {e}")
+
+                # Apply the AI/Auto-reply Logged label to the message (idempotency marker)
+                if not dry_run and auto_reply_label_id and inbound_msg_id:
+                    try:
+                        gsvc.users().messages().modify(
+                            userId="me",
+                            id=inbound_msg_id,
+                            body={"addLabelIds": [auto_reply_label_id]},
+                        ).execute()
+                        if verbose:
+                            print(f"  label   row {r} msg {inbound_msg_id}: +{AUTO_REPLY_LOGGED_GMAIL_LABEL!r}")
+                    except Exception as e:
+                        print(f"  WARNING: auto-reply label apply failed for row {r} msg {inbound_msg_id}: {e}")
+
+                # Track auto-reply streak and park if threshold reached
+                if not dry_run:
+                    existing_notes = smf.cell(row, notes_i) if notes_i is not None else ""
+                    current_streak = _parse_auto_reply_streak(existing_notes)
+                    new_streak = current_streak + 1
+                    _set_auto_reply_streak_in_notes(hit_ws, r, notes_i, new_streak)
+                    if verbose:
+                        print(f"  streak  row {r} {em}: auto_reply_streak={new_streak}")
+
+                    if new_streak >= auto_reply_park_threshold:
+                        # Park the row: flip Status to On Hold
+                        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                        park_note = (
+                            f"parked: auto-responder only, no human reply after "
+                            f"{new_streak} touches ({now_iso})"
+                        )
+                        hit_ws.update_cell(r, status_col, "On Hold")
+                        if notes_i is not None:
+                            notes_col = notes_i + 1
+                            updated_notes = smf.cell(hit_ws.row_values(r), notes_i) if r <= len(hit_ws.get_all_values()) else ""
+                            if not updated_notes:
+                                updated_notes = existing_notes
+                            park_suffix = f"parked: auto-responder only, no human reply after {new_streak} touches ({now_iso})"
+                            new_notes_val = f"{updated_notes}; {park_suffix}" if updated_notes else park_suffix
+                            hit_ws.update_cell(r, notes_col, new_notes_val)
+                        print(f"  PARKED  row {r} {em}: auto_reply_streak={new_streak} >= threshold={auto_reply_park_threshold} → On Hold")
                 continue  # skip promotion for auto-replies
 
             if verbose:
@@ -1211,6 +1321,12 @@ def main() -> None:
         help="Cap reply drafts created; 0 = unlimited.",
     )
     p.add_argument(
+        "--auto-reply-park-threshold",
+        type=int,
+        default=2,
+        help="Number of distinct auto-reply cycles before parking the row to On Hold (default 2).",
+    )
+    p.add_argument(
         "--track-opens",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -1263,6 +1379,7 @@ def main() -> None:
             remarks_ws,
             dry_run=args.dry_run,
             verbose=args.verbose,
+            auto_reply_park_threshold=args.auto_reply_park_threshold,
         )
         if promoted:
             print(f"Promoted {promoted} row(s) {HIT_STATUS_WARMUP!r} → {HIT_STATUS_REPLIED!r}.")
