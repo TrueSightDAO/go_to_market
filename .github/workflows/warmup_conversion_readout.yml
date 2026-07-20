@@ -1,0 +1,80 @@
+# Monthly reply-rate readout for first-touch warm-up sends, split by segment
+# (Hosts Circles yes/no) and by channel (auto-sent vs human-sent).
+#
+# Why this exists: WARMUP_AUTOSEND_PLAN.md §6 promised a 30-day metrics
+# readout after the 2026-06-05 auto-send graduation. It was never run — a
+# 6-week reply-rate collapse (6% -> 0.3%) sat undetected until an on-demand
+# review caught it. This workflow makes the readout something that happens
+# on its own, not something that depends on a human remembering to run it.
+# See agentic_ai_context/plans/WARMUP_CONVERSION_IMPROVEMENT_PLAN.md PR3.
+#
+# Read-only against Hit List / Email Agent Drafts (Sheets API); only writes
+# the report file back into this repo.
+#
+# Required repository secret: GOOGLE_CREDENTIALS_JSON (same service account
+# as the other Hit List workflows — Sheets read only, no Gmail scope needed).
+
+name: Warm-up conversion readout
+
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: 'ISO date cutoff (default 2026-06-05, auto-send launch). Empty for all-time.'
+        required: false
+        default: ''
+  schedule:
+    # First of the month, 08:00 UTC.
+    - cron: "0 8 1 * *"
+
+concurrency:
+  group: warmup-conversion-readout
+  cancel-in-progress: false
+
+jobs:
+  readout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Write service account JSON
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: printf '%s' "$GOOGLE_CREDENTIALS_JSON" > google_credentials.json
+
+      - name: Generate readout
+        env:
+          SINCE: ${{ github.event.inputs.since }}
+        run: |
+          if [ -n "${SINCE}" ]; then
+            python3 scripts/warmup_conversion_readout.py --since "${SINCE}" \
+              --output reports/warmup_conversion_readout_latest.md
+          else
+            python3 scripts/warmup_conversion_readout.py \
+              --output reports/warmup_conversion_readout_latest.md
+          fi
+
+      - name: Commit and push if changed
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add reports/warmup_conversion_readout_latest.md
+          if git diff --staged --quiet; then
+            echo "No changes to the readout; skipping commit."
+          else
+            git commit -m "chore: refresh warm-up conversion readout [skip ci]"
+            git push origin HEAD:main
+          fi
