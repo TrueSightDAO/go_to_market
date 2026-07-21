@@ -86,6 +86,39 @@ DEFAULT_GROK_MODEL = smf.DEFAULT_GROK_MODEL
 DEFAULT_GMAIL_LABEL = "AI/Warm-up"
 PER_MESSAGE_BODY_CAP = smf.PER_MESSAGE_BODY_CAP
 
+# ── first-touch segmentation (WARMUP_CONVERSION_IMPROVEMENT_PLAN.md PR2) ────
+#
+# Before this, every warm-up email was the same boilerplate script (Amazon
+# restoration -> tree-per-bag -> QR code -> 30-sec reel) regardless of whether
+# the recipient was an astrology store, a yoga studio, or a wellness clinic —
+# despite `Shop Type` and `Hosts Circles` already sitting in the Hit List as
+# targetable signal. This selects one of three framings per recipient; every
+# variant still keeps the required mission line, attachments mention, and
+# flexible-consignment-or-bulk language, and still must clear the existing
+# 12-rule linter before it's eligible for auto-send.
+SEGMENT_CIRCLES_HOST = "circles_host"
+SEGMENT_CEREMONIAL_SPIRITUAL = "ceremonial_spiritual"
+SEGMENT_RETAIL_MERCH = "retail_merch"
+
+_CEREMONIAL_SHOP_TYPES = {
+    "metaphysical/spiritual", "spiritual/zen center", "yoga studio",
+}
+
+
+def classify_warmup_segment(shop_type: str, hosts_circles: str) -> str:
+    """Pick a template/framing segment from existing Hit List signal only —
+    no new scraping. `Hosts Circles` overrides Shop Type: a venue that hosts
+    sound baths / breathwork / moon circles converts ~1.8x the rest of the
+    list (11.8% vs 6.6% to Partnered/Manager Follow-up, per the 2026-07-18
+    stats review) and gets its own framing regardless of its retail category.
+    """
+    if (hosts_circles or "").strip().lower().startswith("yes"):
+        return SEGMENT_CIRCLES_HOST
+    st = (shop_type or "").strip().lower()
+    if st in _CEREMONIAL_SHOP_TYPES:
+        return SEGMENT_CEREMONIAL_SPIRITUAL
+    return SEGMENT_RETAIL_MERCH
+
 
 def load_warmup_targets(ws: gspread.Worksheet) -> list[dict]:
     values = ws.get_all_values()
@@ -99,6 +132,8 @@ def load_warmup_targets(ws: gspread.Worksheet) -> list[dict]:
     notes_i = hdr.get("Notes")
     city_i = hdr.get("City")
     state_i = hdr.get("State")
+    shop_type_i = hdr.get("Shop Type")
+    hosts_circles_i = hdr.get("Hosts Circles")
     if status_i is None or email_i is None:
         raise SystemExit("Hit List row 1 must include 'Status' and 'Email'.")
 
@@ -120,9 +155,23 @@ def load_warmup_targets(ws: gspread.Worksheet) -> list[dict]:
                 "to_email": em,
                 "notes": smf.cell(row, notes_i) if notes_i is not None else "",
                 "city_state": locale,
+                "shop_type": smf.cell(row, shop_type_i) if shop_type_i is not None else "",
+                "hosts_circles": smf.cell(row, hosts_circles_i) if hosts_circles_i is not None else "",
             }
         )
     return out
+
+
+def pick_warmup_segment_fields(targets: list[dict], partner_email: str) -> tuple[str, str]:
+    """(shop_type, hosts_circles) for the same primary-store row `smf.pick_primary_store`
+    would pick (lowest hit_list_row) — kept separate since the shared `pick_primary_store`
+    return arity is used by suggest_manager_followup_drafts.py too and doesn't carry these
+    two fields."""
+    matches = [t for t in targets if t["to_email"] == partner_email]
+    if not matches:
+        return "", ""
+    first = min(matches, key=lambda x: x["hit_list_row"])
+    return (first.get("shop_type") or "").strip(), (first.get("hosts_circles") or "").strip()
 
 
 def _email_from_from_header(from_hdr: str) -> str:
@@ -1123,6 +1172,28 @@ def grok_warmup_system_prompt() -> str:
     )
 
 
+_SEGMENT_GROK_FRAMING = {
+    SEGMENT_CIRCLES_HOST: (
+        "segment: circles_host — this venue hosts community circles (sound healing, breathwork, moon "
+        "circles, ecstatic dance, etc. — see hosts_circles_activities below). Lead with cacao as a "
+        "natural fit for the circles they already host, not a generic retail pitch. It's fine to "
+        "mention it could work as part of the ceremony itself (session-sized quantity), alongside the "
+        "standard retail/wholesale option — offer both, don't force a choice."
+    ),
+    SEGMENT_CEREMONIAL_SPIRITUAL: (
+        "segment: ceremonial_spiritual — a metaphysical/spiritual retail storefront (not necessarily "
+        "hosting circles itself). Lead with ceremonial cacao as a natural complement to what they "
+        "already sell to an intentional, ritual-minded customer base — not a generic 'stock this "
+        "snack' pitch."
+    ),
+    SEGMENT_RETAIL_MERCH: (
+        "segment: retail_merch — a general wellness/specialty retail shop. Lead with the "
+        "retail-merchandising angle: shelf variety, margin-friendly consignment or wholesale, "
+        "tree-traceability as a customer-facing story their shop can tell."
+    ),
+}
+
+
 def grok_generate_warmup(
     *,
     api_key: str,
@@ -1135,6 +1206,8 @@ def grok_generate_warmup(
     hit_list_notes: str,
     dapp_remarks_log: str,
     conversation_history: str,
+    segment: str = SEGMENT_RETAIL_MERCH,
+    hosts_circles_activities: str = "",
 ) -> tuple[str, str]:
     crm_notes = (hit_list_notes or "").strip()
     locality = (city_state or "").strip()
@@ -1147,7 +1220,10 @@ def grok_generate_warmup(
         f"- hit_list_row(s): {hit_list_row}\n"
         f"- recipient_email: {to_email}\n"
         f"- hit_list_status: {HIT_STATUS_WARMUP} (first-touch intro; PDF wholesale list + two packaging photos will be attached)\n"
+        f"- {_SEGMENT_GROK_FRAMING.get(segment, _SEGMENT_GROK_FRAMING[SEGMENT_RETAIL_MERCH])}\n"
     )
+    if segment == SEGMENT_CIRCLES_HOST and (hosts_circles_activities or "").strip():
+        user += f"- hosts_circles_activities: {hosts_circles_activities.strip()}\n"
     if crm_notes:
         user += (
             "- internal_hit_list_notes (use for specificity; do not quote as if the merchant wrote this): "
@@ -1241,13 +1317,69 @@ def build_message_raw_with_attachments(
     return {"raw": raw}
 
 
-def warmup_subject_template(shop_name: str) -> str:
+def warmup_subject_template(shop_name: str, segment: str = SEGMENT_RETAIL_MERCH) -> str:
     s = (shop_name or "Intro").strip()
+    if segment == SEGMENT_CIRCLES_HOST:
+        return f"Ceremonial cacao for the circles you host at {s}"
+    if segment == SEGMENT_CEREMONIAL_SPIRITUAL:
+        return f"Ceremonial cacao for {s} — sourced with intention (PDF attached)"
     return f"Ceremonial cacao for {s} — each bag plants a tree (PDF attached)"
 
 
-def warmup_body_template(shop_name: str) -> str:
-    shop = shop_name or "your shop"
+_WARMUP_SHARED_CLOSE = (
+    "We're **flexible on structure** — **either** **consignment-friendly** retail **or** "
+    "**wholesale / bulk** works on our side; I've attached our **wholesale price list PDF** so you "
+    "can skim SKUs and tiers, plus **two photos of the packaging** (front and back) so you can "
+    "picture how it sits on shelf.\n\n"
+    "For partner-shop shelf photos and the current U.S. stockist list, see "
+    "https://agroverse.shop/wholesale — that's the visual companion to the PDF.\n\n"
+    "No need to meet in person on my side; happy to answer by email or on a quick call if that's "
+    "easier. If you tell me which path you'd rather explore first (consignment vs bulk), I can "
+    "point you to the lightest next step.\n\n"
+    "Thanks,\n"
+    "Gary\n"
+    "Agroverse | ceremonial cacao for retail\n"
+    "garyjob@agroverse.shop\n"
+)
+
+
+def _warmup_body_circles_host(shop: str) -> str:
+    return (
+        f"Hi —\n\n"
+        f"I'm Gary with Agroverse. I came across {shop} and the circles you host — the kind of space "
+        f"where ceremonial cacao usually already belongs. We work with regenerative farms across the "
+        f"Brazilian Amazon — Oscar's Farm in Bahia (deep European-chocolate profile, buttery and smooth) "
+        f"and Paulo's Farm in the Pará Amazon (smoky, earthy, unfolding into delicate floral notes) — and "
+        f"every bag sold plants a new tree, directly traceable via the unique QR code on that bag.\n\n"
+        f"30-second proof of the restoration in motion: https://www.instagram.com/p/DJqW8TRtJK3/ — watch "
+        f"on your phone, see the actual tree planting and the satellite imagery the QR code unlocks.\n\n"
+        f"A few hosts have started offering it as part of their circle itself, not just on a shelf — "
+        f"sound healing, breathwork, moon circles, ecstatic dance — cacao as part of setting the "
+        f"container before people arrive. Happy to send samples sized for that if it's useful, alongside "
+        f"the retail option below.\n\n"
+        f"{_WARMUP_SHARED_CLOSE}"
+    )
+
+
+def _warmup_body_ceremonial_spiritual(shop: str) -> str:
+    return (
+        f"Hi —\n\n"
+        f"I'm Gary with Agroverse. I'm reaching out to {shop} because ceremonial cacao — sourced with "
+        f"the same intention your customers already bring to their practice — feels like a natural fit "
+        f"for what you carry. We work with regenerative farms across the Brazilian Amazon — Oscar's Farm "
+        f"in Bahia (deep European-chocolate profile, buttery and smooth) and Paulo's Farm in the Pará "
+        f"Amazon (smoky, earthy, unfolding into delicate floral notes) — and every bag sold plants a new "
+        f"tree, directly traceable via the unique QR code on that bag.\n\n"
+        f"30-second proof of the restoration in motion: https://www.instagram.com/p/DJqW8TRtJK3/ — watch "
+        f"on your phone, see the actual tree planting and the satellite imagery the QR code unlocks for "
+        f"anyone curious about where their cacao comes from.\n\n"
+        f"I think it's a natural complement to what you already offer — not a generic add-on, but "
+        f"something your customers who already value intentional, traceable sourcing would recognize.\n\n"
+        f"{_WARMUP_SHARED_CLOSE}"
+    )
+
+
+def _warmup_body_retail_merch(shop: str) -> str:
     return (
         f"Hi —\n\n"
         f"I'm Gary with Agroverse. We work with regenerative cacao farms across the Brazilian Amazon — "
@@ -1256,22 +1388,24 @@ def warmup_body_template(shop_name: str) -> str:
         f"bag sold plants a new tree, directly traceable via the unique QR code on each bag.\n\n"
         f"30-second proof of the restoration in motion: https://www.instagram.com/p/DJqW8TRtJK3/ — watch on "
         f"your phone, see the actual tree planting and the satellite imagery the QR code unlocks for customers.\n\n"
-        f"We're **flexible on structure** — **either** **consignment-friendly** retail **or** **wholesale / bulk** "
-        f"works on our side; I've attached our **wholesale price list PDF** so you can skim SKUs and tiers, "
-        f"plus **two photos of the packaging** (front and back) so you can picture how it sits on shelf.\n\n"
         f"I'm reaching out to {shop} because we believe offering different taste profiles "
         f"creates a richer experience for your customers — each farm's cacao is distinct, and variety "
         f"is what keeps a shelf interesting.\n\n"
-        f"For partner-shop shelf photos and the current U.S. stockist list, see "
-        f"https://agroverse.shop/wholesale — that's the visual companion to the PDF.\n\n"
-        f"No need to meet in person on my side; happy to answer by email or on a quick call if that's easier. "
-        f"If you tell me which path you'd rather explore first (consignment vs bulk), I can point you to the "
-        f"lightest next step.\n\n"
-        f"Thanks,\n"
-        f"Gary\n"
-        f"Agroverse | ceremonial cacao for retail\n"
-        f"garyjob@agroverse.shop\n"
+        f"{_WARMUP_SHARED_CLOSE}"
     )
+
+
+_WARMUP_BODY_BY_SEGMENT = {
+    SEGMENT_CIRCLES_HOST: _warmup_body_circles_host,
+    SEGMENT_CEREMONIAL_SPIRITUAL: _warmup_body_ceremonial_spiritual,
+    SEGMENT_RETAIL_MERCH: _warmup_body_retail_merch,
+}
+
+
+def warmup_body_template(shop_name: str, segment: str = SEGMENT_RETAIL_MERCH) -> str:
+    shop = shop_name or "your shop"
+    fn = _WARMUP_BODY_BY_SEGMENT.get(segment, _warmup_body_retail_merch)
+    return fn(shop)
 
 
 def main() -> None:
@@ -1506,6 +1640,8 @@ def main() -> None:
         if args.max_drafts > 0 and n_made >= args.max_drafts:
             break
         sk, shop, rows_str, hit_notes, city_st = smf.pick_primary_store(targets, to_addr)
+        shop_type, hosts_circles = pick_warmup_segment_fields(targets, to_addr)
+        segment = classify_warmup_segment(shop_type, hosts_circles)
         if remarks_ws is not None:
             dapp_ctx = smf.format_dapp_remarks_for_grok(remarks_ws, shop, sk)
         else:
@@ -1547,16 +1683,18 @@ def main() -> None:
                     hit_list_notes=hit_notes,
                     dapp_remarks_log=dapp_ctx,
                     conversation_history=hist,
+                    segment=segment,
+                    hosts_circles_activities=hosts_circles,
                 )
                 source = "grok"
             except Exception as e:
                 sys.stderr.write(f"Grok failed for {to_addr}: {e}\n")
-                subj = warmup_subject_template(shop)
-                body = warmup_body_template(shop)
+                subj = warmup_subject_template(shop, segment)
+                body = warmup_body_template(shop, segment)
                 source = "template_fallback"
         else:
-            subj = warmup_subject_template(shop)
-            body = warmup_body_template(shop)
+            subj = warmup_subject_template(shop, segment)
+            body = warmup_body_template(shop, segment)
 
         sug_id = str(uuid.uuid4())
         tracking_base = (os.environ.get("EMAIL_AGENT_TRACKING_BASE_URL") or "https://edgar.truesight.me").strip()
@@ -1590,7 +1728,7 @@ def main() -> None:
             sys.exit(1)
 
         if args.dry_run:
-            print(f"\n--- dry-run draft → {to_addr} ({shop}) ---")
+            print(f"\n--- dry-run draft → {to_addr} ({shop}) [segment={segment}] ---")
             if args.use_grok:
                 print("(Note: --dry-run skips Grok; preview is template.)")
             print(f"Subject: {subj}")
@@ -1620,7 +1758,7 @@ def main() -> None:
             [args.pdf_path.name] + [p.name for p in image_paths]
         )
         notes = (
-            f"kind=warmup_intro; attachments={attachment_names}; source={source}; "
+            f"kind=warmup_intro; attachments={attachment_names}; source={source}; segment={segment}; "
             f"cadence min_days={args.min_days_since_sent}; last_logged_send={prev_s}; "
             f"grok_model={args.grok_model if args.use_grok else 'n/a'}. Edit before Send."
         )
