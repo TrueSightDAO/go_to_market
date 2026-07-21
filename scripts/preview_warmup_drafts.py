@@ -350,6 +350,18 @@ def _render_html(rows: list[dict], generated_at: str) -> str:
     parts.append(f"<div><b style='color:#28a'>{n_aw}</b>Hosts Circles=Yes</div>")
     parts.append("</div>")
 
+    # Hosts Circles=Yes fast lane (WARMUP_CONVERSION_IMPROVEMENT_PLAN.md PR3) —
+    # that segment converts ~1.8x the rest of the list; call out backlog age
+    # explicitly so "same-day attention" is a checkable fact, not an assumption.
+    oldest_hc_days = _oldest_hosts_circles_age_days(rows)
+    if n_aw and oldest_hc_days is not None and oldest_hc_days > 1:
+        parts.append(
+            f"<div style='background:#fde; color:#a00; padding:8px 12px; "
+            f"border-radius:6px; margin-bottom:16px; font-size:13px;'>"
+            f"⚠️ {n_aw} Hosts Circles=Yes draft(s) pending — oldest is "
+            f"{oldest_hc_days:.1f} day(s) old (target: same-day review).</div>"
+        )
+
     if not rows:
         parts.append("<div class='empty'>No pending warm-up drafts.</div>")
         parts.append("</body></html>")
@@ -462,8 +474,40 @@ def main(argv=None) -> int:
     n_yel = sum(1 for r in rows if any(s == SEV_YELLOW for s, *_ in r["flags"]) and not any(s == SEV_RED for s, *_ in r["flags"]))
     n_clean = sum(1 for r in rows if not any(s in (SEV_RED, SEV_YELLOW) for s, *_ in r["flags"]))
     print(f"Flagged: red={n_red} yellow_only={n_yel} clean={n_clean}")
+    # Hosts Circles=Yes fast lane (WARMUP_CONVERSION_IMPROVEMENT_PLAN.md PR3): that
+    # segment converts ~1.8x the rest of the list, so surface its backlog age
+    # explicitly rather than relying on the operator to notice it in the sorted
+    # list — a count alone doesn't say whether same-day attention is being kept up.
+    oldest_hc_days = _oldest_hosts_circles_age_days(rows)
+    n_hc = sum(1 for r in rows if r.get("hosts_circles"))
+    if n_hc:
+        if oldest_hc_days is not None and oldest_hc_days > 1:
+            print(f"⚠️  Hosts Circles=Yes: {n_hc} pending, oldest is {oldest_hc_days:.1f}d old (target: same-day)")
+        else:
+            print(f"Hosts Circles=Yes: {n_hc} pending, oldest {oldest_hc_days:.1f}d old" if oldest_hc_days is not None else f"Hosts Circles=Yes: {n_hc} pending")
     print(f"Wrote {out_path}")
     return 0
+
+
+def _oldest_hosts_circles_age_days(rows: list[dict]) -> float | None:
+    ages = []
+    now = datetime.now(timezone.utc)
+    for r in rows:
+        if not r.get("hosts_circles"):
+            continue
+        dt = _parse_created_at(r.get("created_at", ""))
+        if dt:
+            ages.append((now - dt).total_seconds() / 86400)
+    return max(ages) if ages else None
+
+
+def _parse_created_at(ts: str) -> datetime | None:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _write_and_open(rows: list[dict], no_browser: bool) -> Path:
