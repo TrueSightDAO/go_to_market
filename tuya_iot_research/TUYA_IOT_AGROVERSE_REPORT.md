@@ -13,6 +13,7 @@
 - Sensor ecosystem spans **soil moisture/temperature, weather, water quality, pest sensors, cameras, gateways** — with **LoRa / Sub-1GHz** long-range options for remote fields.
 - Agriculture line: **"M0L0, powered by Tuya"** smart-agriculture solution (LoRa soil/water/pest monitoring, edge gateway, cloud backend).
 - **Relevance to Agroverse:** continuous **soil-quality time-series** on partner farms and **biodiversity monitoring** as we restore forest — both map cleanly onto Tuya's sensor + cloud + app platform.
+- **NEW — Bean Quality × Environment:** tying Tuya's soil + weather time-series to per-batch cut-test quality grades turns the sensors into a **quality-forecasting and premium-pricing** tool.
 - **Mission tie-back:** every hectare monitored with real data strengthens the path to **10,000 hectares of restored Amazon rainforest**.
 
 ---
@@ -89,16 +90,61 @@ Long-range **LoRa / Sub-1GHz** variants matter for the Amazon: low power, severa
 
 ---
 
-## 7. Fit with Agroverse Stack
+## 7. Bean Quality × Environment Interface
+
+The highest-value link: tying Tuya's soil + weather time-series to the actual quality of the cacao beans each zone produces. This turns environmental monitoring into a **quality-forecasting and premium-pricing** tool.
+
+### 7.1 Three layers
+
+1. **Environmental layer (Tuya sensors)** — continuous soil (moisture, temperature, pH, NPK/EC) + weather (rainfall, air temp, humidity, wind) per farm zone.
+2. **Bean-quality layer (post-harvest QC)** — standard cacao grading per batch:
+   - **Cut test**: % brown (well-fermented) / violet (under-fermented) / slaty (unfermented); premium target 70–90% brown
+   - Fermentation index (derived from cut-test color ratios)
+   - Bean count per 100g, moisture %, shell %, fat content
+   - Flavor notes (fruity, nutty, floral) — the premium differentiator
+3. **Correlation & insight layer** — each harvest batch's quality score is joined to the environmental window that preceded it (growing season + fermentation period). Over seasons we learn zone-level rules.
+
+### 7.2 What the science says
+
+- Rainfall, max temperature, and wind during the season measurably affect fermentation and flavor (PMC11353615 — nine agroclimatic clusters; nuttiness rises with higher max temp/wind; fruitiness drops after ~120h fermentation).
+- Fermentation outcome is temperature- and humidity-sensitive (ideal ~45–50°C, high humidity) — so ambient + soil data directly inform when to stop fermentation (96h vs 120h).
+- Cut-test grade (slaty/violet/brown) predicts free amino acid + polyphenol profiles — i.e. the chemistry that drives chocolate flavor (PMC6525676).
+
+### 7.3 Agroverse application
+
+- Per-zone environmental fingerprint + per-batch quality grade attached to each bag's **QR lineage** → TrueChain notarization. "This bag's beans: zone B, soil moisture X, rain Y, fermented 96h, 85% brown — premium."
+- Seasonal learning: "zone with soil moisture < threshold during pod-fill yields +15% brown ratio" → guide irrigation/planting.
+- Premium justification with data; identify microzones that command premium pricing on Oscar's (Bahia) and Paulo's (Pará) farms.
+- QC workflow: farmer/post-harvest team photographs cut-test beans via a lightweight app (or lab form); batch QR links photos + scores to the sensor window. Tuya cloud holds the time-series; our ledger holds the joined record.
+
+### 7.4 Data schema (per batch)
+
+| Field | Source |
+|---|---|
+| batch_id / QR | ledger |
+| farm / zone | ledger |
+| harvest date | QC form |
+| fermentation duration | QC form (h) |
+| cut-test % brown / violet / slaty | QC photo + form |
+| fermentation index | computed |
+| bean count / 100g, moisture % | QC form |
+| flavor notes | taster |
+| soil window (moisture/temp/pH/NPK means) | Tuya cloud (auto) |
+| weather window (rain/temp/hum/wind) | Tuya cloud (auto) |
+| quality grade (A/B/C) | computed |
+
+---
+
+## 8. Fit with Agroverse Stack
 
 - **QR lineage (lineage-credentials / lineage-assets):** sensor data adds an environmental evidence layer to each provenance record.
-- **TrueChain (PoA notarization):** anchor periodic soil/biodiversity snapshots as notarized records.
+- **TrueChain (PoA notarization):** anchor periodic soil/biodiversity/quality snapshots as notarized records.
 - **DApp / truesight.me dashboard:** farm monitoring charts enrich the public "origin & restoration" surface.
 - **Attention surfaces:** turns "Origin & Restoration" from narrative into **measured data** — the strongest possible mission signal.
 
 ---
 
-## 8. Gaps, Risks & Considerations
+## 9. Gaps, Risks & Considerations
 
 | Area | Consideration |
 |---|---|
@@ -109,21 +155,23 @@ Long-range **LoRa / Sub-1GHz** variants matter for the Amazon: low power, severa
 | Data ownership | Confirm data export, on-prem/private-cloud option (Cube Private Cloud) for sovereignty |
 | Cost | Per-hectare cost is low (~BRL 1/ha for some platforms) but hardware + gateways are the real budget line |
 | Security | ISO 27001 + SOC 3 present; still review data residency for Brazilian farm data |
+| QC consistency | Cut-test scoring needs a standard protocol + photo record so batch grades are comparable across farms and seasons |
 
 ---
 
-## 9. Recommended Pilot + Next Steps
+## 10. Recommended Pilot + Next Steps
 
 1. **Confirm scope with Erica** — what her company sells (reseller? integrator? platform?), Brazil presence, reference ag deployments.
 2. **Pick 1 pilot farm** (suggest Oscar's Farm, Bahia) and deploy: 3–5 soil probes + 1 weather station + 1 gateway (LoRa) + solar/battery.
-3. **Define 12-month data plan:** soil moisture/temp/pH/NPK, rainfall, timelapse, acoustic sampling.
+3. **Define 12-month data plan:** soil moisture/temp/pH/NPK, rainfall, timelapse, acoustic sampling + **cut-test QC per batch**.
 4. **Build the dashboard** on Tuya cloud; export snapshots to DAO ledger (QR lineage + TrueChain notarization).
 5. **Baseline biodiversity index** at year 0, measure annually → publish as mission proof.
 6. **Cost the pilot** (hardware + gateway + platform fees) and bring to DAO for budget approval.
+7. **Hand to Jerry (team):** review the bean-quality × environment schema (§7.4) and decide the QC app / data pipeline approach.
 
 ---
 
-## 10. Questions to Ask Erica's Company
+## 11. Questions to Ask Erica's Company
 
 - Is the platform **Tuya** (tuya.com) and what is your exact role — OEM, reseller, integrator, or solution provider?
 - Do you have **deployed agriculture/IoT references in Brazil** (especially Amazon/Bahia/Pará)?
@@ -131,10 +179,11 @@ Long-range **LoRa / Sub-1GHz** variants matter for the Amazon: low power, severa
 - Connectivity options for **off-grid farms** (LoRa range, solar power, data sync frequency).
 - Data ownership, export, and **private-cloud option**.
 - Timeline & minimum order to pilot on one farm.
+- Can the platform expose **time-series APIs / webhooks** so we can join sensor data to our QC records?
 
 ---
 
-## 11. Sources
+## 12. Sources
 
 - tuya.com — platform pages (IoT Core, TuyaOS, App SDK, SaaS framework, Cube Private Cloud)
 - Gartner Peer Insights — Tuya IoT Platform
@@ -143,6 +192,8 @@ Long-range **LoRa / Sub-1GHz** variants matter for the Amazon: low power, severa
 - Landatel — "M0L0, powered by Tuya" Smart Agriculture (LoRaWAN)
 - CSA STAR Registry — Tuya IoT Platform
 - Tuya SOC 3 Report (FY22)
+- PMC11353615 — Fermentation time & climate vs quality (sensorial profile, volatilome)
+- PMC6525676 — Cut-test grade vs amino acids & polyphenols
 
 ---
 
