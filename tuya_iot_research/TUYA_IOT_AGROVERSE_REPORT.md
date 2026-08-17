@@ -1,4 +1,4 @@
-# TUYA IoT — Deep-Dive for Agroverse Farm Monitoring
+# Agroverse Farm Monitoring — Deep-Dive (Radio Data Acquisition)
 
 **Prepared for TrueSight DAO / Agroverse** — partner research following the office visit with Erica & Gianluca.
 
