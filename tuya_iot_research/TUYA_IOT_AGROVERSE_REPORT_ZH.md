@@ -1,4 +1,4 @@
-# 涂鸦智能（Tuya）IoT — Agroverse 农场监测深度调研
+# Agroverse 农场监测 — 深度调研（无线电数据采集）
 
 **为 TrueSight DAO / Agroverse 编制** — 基于与 Erica 与 Gianluca 办公室会面后的合作伙伴调研。
 
