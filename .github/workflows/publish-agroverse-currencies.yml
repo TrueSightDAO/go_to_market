@@ -1,0 +1,81 @@
+# Regenerates public currencies.json in TrueSightDAO/agroverse-inventory from the
+# main ledger (Google Sheets) "Currencies" tab. Uses market_research/scripts/sync_agroverse_currencies.py.
+#
+# Required repository secrets (go_to_market / market_research clone):
+#   GOOGLE_CREDENTIALS_JSON   - service account JSON with Sheets + Drive read (same as other workflows here).
+#   AGROVERSE_INVENTORY_PUSH_TOKEN - fine-grained PAT with **Contents: Read and write** on TrueSightDAO/agroverse-inventory
+#     (classic PAT with `repo` scope also works). Needed because GITHUB_TOKEN cannot push to another repo by default.
+#
+# Outputs: currencies.json on agroverse-inventory default branch (main).
+#
+# Script behavior (sync_agroverse_currencies.py): reads the Currencies tab (column A, rows 2..last),
+# trims/skips-empty/dedupes/sorts exactly like the GAS publisher readCurrencyStringsFromSheet_(), and
+# writes {generatedAt, source, currencies} - the same envelope the GAS repackaging ingest produces, so
+# dapp's currency_conversion.html picker keeps working unchanged.
+#
+# This decouples currencies.json from the single repackaging-ingest event path (see
+# agentic_ai_context/plans/CURRENCY_CONVERSION_STALE_CURRENCIES_JSON_PLAN.md): any Currencies-tab edit
+# reaches the published file on the next daily run, no matter which pathway added the row.
+
+name: Publish Agroverse currencies
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 06:45 UTC daily - offset from the 06:15 sibling snapshot to reduce Sheets API burst collisions.
+    - cron: "45 6 * * *"
+
+concurrency:
+  group: agroverse-currencies
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout market_research (this repo)
+        uses: actions/checkout@v4
+
+      - name: Checkout agroverse-inventory (target)
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/agroverse-inventory
+          path: agroverse-inventory
+          token: ${{ secrets.AGROVERSE_INVENTORY_PUSH_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "gspread>=5.12" "google-auth>=2.23"
+
+      - name: Write Google credentials
+        run: |
+          echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > google_credentials.json
+
+      - name: Sync Currencies tab and write currencies.json
+        run: |
+          python3 scripts/sync_agroverse_currencies.py --execute \
+            --json-out agroverse-inventory/currencies.json
+
+      - name: Commit and push agroverse-inventory if changed
+        working-directory: agroverse-inventory
+        env:
+          TARGET_TOKEN: ${{ secrets.AGROVERSE_INVENTORY_PUSH_TOKEN }}
+        run: |
+          git remote set-url origin "https://x-access-token:${TARGET_TOKEN}@github.com/TrueSightDAO/agroverse-inventory.git"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add currencies.json
+          if git diff --staged --quiet; then
+            echo "No changes to currencies.json; skipping commit."
+          else
+            git commit -m "chore: refresh currencies.json [skip ci]"
+            git push origin HEAD:main
+          fi
