@@ -2,34 +2,36 @@
 
 **Companion to:** `proposal.md` (plan-of-record) · `implementation_roadmap.md` (phasing)
 **Event:** June 12, 2026 (Friday) · ICC, 525 Los Coches St, Milpitas, CA 95035 · 11:00 AM – 5:00 PM PT
-**Format:** two flasks — **Oscar's ceremonial cacao + Paulo's cacao tea** — in 3 oz cups, self-serve at the snack table. Placard does the talking.
+**Format (updated Jun 9):** Gary attending with comp student ticket. Cacao pour at happy hour (after 4-5 PM) — setup coordinated on-site with Soniya. Arrive at lunch to coordinate.
 **How to use:** check items as done; each phase is time-bounded.
 
 Legend: `[x]` done · `[ ]` open · `[~]` drafted, pending review · 🔒 blocked on a dependency
 
 ---
 
-## Phase 0 — Confirm with Soniya · now → ~Jun 5 · Gary
+## Phase 0a — Original plan (superseded by WhatsApp Jun 9)
 
-- [ ] **0.1** Confirm **snack table location** — is it accessible to all attendees? Where in the venue?
-- [ ] **0.2** Confirm **self-serve** is approved — no dedicated pourer, no one staffing the table
-- [ ] **0.3** Confirm **stage shoutout** — still offered? Preferred timing? *(Suggested: Sponsors Acknowledgement at 3:00 PM, or before a break)*
-- [ ] **0.4** Confirm **Gary + friend passes** — logistics (names, how to get in, any registration needed)
-- [ ] **0.5** Confirm any venue restrictions (outside food/beverage, alcohol policy, setup time)
+Soniya confirmed via WhatsApp: snack table / self-serve / stage shoutout coordination is "a little too late now." The original Phase 0 items (0.1–0.5) are superseded. Gary has a **comp student ticket**. She'll set him up for happy hour (after 4-5 PM).
 
-> **Draft message to Soniya** *(send soon)*:
->
-> Hi Soniya — circling back on the cacao for Tech Fest (June 12!). Just locking in a few logistics when you get a sec:
->
-> - Where's the **snack table** located — is it in the main hall or a separate area? We'll just drop two flasks + cups + a small placard, fully self-serve, no one staffing it.
-> - Is the **stage shoutout** still on? If so, happy to do ~30 seconds whenever fits the flow — Sponsors Acknowledgement or right before a break.
-> - **Passes for me + my friend** — anything we need to do to get registered?
->
-> Thanks for making space for this! 🍫
+- [x] ~~0.1 Confirm snack table location~~ → **Superseded.** Will coordinate on-site.
+- [x] ~~0.2 Confirm self-serve~~ → **Superseded.**
+- [x] ~~0.3 Confirm stage shoutout~~ → **Superseded.**
+- [x] ~~0.4 Confirm Gary + friend passes~~ → **Comp student ticket confirmed** (singular).
+- [x] ~~0.5 Confirm venue restrictions~~ → **Superseded.**
 
 ---
 
-## Phase 1 — QR codes + placard · now → Jun 5 · Claude
+## Phase 0b — On-site coordination (new) · Jun 12 · Gary
+
+- [ ] **0b.1** Arrive at **lunch time** (not 11 AM opening)
+- [ ] **0b.2** Find Soniya, check in, thank her for the comp ticket
+- [ ] **0b.3** Coordinate **happy hour setup** — where to place flasks + cups, what time, any table available
+- [ ] **0b.4** Confirm happy hour timing (she said "after 4 or 5 PM")
+- [ ] **0b.5** Decide on the spot: one flask or two? (Oscar's ceremonial + Paulo's tea, or just one depending on space)
+
+---
+
+## Phase 1 — QR codes + placard · now → Jun 11 · Claude
 
 - [ ] **1.1** Generate QR codes via `AGROVERSE_QR_CODE_BATCH_GENERATION.md`:
   - `SFTF_CC_2026` → agl4 (Oscar's ceremonial cacao)
@@ -42,7 +44,7 @@ Legend: `[x]` done · `[ ]` open · `[~]` drafted, pending review · 🔒 blocke
 
 ---
 
-## Phase 2 — DRY RUN · Jun 5–7 · Claude  ← gate
+## Phase 2 — DRY RUN · Jun 10–11 · Claude  ← gate
 
 - [ ] **2.1** Print **test placard** with both QRs
 - [ ] **2.2** Scan provenance QR → confirm it resolves to the correct agl4/agl8 page (no dead link / CORS)
@@ -54,38 +56,41 @@ Legend: `[x]` done · `[ ]` open · `[~]` drafted, pending review · 🔒 blocke
 
 ---
 
-## Phase 3 — Print + prep (Jun 8–11) · Gary
+## Phase 3 — Print + prep · Jun 10–11 · Gary
 
 - [ ] **3.1** Print **2 copies** of the placard (5x7) — one for the table, one backup
-- [ ] **3.2** Pull cacao for two flasks from inventory:
+- [ ] **3.2** Pull cacao for **1–2 flasks** from inventory (decide on-site with Soniya):
   - Oscar's Farm ceremonial cacao (Bahia) — enough for 1 full thermal flask
   - Paulo's cacao tea (Pará) — enough for 1 full thermal flask
 - [ ] **3.3** Log `[INVENTORY MOVEMENT]` for the cacao pulled
-- [ ] **3.4** Gather cups (3 oz, compostable) + napkins — enough for ~50 servings
-- [ ] **3.5** Day-of: pre-brew both flasks (Kirsten or Gary). Hot, ready to go. No kettle needed.
-- [ ] **3.6** Pack kit: 2 flasks (sealed tight), cups, napkins, placard x2, tape (to secure placard if needed)
-- [ ] **3.7** Final confirm with Soniya (time to arrive, snack table location) — 📞 Soniya check-in
+- [ ] **3.4** Gather cups (3 oz, compostable) + napkins — enough for ~30-50 servings
+- [ ] **3.5** Day-of: pre-brew flask(s) (Kirsten or Gary). Hot, ready to go. No kettle needed.
+- [ ] **3.6** Pack kit: 1-2 flasks (sealed tight), cups, napkins, placard x2, tape
 
 ---
 
 ## Phase 4 — Event day · Jun 12 · Gary
 
-### 4.1 Setup
-- [ ] **4.1.1** Arrive early — check in with Soniya, find the snack table
-- [ ] **4.1.2** Place two flasks + cups (stacked) + napkins + placard at the snack table
-- [ ] **4.1.3** Place the second placard copy in your bag (backup)
-- [ ] **4.1.4** Take a photo of the setup before attendees arrive
+### 4.1 Arrival & coordination
+- [ ] **4.1.1** Arrive at **lunch time** (not 11 AM)
+- [ ] **4.1.2** Check in with Soniya — thank her, coordinate happy hour setup
+- [ ] **4.1.3** Confirm where and when to place flasks for happy hour (after 4-5 PM)
+- [ ] **4.1.4** Keep kit in car / bag until happy hour timing is confirmed
 
-### 4.2 During event
-- [ ] **4.2.1** Midday check: is a flask empty? Is the placard still visible and in place?
-- [ ] **4.2.2** Note any conversations about the cacao (who, what they asked, any retail interest)
-- [ ] **4.2.3** If Soniya does the stage shoutout: pay attention, note the timing
-- [ ] **4.2.4** Network. You're an attendee, not on shift.
+### 4.2 During event (before happy hour)
+- [ ] **4.2.1** Network as an attendee — you're not on shift
+- [ ] **4.2.2** Note any conversations about cacao (who, what they asked, any retail interest)
 
-### 4.3 End of event
-- [ ] **4.3.1** Collect flasks and any remaining cups (leave the table clean)
-- [ ] **4.3.2** Quick photo of the setup at end-of-day (for contrast)
-- [ ] **4.3.3** Mental notes → jot down before you forget: names, conversations, what people said
+### 4.3 Happy hour setup (after 4-5 PM)
+- [ ] **4.3.1** Set up flask(s) + cups + napkins + placard at the happy hour location
+- [ ] **4.3.2** Take a photo of the setup
+- [ ] **4.3.3** Pour and talk story — this is the primary activation moment
+- [ ] **4.3.4** Cacao as the non-alcoholic, focus-enhancing counterpoint to flowing drinks
+
+### 4.4 End of event
+- [ ] **4.4.1** Collect flask(s) and any remaining cups (leave the table clean)
+- [ ] **4.4.2** Photo of the setup at end-of-day
+- [ ] **4.4.3** Mental notes → jot down before you forget: names, conversations, what people said
 
 ---
 
@@ -113,14 +118,14 @@ Legend: `[x]` done · `[ ]` open · `[~]` drafted, pending review · 🔒 blocke
 
 | Phase | Target date | Follow-up due |
 |---|---|---|
-| 0 | ASAP (by Jun 5) | Confirm snack table, self-serve, shoutout, passes |
-| 1 | Jun 1–5 | QR codes minted, placard designed |
-| 2 | Jun 5–7 | Dry run passes |
-| 3 | Jun 8–11 | Placard printed, kit assembled |
-| 4 | Jun 12 | Setup, midday check, teardown |
+| 0b | Jun 12 (on-site) | Coordinate happy hour setup with Soniya |
+| 1 | Jun 10–11 | QR codes minted, placard designed |
+| 2 | Jun 10–11 | Dry run passes |
+| 3 | Jun 11 | Placard printed, kit assembled |
+| 4 | Jun 12 | Arrive lunch, coordinate, happy hour pour |
 | 5 | Jun 13–14 | Signups verified, leads in Hit List |
 | 6 | Jun 15+ | Thank-you to Soniya, follow-ups |
 
 ---
 
-*Created 2026-05-26 by Claude (Anthropic). Mirrors `implementation_roadmap.md`; update both if phasing changes.*
+*Created 2026-05-26 by Claude (Anthropic). Updated 2026-06-09 per Soniya WhatsApp — format shifted from snack-table self-serve to happy-hour pour.*
