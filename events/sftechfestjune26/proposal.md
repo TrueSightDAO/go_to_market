@@ -1,6 +1,10 @@
 # SF Tech Fest 2026 — Agroverse cacao activation proposal
 
-**Status:** DRAFT v0.1 — plan-of-record
+**⚠️ STATUS UPDATE (2026-06-04):** This proposal is now **historical**. Gary missed the reply window with Soniya, so the snack-table serving format is no longer available. He still has a free pass to attend as a guest. See `implementation_roadmap.md` for the revised plan (reconnaissance mission only). The original proposal is preserved below for reference.
+
+---
+
+**Status:** DRAFT v0.1 — plan-of-record (historical)
 **Date:** 2026-05-26
 **Author:** Claude (Anthropic) — lead
 
@@ -26,7 +30,7 @@ Gary reached out to Soniya (May 2026) after seeing the invitation, offering two 
 
 > **Soniya:** *"That would be very helpful."*
 
-**Format confirmed:** two flasks + 3 oz cups + a placard, placed at the snack table. Self-serve. Gary gets free passes for himself + a friend. Shoutout on stage is on the table (confirm with Soniya).
+**Format confirmed (original):** two flasks + 3 oz cups + a placard, placed at the snack table. Self-serve. Gary gets free passes for himself + a friend. Shoutout on stage is on the table (confirm with Soniya).
 
 ---
 
