@@ -11,7 +11,8 @@ Port of `agroverse_shop/google-app-script/update_store_inventory.gs` (Python).
    `contributor_contact_id`, regardless of column **T** (venue vs online).
 4. `skus.json` is the public Agroverse SKU catalog (columns **A-I** of the **Agroverse SKUs** tab)
    consumed by the dapp's define_currency.html picker. It shares this script so the catalog and the
-   per-SKU stock snapshot never drift.
+   per-SKU stock snapshot never drift. Cell values mirror the deployed GAS reader (raw/unformatted),
+   so `priceUsd` is the number string (`25`), not the display string (`$25.00`).
 
 Requires `market_research/google_credentials.json` with access to:
 - Main workbook `1GE7PUq-UT6x2rBN-Q2ksogbWpgyuh2SaxJyG_uEK6PU`
@@ -79,15 +80,27 @@ def _to_float(val: object) -> float:
         return 0.0
 
 
-def _to_float_or_none(val: object) -> float | None:
-    """Like `_to_float` but returns None (not 0.0) for empty/unparseable input, so
-    numeric JSON fields can distinguish "missing" from an actual zero."""
+def _gas_cell_str(val: object) -> str:
+    """Mirror the GAS reader's `row[i] ? row[i].toString().trim() : ''` for a cell read
+    with `valueRenderOption=UNFORMATTED_VALUE`. JS treats 0/'', null as falsy, so a zero
+    price becomes '' (not '0.00'); whole numbers print without a trailing '.0'."""
+    if val is None or val == "" or val == 0:
+        return ""
+    if isinstance(val, float) and val.is_integer():
+        return str(int(val))
+    return str(val).strip()
+
+
+def _gas_parse_float(val: object) -> float | int | None:
+    """Mirror GAS `parseFloat(cell)` on an UNFORMATTED cell: numeric or None. Whole
+    numbers are emitted as int, matching JS JSON serialization (so 8, not 8.0)."""
     if val is None or val == "":
         return None
     try:
-        return float(val)
+        f = float(val)
     except (TypeError, ValueError):
         return None
+    return int(f) if f.is_integer() else f
 
 
 def _extract_spreadsheet_id(url: str) -> str | None:
@@ -485,8 +498,11 @@ def read_sku_catalog(sh: gspread.Spreadsheet) -> list[dict[str, object]]:
       {productId, productName, priceUsd, weightOz, category, shipment, farm,
        imagePath, storeInventory}
 
-    `priceUsd` is passed through as the trimmed sheet string; `weightOz` is numeric or
-    null; `storeInventory` is numeric (defaults to 0). Blank product IDs are skipped.
+    Cell values mirror the deployed GAS reader (`getValues()` /
+    `valueRenderOption=UNFORMATTED_VALUE`), so `priceUsd` is the raw number string
+    (e.g. `25`, or `''` when the cell is 0) rather than the formatted `$25.00` — the
+    dapp drops it straight into a `type="number"` input. `weightOz` is numeric or null;
+    `storeInventory` is numeric (defaults to 0). Blank product IDs are skipped.
     """
 
     def _read() -> list[dict[str, object]]:
@@ -494,30 +510,29 @@ def read_sku_catalog(sh: gspread.Spreadsheet) -> list[dict[str, object]]:
         last = _last_filled_row_in_col_a(ws)
         if last < 2:
             return []
-        rows = ws.get_values(f"A2:I{last}")
+        rows = ws.get_values(f"A2:I{last}", value_render_option="UNFORMATTED_VALUE")
         out: list[dict[str, object]] = []
         for row in rows:
             if not row:
                 continue
 
-            def cell(i: int) -> str:
-                return row[i].strip() if len(row) > i and row[i] else ""
+            def cell(i: int) -> object:
+                return row[i] if len(row) > i else ""
 
-            product_id = cell(0)
+            product_id = _gas_cell_str(cell(0))
             if not product_id:
                 continue
-            weight = _to_float_or_none(cell(3))
             out.append(
                 {
                     "productId": product_id,
-                    "productName": cell(1),
-                    "priceUsd": cell(2),
-                    "weightOz": weight,
-                    "category": cell(4),
-                    "shipment": cell(5),
-                    "farm": cell(6),
-                    "imagePath": cell(7),
-                    "storeInventory": _to_float(cell(8)),
+                    "productName": _gas_cell_str(cell(1)),
+                    "priceUsd": _gas_cell_str(cell(2)),
+                    "weightOz": _gas_parse_float(cell(3)),
+                    "category": _gas_cell_str(cell(4)),
+                    "shipment": _gas_cell_str(cell(5)),
+                    "farm": _gas_cell_str(cell(6)),
+                    "imagePath": _gas_cell_str(cell(7)),
+                    "storeInventory": _gas_parse_float(cell(8)) or 0,
                 }
             )
         return out
