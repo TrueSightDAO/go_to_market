@@ -6,9 +6,12 @@ Port of `agroverse_shop/google-app-script/update_store_inventory.gs` (Python).
    currency→SKU mapping, main-ledger inventory, and managed-ledger balances.
 2. Writes computed totals to **Agroverse SKUs** column **I** (Store inventory) — **only** locations
    flagged as store managers (online-fulfillable stock).
-3. Writes `store-inventory.json` and `partners-inventory.json`. Partner venue totals attribute any
-   ledger row whose **Location** matches an active **Agroverse Partners** `contributor_contact_id`,
-   regardless of column **T** (venue vs online).
+3. Writes `store-inventory.json`, `partners-inventory.json`, and `skus.json`. Partner venue totals
+   attribute any ledger row whose **Location** matches an active **Agroverse Partners**
+   `contributor_contact_id`, regardless of column **T** (venue vs online).
+4. `skus.json` is the public Agroverse SKU catalog (columns **A-I** of the **Agroverse SKUs** tab)
+   consumed by the dapp's define_currency.html picker. It shares this script so the catalog and the
+   per-SKU stock snapshot never drift.
 
 Requires `market_research/google_credentials.json` with access to:
 - Main workbook `1GE7PUq-UT6x2rBN-Q2ksogbWpgyuh2SaxJyG_uEK6PU`
@@ -17,6 +20,7 @@ Requires `market_research/google_credentials.json` with access to:
 Usage:
   python3 scripts/sync_agroverse_store_inventory.py --dry-run
   python3 scripts/sync_agroverse_store_inventory.py --execute
+  python3 scripts/sync_agroverse_store_inventory.py --execute --skus-json-out agroverse-inventory/skus.json
 """
 
 from __future__ import annotations
@@ -73,6 +77,17 @@ def _to_float(val: object) -> float:
         return float(val)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _to_float_or_none(val: object) -> float | None:
+    """Like `_to_float` but returns None (not 0.0) for empty/unparseable input, so
+    numeric JSON fields can distinguish "missing" from an actual zero."""
+    if val is None or val == "":
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
 
 
 def _extract_spreadsheet_id(url: str) -> str | None:
@@ -461,6 +476,55 @@ def read_current_inventory_column(sh: gspread.Spreadsheet) -> dict[str, float]:
     return _gspread_retry(_read)  # type: ignore[return-value]
 
 
+def read_sku_catalog(sh: gspread.Spreadsheet) -> list[dict[str, object]]:
+    """Read the public Agroverse SKU catalog (columns A-I of the **Agroverse SKUs** tab).
+
+    Emits the exact object shape consumed by the dapp (define_currency.html) and by the
+    (now-retired) GAS publisher, so skus.json stays drop-in compatible:
+
+      {productId, productName, priceUsd, weightOz, category, shipment, farm,
+       imagePath, storeInventory}
+
+    `priceUsd` is passed through as the trimmed sheet string; `weightOz` is numeric or
+    null; `storeInventory` is numeric (defaults to 0). Blank product IDs are skipped.
+    """
+
+    def _read() -> list[dict[str, object]]:
+        ws = sh.worksheet(SKUS_SHEET_NAME)
+        last = _last_filled_row_in_col_a(ws)
+        if last < 2:
+            return []
+        rows = ws.get_values(f"A2:I{last}")
+        out: list[dict[str, object]] = []
+        for row in rows:
+            if not row:
+                continue
+
+            def cell(i: int) -> str:
+                return row[i].strip() if len(row) > i and row[i] else ""
+
+            product_id = cell(0)
+            if not product_id:
+                continue
+            weight = _to_float_or_none(cell(3))
+            out.append(
+                {
+                    "productId": product_id,
+                    "productName": cell(1),
+                    "priceUsd": cell(2),
+                    "weightOz": weight,
+                    "category": cell(4),
+                    "shipment": cell(5),
+                    "farm": cell(6),
+                    "imagePath": cell(7),
+                    "storeInventory": _to_float(cell(8)),
+                }
+            )
+        return out
+
+    return _gspread_retry(_read)  # type: ignore[return-value]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -479,6 +543,15 @@ def main() -> None:
         type=Path,
         default=REPO.parent / "agroverse-inventory" / "partners-inventory.json",
         help="Path to partner inventory JSON payload.",
+    )
+    parser.add_argument(
+        "--skus-json-out",
+        type=Path,
+        default=None,
+        help=(
+            "Path to skus.json (public Agroverse SKU catalog). "
+            "When omitted, the catalog is not written."
+        ),
     )
     args = parser.parse_args()
     dry_run = not args.execute
@@ -523,14 +596,16 @@ def main() -> None:
     else:
         print("Column I already matches calculated inventory for all listed SKUs.")
 
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
     payload = {
-        "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        "generatedAt": generated_at,
         "source": "sync_agroverse_store_inventory",
         "inventory": snapshot,
     }
 
     partner_payload = {
-        "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        "generatedAt": generated_at,
         "source": "sync_agroverse_store_inventory",
         "partners": {},
     }
@@ -554,12 +629,18 @@ def main() -> None:
         if items:
             partner_payload["partners"][partner_id] = {"items": items}
 
+    sku_catalog: list[dict[str, object]] = []
+    if args.skus_json_out is not None:
+        sku_catalog = read_sku_catalog(sh)
+
     if dry_run:
         print("\nDry run: no sheet or JSON writes. Re-run with --execute to apply.")
         print(
             f"Partner inventory payload (partners with items): "
             f"{len(partner_payload['partners'])}"
         )
+        if args.skus_json_out is not None:
+            print(f"SKU catalog rows: {len(sku_catalog)} -> {args.skus_json_out}")
         return
 
     n = len(updates)
@@ -575,9 +656,20 @@ def main() -> None:
     args.partner_json_out.parent.mkdir(parents=True, exist_ok=True)
     args.partner_json_out.write_text(json.dumps(partner_payload, indent=2) + "\n", encoding="utf-8")
 
+    if args.skus_json_out is not None:
+        skus_payload = {
+            "generatedAt": generated_at,
+            "source": "sync_agroverse_store_inventory",
+            "skus": sku_catalog,
+        }
+        args.skus_json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.skus_json_out.write_text(json.dumps(skus_payload, indent=2) + "\n", encoding="utf-8")
+
     print(f"\nWrote Agroverse SKUs column I (rows 2..{1 + n}).")
     print(f"Wrote JSON: {args.json_out}")
     print(f"Wrote partner JSON: {args.partner_json_out}")
+    if args.skus_json_out is not None:
+        print(f"Wrote SKU catalog JSON: {args.skus_json_out} ({len(sku_catalog)} rows)")
 
 
 if __name__ == "__main__":
