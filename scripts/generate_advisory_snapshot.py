@@ -532,6 +532,48 @@ def _notes_recent(ctx_root: Path, since_ts: float) -> list[str]:
 _MAIN_LEDGER_SPREADSHEET_ID = "1GE7PUq-UT6x2rBN-Q2ksogbWpgyuh2SaxJyG_uEK6PU"
 _TELEGRAM_SUBMISSIONS_SPREADSHEET_ID = "1qbZZhf-_7xzmDTriaJVWj6OZshyQsFkdsAV8-pyzASQ"
 _TELEGRAM_CHAT_LOGS_WS = "Telegram Chat Logs"
+
+
+# §11.4 hard-excluded markers: an event whose bracket tag is in this set must
+# NEVER have its body rendered into a PUBLIC, republished surface. The canonical
+# `Telegram Chat Logs` workbook is publicly republished (ADVISORY_SNAPSHOT + the
+# `truesight.me/notarizations` redirect), and `[PAYOUT REGISTRATION]` carries a
+# raw PIX key (often a CPF) bound to a public key -- so its body is redacted out
+# of the snapshot exactly as the two other cache generators exclude it
+# (sync_sunmint_signatures.py / ledger_emit.py). See
+# plans/CRF_ANAPU_SUNMINT_COHORT_PROPOSAL.md §11.4.
+_PUBLIC_EXCLUDED_EVENT_MARKERS = ("[PAYOUT REGISTRATION]",)
+
+
+def _is_public_excluded_event(msg: str) -> bool:
+    """True when the message's FIRST bracket tag is a §11.4 hard-excluded marker.
+
+    Matches the tag only in leading position (a bare mention deeper in a body is
+    not an event), mirroring isPayoutRegistrationEvent_ in the tokenomics sink.
+    """
+    for raw in str(msg or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        for marker in _PUBLIC_EXCLUDED_EVENT_MARKERS:
+            if line.startswith(marker):
+                return True
+        return False
+    return False
+
+
+def _redact_excluded_rows(rows: list) -> list:
+    """Drop rows whose message body is a §11.4 hard-excluded event.
+
+    Fail-closed: an excluded row contributes nothing -- not to the tag rollup and
+    not to the latest-entries renderer -- so its body can never reach the public
+    snapshot.
+    """
+    return [
+        r
+        for r in rows
+        if not _is_public_excluded_event((r[6] if len(r) > 6 else "") or "")
+    ]
 _MONTHLY_STATISTICS_WS = "Monthly Statistics"
 _QR_CODE_SALES_WS = "QR Code Sales"
 _OFFCHAIN_BALANCE_WS = "off chain asset balance"
@@ -686,6 +728,7 @@ def _fetch_telegram_recent_activity_markdown(repo_root: Path, *, tail_n: int = 5
         return header + explain + f"_(Skipped: sheet read failed: `{e}`.)_\n\n"
 
     rows = [r for r in rows if r and len(r) >= 7 and (r[6] or "").strip()]
+    rows = _redact_excluded_rows(rows)
     rows = rows[-tail_n:]
     if not rows:
         return header + explain + "_(No non-empty messages in the recent window.)_\n\n"
