@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "slug": "founderhaussummitaug26",
+  "name": "Founder Haus Startup Summit 2026",
+  "status": "done",
+  "status_note": "Activation complete. Founder Haus (Web3 partner, Jurerê Internacional, Florianópolis) during Startup Summit 2026 (Aug 26-28). Tree pledge QR minted/planted 2026-08-21; media archived to MAP 2026-09-30.",
+  "date": "2026-08-26",
+  "end_date": "2026-08-28",
+  "start_time": null,
+  "end_time": null,
+  "timezone": "America/Sao_Paulo",
+  "venue": "Founder Haus, Av. dos Merlins 156, Jurerê Internacional, Florianópolis, SC, Brazil",
+  "city": "Florianópolis, SC",
+  "host": { "name": "Founder Haus", "org": "Founder Haus / Founder Village" },
+  "format": "Cacao activation at the Founder Haus Web3/founder hub during Startup Summit week (Florianópolis, Aug 26-28 2026). Tree-planting pledge QR + cacao product sampling with the founder community.",
+  "products": ["Oscar's cacao tea (Bahia)", "Oscar's ceremonial cacao / nibs (Bahia)"],
+  "qr_codes": [
+    { "id": "FOUNDERHAUS_BOUGAINVILLEA_20260821_1", "landing": "sunmint-tree-pledge", "product": "SunMint Tree Planting Pledge", "status": "minted" }
+  ],
+  "owner": "Gary",
+  "next_milestone": { "phase": 6, "due": null, "what": "Post-event: publish media gallery + follow up with Founder Haus community" },
+  "reminders": { "apple_reminder": false, "apple_calendar": null, "check_in_date": null },
+  "docs": {},
+  "media": {
+    "manifest_repo": "TrueSightDAO/farm_media_manifests",
+    "collection_id": "founderhaus",
+    "note": "10 videos (20 MOV incl. AppleDouble junk) archived to S3 raw/event-media/ 2026-09-30; indexed in farm_media_manifests/founderhaus.json."
+  },
+  "links": { "luma": "https://luma.com/founderhaus", "website": "https://foundervillage.xyz" }
+}
