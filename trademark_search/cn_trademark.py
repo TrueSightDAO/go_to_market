@@ -10,6 +10,9 @@ Usage
   # One-line verdicts (paginates the WHOLE result set before judging):
   python3 cn_trademark.py check "Catonga" "Cabrua" "Itacare"
 
+  # Scope to the Nice classes you actually care about (comma-separated):
+  python3 cn_trademark.py check "Itacare" --class 29,30,35
+
   # Raw similar marks (JSON):
   python3 cn_trademark.py search "Agroverse" --class 30
 
@@ -90,13 +93,13 @@ def search(sess, mark, intcls="", ln="", max_pages=120, pause=0.4):
     return total, rows
 
 
-def check(sess, term, **kw):
-    """Verdict for one term over the full result set."""
-    total, rows = search(sess, term, **kw)
+def check(sess, term, intcls="", **kw):
+    """Verdict for one term over the full result set (optionally scoped to Nice class(es))."""
+    total, rows = search(sess, term, intcls, **kw)
     tl = term.lower().replace(" ", "")
     exact = [r for r in rows if r["mark"].lower().replace(" ", "") == tl]
     near = [r for r in rows if tl in r["mark"].lower().replace(" ", "") and r not in exact]
-    return {"term": term, "total_similar": total, "fetched": len(rows),
+    return {"term": term, "intcls": intcls, "total_similar": total, "fetched": len(rows),
             "exact_hits": exact, "near_hits": near,
             "registered": bool(exact), "similar_on_file": bool(near)}
 
@@ -127,7 +130,9 @@ def verdict_line(v: dict) -> str:
         tag = "SIMILAR MARKS ON FILE"
     else:
         tag = "CLEAR (no exact/near hit)"
-    return f"{v['term']:<12} {tag:<26} ({v['total_similar']} similar; {v['fetched']} scanned)"
+    scope = f" [cl {v['intcls']}]" if v.get("intcls") else ""
+    return (f"{v['term']:<12}{scope} {tag:<26} "
+            f"({v['total_similar']} similar; {v['fetched']} scanned)")
 
 
 def main(argv=None):
@@ -139,6 +144,8 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     c = sub.add_parser("check")
     c.add_argument("terms", nargs="+")
+    c.add_argument("--class", dest="intcls", default="",
+                   help="Nice class(es) to scope to, comma-separated (e.g. '29,30,35').")
     c.add_argument("--json", action="store_true")
     d = sub.add_parser("detail")
     d.add_argument("url")
@@ -161,7 +168,7 @@ def main(argv=None):
 
     out, bad = [], False
     for t in a.terms:
-        v = check(sess, t)
+        v = check(sess, t, a.intcls)
         out.append(v)
         bad = bad or v["registered"]
         time.sleep(0.5)

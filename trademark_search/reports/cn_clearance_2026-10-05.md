@@ -40,6 +40,21 @@ The exact-match path was validated against a known registration:
 `AEROVERSE` → #70070835, class 9 (Chengdu Chengdian Guangxin Technology) —
 correctly surfaced as exact.
 
+## Class-scoped read-out (classes 29 / 30 / 35 = food, cacao, retail)
+
+A mark is only a problem in the classes you actually use, so each term was
+re-checked scoped to Nice classes 29/30/35:
+
+| Term | Class 29 | Class 30 | Class 35 | Verdict (our classes) |
+|------|---------:|---------:|---------:|-----------------------|
+| Catonga | 0 exact | 0 | 0 | CLEAR |
+| Cabrua | 0 | 0 | 0 | CLEAR |
+| Itacare | 0 | 0 | 0 | CLEAR |
+
+**Itacare's only exact hit (#93301527, filed 2026-08-03) is in class 5 (pharma),
+not our food/cacao/retail classes** — it does not block 29/30/35. The near marks
+in our classes are the VITACARE family (phonetic tail only).
+
 ## Caveat
 
 Reference only — **no legal effect**. The mirror is an English transliteration
