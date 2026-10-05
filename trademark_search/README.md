@@ -27,6 +27,9 @@ pip install requests
 # Verdicts over the FULL result set (slow for common strings; ~20 rows/page):
 python3 cn_trademark.py check "Catonga" "Cabrua" "Itacare"
 
+# Scope to the Nice classes you actually care about (comma-separated):
+python3 cn_trademark.py check "Itacare" --class 29,30,35
+
 # Machine-readable:
 python3 cn_trademark.py check "Itacare" --json
 
@@ -45,6 +48,8 @@ python3 cn_trademark.py detail "https://www.chinatrademarkoffice.com/search/tmde
 - **near** = the query is a substring of the result mark (e.g. `ITACARE` inside `VITACARE`).
 - A term is judged only after paginating the **entire** result set, because an
 exact registration can fall on any page (it is *not* ranked first).
+- `--class 29,30,35` scopes the search to those Nice classes (comma-separated —
+  a space-separated list like `30 35` is silently treated as **no** filter).
 
 ## Gotchas
 
