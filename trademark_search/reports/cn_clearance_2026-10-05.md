@@ -55,6 +55,41 @@ re-checked scoped to Nice classes 29/30/35:
 not our food/cacao/retail classes** — it does not block 29/30/35. The near marks
 in our classes are the VITACARE family (phonetic tail only).
 
+## Batch 2 — Cabruca / Catongo / Itacare / Bahia (classes 29, 30, 35)
+
+Second request: `cabruca`, `catongo` (albino cacao, Bahia), `itacare`, `bahia`,
+scoped to Nice **29** (food), **30** (cacao), **35** (marketing / advertising /
+retail). Full result set paginated per (term, class) — no page-1-only blind spot.
+
+| Term | cl 29 | cl 30 | cl 35 | Verdict (our classes) |
+|------|------:|------:|------:|-----------------------|
+| Cabruca | 0 exact | 0 | 0 | ✅ CLEAR |
+| Catongo | 0 exact | 0 | 0 | ✅ CLEAR |
+| Itacare | 0 exact | 0 | 0 | ✅ CLEAR (VITACARE near only) |
+| **Bahia** | 0 exact | **2 EXACT** | **1 EXACT** | ⚠️ **REGISTERED** |
+
+### Bahia — blocked in the two classes that matter
+`BAHIA` is an **exact word mark already on the CN register** in the exact classes
+the DAO needs:
+
+| Class | Reg. no. | Owner (as shown) | Dates |
+|------:|----------|------------------|-------|
+| **30** (cacao/food) | **9841063** | zhe jiang jia xin tou zi fa zhan you xian gong si (Zhejiang Jiaxin Investment) | 2011-08-12 |
+| **30** (cacao/food) | **G612817** | B A H L S E N G M B H C O K G (**Madrid** international registration) | 1993-12-07 → 2013-12-07 |
+| **35** (marketing/advertising) | **83400642** | guang dong ba yi ya ke ji you xian gong si (Guangdong Bayiya Tech) | 2025-02-11 → registered 2025-05-13, valid to **2035-08-13** |
+
+**Read-out:** "Bahia" cannot be filed as a standalone word mark in class 30 or 35
+today — both are occupied, and the class-35 mark is freshly registered (2025) and
+runs to 2035. It remains usable **as part of a composite/device mark**
+(e.g. *Itacare, Bahia* / a logo lockup), which is the normal workaround. Cabruca,
+Catongo and Itacare are clear in our classes.
+
+### Itacare — near marks only
+The only close marks in classes 29/35 are the **VITACARE** family (class 29:
+jing hua #42007205/#45119373, tian jin kai ji er xin neng yuan #11641814; class 35:
+shang hai wei kai #20453960, hai nan he he di yi liao #84944595, wei bao #37292091).
+Different word marks sharing the "-acare" phonetic tail — not an exact block.
+
 ## Caveat
 
 Reference only — **no legal effect**. The mirror is an English transliteration
