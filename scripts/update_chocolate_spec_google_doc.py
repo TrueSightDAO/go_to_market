@@ -174,7 +174,7 @@ def main() -> int:
             ["Retail case", "10 × 50 g display box (RDB)"],
             ["Primary manufacturing", "TrueTech Inc. / Santos line constraints TBD"],
             ["US distributor on label", "Agroverse, San Francisco, CA"],
-            ["Revision date", "[Date]"],
+            ["Revision date", "2026-10-09"],
         ],
     )
 
@@ -226,7 +226,7 @@ def main() -> int:
             ["Barrier & shelf life", "WVTR/OTR or supplier spec; sensory at 0/3/6 mo; bloom risk"],
             ["Compostable claims", "No greenwashing; PFAS / barrier chemistry review"],
             ["Print & adhesion", "Inkjet vs thermal; rub resistance on film/kraft"],
-            ["Dimensions / break", "Bar mold, thickness, headspace vs pouch and RDB crush"],
+            ["Dimensions / break", "Bar mold 58 × 125 mm cavity (MHC-CL082) = finished bar footprint; bar thickness ~5 mm (est., TBD); headspace vs pouch and RDB crush. Source: DAO ledger currency 'Chocolate Mold MHC-CL082 (58 x 125 mm) - Dongguan MHC Industrial Co Ltd'."],
             ["MOQ / lead time", "Film, print, copacker; wet proof / press proof"],
         ],
     )
