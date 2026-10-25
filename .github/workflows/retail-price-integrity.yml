@@ -1,0 +1,102 @@
+# Two read-only guards on retail pricing. Neither writes anything.
+#
+# 1. priceread-guard (margin)  -- fails when a retail SKU's gross margin falls below
+#    the floor at its cheapest known batch cost. Reads the main ledger's
+#    `Agroverse SKUs` (price, SSOT) and `Currencies` (unit cost, keyed by col M).
+#    Why: unit costs move with every freight batch, but nothing re-derives margin
+#    when they do. A product can drift below cost silently.
+#
+# 2. price-consistency (display vs cart) -- fails when a page displays a different
+#    price than the cart would charge. Why: there is NO server-side price table;
+#    the GAS checkout takes unit_amount straight from the client payload, while the
+#    displayed price is static markup. So a price edit must touch products.js AND
+#    the PDP markup AND the landing card, and missing one is silently expensive in
+#    both directions (show $30/charge $25, or show $25/charge $30).
+#
+# Required secrets:
+#   GOOGLE_CREDENTIALS_JSON -- service account with Sheets read on the main ledger.
+#   (only job 1 needs it; job 2 is pure file inspection)
+#
+# The margin job is advisory-by-design in one respect: only the CHEAPEST batch cost
+# is enforced. A single outlier-high cost row produces a warning, not a failure,
+# because that is more often a data-entry problem than a pricing signal.
+
+name: Retail price integrity
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 07:20 UTC daily - after the 06:15/06:45 inventory publishers, offset to
+    # avoid a Sheets API burst with its siblings.
+    - cron: "20 7 * * *"
+  pull_request:
+    paths:
+      - "scripts/check_retail_margins.py"
+      - "scripts/check_product_price_consistency.py"
+      - "scripts/retail_margin_allowlist.json"
+      - "tests/test_check_retail_margins.py"
+      - "tests/test_check_product_price_consistency.py"
+      - ".github/workflows/retail-price-integrity.yml"
+
+concurrency:
+  group: retail-price-integrity
+  cancel-in-progress: false
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "pytest>=8"
+      - name: Run guard unit tests
+        run: |
+          python3 -m pytest tests/test_check_retail_margins.py \
+                           tests/test_check_product_price_consistency.py -q
+
+  price-consistency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout agroverse_shop_beta (the shop being priced)
+        uses: actions/checkout@v4
+        with:
+          repository: TrueSightDAO/agroverse_shop_beta
+          path: agroverse_shop_beta
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Assert display price == cart price on every retail SKU
+        run: |
+          python3 scripts/check_product_price_consistency.py \
+            --repo-root agroverse_shop_beta
+
+  margin-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "gspread>=5.12" "google-auth>=2.23"
+      - name: Write Google credentials
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > google_credentials.json
+      - name: Enforce gross-margin floor on retail SKUs
+        run: |
+          python3 scripts/check_retail_margins.py \
+            --credentials google_credentials.json \
+            --allowlist scripts/retail_margin_allowlist.json

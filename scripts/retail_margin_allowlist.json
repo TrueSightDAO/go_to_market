@@ -1,0 +1,4 @@
+{
+  "_comment": "Retail SKUs temporarily grandfathered below the gross-margin floor. Prefer fixing the price or the cost. Every entry MUST carry a reason -- an unexplained exemption is how a 44%-margin product quietly ships for a year. Remove an entry the moment it is resolved.",
+  "organic-81-dark-chocolate-bar-50g-fazenda-sao-jorge-bahia-2024": "OPEN FINDING (2026-10-26): 43.8% GM at $10.00 vs $5.6241 cost. Its three 50g siblings (Oscar $2.0488, Santa Ana $2.0510, Vivi $1.9870) all cost ~1/3 as much on the identical $10 price and 50g format, so this is most likely a batch-cost entry error rather than a real landed cost. Blocking on a cost investigation, not a price change. Exemption exists so the guard ships green (avoiding alert fatigue); DELETE this entry once the cost is corrected or the price is raised to ~$12.50."
+}
