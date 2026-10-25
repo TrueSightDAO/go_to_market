@@ -6,7 +6,7 @@
 **Trigger:** Ken offered to make Agroverse ceremonial cacao available at the event.
 
 **Event:** SVH Capital Presents — Dual Tech Summit 2026
-**When:** June 2026 *(exact date TBC — event slug reads `june26`; confirm with Ken)*
+**When:** June 24, 2026 *(confirmed with Ken)*
 **Where:** War Memorial Veterans Building, 401 Van Ness Ave, San Francisco
 **Hosts / presenters:** SVH Capital · Orbis86 Events · OffChain Global · Soniya, Steven Echtman, John Gibson, Patrick Eibl
 **Theme:** Dual-use technology — AI, robotics, cyber, space — bridging commercial and defense/public sectors
@@ -143,7 +143,7 @@ A pre-event "come to a defense summit" send to the wellness list is both **wrong
 
 ## 10. Open questions for Gary
 
-1. **Confirmed date** — is it June 26, 2026 (slug) or another June date? Need Ken's confirmation.
+1. **Confirmed date** — June 24, 2026 (confirmed with Ken)
 2. **Format** — branded bags handed out, or brewed ceremonial cacao served at a table? (Changes QR strategy and quantity.)
 3. **Our presence** — are we exhibiting (demo table), or is Ken simply carrying the cacao on our behalf? Determines who staffs permission capture.
 4. **Quantity & cost** — how many units, and is this a gift/demonstration budget (recommended) vs. consignment to Ken?

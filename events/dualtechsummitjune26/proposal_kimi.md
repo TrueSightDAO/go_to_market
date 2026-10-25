@@ -1,7 +1,7 @@
 # Dual Tech Summit 2026 — Cacao Activation Proposal
 
 **Event:** SVH Capital Presents: Dual Tech Summit 2026  
-**Date:** June 26, 2026  
+**Date:** June 24, 2026  
 **Venue:** American Legion San Francisco Post 1 and Post 599  
 **Audience:** Veteran founders, defense-tech operators, dual-use investors, ClawCamp builders  
 **Our role:** Sponsor (Agroverse + ClawCamp co-listed)  
