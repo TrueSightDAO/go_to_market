@@ -2,8 +2,8 @@
   "schema_version": 1,
   "slug": "sftechfestjune26",
   "name": "SF Tech Fest 2026",
-  "status": "planning",
-  "status_note": "Date/venue confirmed; Phase 0 host confirmations (snack table, self-serve, shoutout, passes) pending with Soniya.",
+  "status": "attending_only",
+  "status_note": "Gary missed the reply window with Soniya; snack-table serving slot is no longer available. He still has a free pass to attend as a guest. Reconnaissance mission — walk the floor, note conversations, gather signal.",
   "date": "2026-06-12",
   "end_date": "2026-06-12",
   "start_time": "11:00",
@@ -12,20 +12,17 @@
   "venue": "ICC, 525 Los Coches St, Milpitas, CA 95035",
   "city": "Milpitas, CA",
   "host": { "name": "Soniya", "org": "SF Tech Fest" },
-  "format": "Two flasks — Oscar's ceremonial cacao + Paulo's cacao tea — 3 oz cups, self-serve at the snack table.",
-  "products": ["Oscar's ceremonial cacao (Bahia)", "Paulo's cacao tea (Pará)"],
-  "qr_codes": [
-    { "id": "SFTF_CC_2026", "landing": "agl4", "product": "Oscar's ceremonial cacao", "status": "pending" },
-    { "id": "SFTF_CT_2026", "landing": "agl8", "product": "Paulo's cacao tea", "status": "pending" }
-  ],
+  "format": "Pass-only attendance. No serving. Gary attends as a guest with a free pass, walks the floor, and gathers signal.",
+  "products": [],
+  "qr_codes": [],
   "owner": "Gary",
-  "next_milestone": { "phase": 0, "due": "2026-06-05", "what": "Confirm snack table / self-serve / stage shoutout / passes with Soniya" },
-  "reminders": { "apple_reminder": true, "apple_calendar": "Work", "check_in_date": "2026-05-27" },
+  "next_milestone": { "phase": 5, "due": "2026-06-13", "what": "Post-event: note any conversations or observations from the floor" },
+  "reminders": { "apple_reminder": false, "apple_calendar": null, "check_in_date": null },
   "docs": {
-    "checklist": "EXECUTION_CHECKLIST.md",
+    "checklist": null,
     "proposal": "proposal.md",
     "roadmap": "implementation_roadmap.md",
-    "field_assets": "field_assets.md"
+    "field_assets": null
   },
   "links": { "luma": "https://luma.com/sftechfest26", "website": "https://sftechfest.com/" }
 }
