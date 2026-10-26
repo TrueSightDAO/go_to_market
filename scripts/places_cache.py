@@ -141,11 +141,34 @@ def _cache_path(place_id: str) -> str:
     return f"places/{prefix}/{pid}.json"
 
 
-def _fetch_cached_record(place_id: str) -> tuple[dict | None, str | None]:
-    """Return (record_dict, sha) or (None, None) on miss / error.
+# --- Cache-read outcome sentinels -------------------------------------------
+#
+# A read can fail in ways that are NOT "the cache is empty", and conflating them
+# cost real money: 2026-10-26, 60/60 authenticated reads 403'd, every row was
+# treated as a cache miss, and the hourly sweep billed a live Places Details call
+# for each one -- ~112 billed calls/day -- while persisting nothing. The failure
+# was invisible because a permission error and a genuine absence both surfaced as
+# (None, None), and the sweep tallied both as "skipped".
+#
+# Callers that only want "record or nothing" can keep using the 2-tuple wrapper.
+# Callers that need to tell an outage apart from a cold cache should ask for the
+# status.
+READ_OK = "ok"        # 200, record decoded
+READ_MISS = "miss"    # 404 -- genuinely not in the cache; a live lookup is correct
+READ_ERROR = "error"  # auth / network / parse / unexpected status -- NOT a miss
+
+
+def _fetch_cached_record_verbose(
+    place_id: str,
+) -> tuple[dict | None, str | None, str, str]:
+    """Return (record, sha, status, detail).
+
+    ``status`` is one of READ_OK / READ_MISS / READ_ERROR, and ``detail`` is a
+    short human string suitable for a log line (it carries the upstream status
+    code and the response body, which is what actually identifies a 403 cause).
 
     Reads via the GitHub Contents API rather than raw.githubusercontent.com
-    because raw is fronted by a CDN with up to ~5-minute staleness — that
+    because raw is fronted by a CDN with up to ~5-minute staleness -- that
     produced false cache-misses immediately after a write, and write retries
     then failed with 422 ("sha wasn't supplied"). The Contents API is
     real-time and returns the file content + sha in one response, which is
@@ -167,9 +190,11 @@ def _fetch_cached_record(place_id: str) -> tuple[dict | None, str | None]:
             headers["Authorization"] = f"Bearer {auth_token}"
         try:
             return requests.get(api_url, headers=headers, timeout=15)
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            last_exc.append(f"{type(exc).__name__}: {exc}")
             return None
 
+    last_exc: list[str] = []
     r = _get(token)
     # Any auth-level failure must NOT turn every cache hit into a billed live
     # Places lookup: 403 = token valid but denied (fine-grained PAT without
@@ -179,33 +204,53 @@ def _fetch_cached_record(place_id: str) -> tuple[dict | None, str | None]:
     # Observed 2026-10-26: 60/60 authenticated reads 403'd -> 60 live calls/run,
     # filled=0, ~112 billed calls/day.
     if token and (r is None or r.status_code in (401, 403)):
+        # Log the BODY, not just the code: "403" alone is ambiguous between a
+        # scope problem, an SSO problem and a secondary rate limit, and the body
+        # is the only place that distinction appears. It was previously
+        # truncated to "***" in the logs, which is why this went unexplained.
+        body = (getattr(r, "text", "") or "")[:300].replace("\n", " ")
         sys.stderr.write(
             f"places_cache: authenticated read failed "
             f"({getattr(r, 'status_code', 'exc')}) for {place_id}; "
-            f"retrying anonymously (check PLACES_CACHE_PAT scope/SSO)\n"
+            f"retrying anonymously. body={body!r}\n"
         )
         r = _get(None)
 
     if r is None:
-        return None, None
-    if r.status_code == 404:
-        return None, None
-    if r.status_code != 200:
-        sys.stderr.write(
-            f"places_cache: read HTTP {r.status_code} for {place_id}: {r.text[:200]}\n"
-        )
-        return None, None
+        detail = "transport error" + (f": {last_exc[-1]}" if last_exc else "")
+        sys.stderr.write(f"places_cache: read failed for {place_id}: {detail}\n")
+        return None, None, READ_ERROR, detail
 
-    payload = r.json()
-    sha = payload.get("sha")
-    encoded = payload.get("content", "")
-    if not encoded:
-        return None, sha
-    try:
-        decoded = base64.b64decode(encoded).decode("utf-8")
-        rec = json.loads(decoded)
-    except (ValueError, json.JSONDecodeError):
-        return None, sha
+    if r.status_code == 200:
+        payload = r.json()
+        sha = payload.get("sha")
+        encoded = payload.get("content", "")
+        if not encoded:
+            return None, sha, READ_ERROR, "200 but empty content field"
+        try:
+            decoded = base64.b64decode(encoded).decode("utf-8")
+            return json.loads(decoded), sha, READ_OK, ""
+        except (ValueError, json.JSONDecodeError) as exc:
+            return None, sha, READ_ERROR, f"undecodable record: {exc}"
+
+    if r.status_code == 404:
+        # Genuinely absent. A live lookup is the correct, paid-for action.
+        return None, None, READ_MISS, ""
+
+    detail = f"HTTP {r.status_code}: {(r.text or '')[:200]}"
+    sys.stderr.write(f"places_cache: read {detail} for {place_id}\n")
+    return None, None, READ_ERROR, detail
+
+
+def _fetch_cached_record(place_id: str) -> tuple[dict | None, str | None]:
+    """Return (record_dict, sha) or (None, None) on miss / error.
+
+    Backwards-compatible wrapper over ``_fetch_cached_record_verbose``. Prefer
+    the verbose form when the difference between "not cached" and "cache read
+    failed" changes behaviour -- mistaking the latter for the former is what
+    billed ~112 Places calls/day on 2026-10-26.
+    """
+    rec, sha, _status, _detail = _fetch_cached_record_verbose(place_id)
     return rec, sha
 
 
