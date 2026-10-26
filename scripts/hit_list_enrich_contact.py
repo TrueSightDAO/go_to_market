@@ -225,6 +225,67 @@ def _row_cell(row: list[str], header: list[str], name: str) -> tuple[str, int]:
     return cur, ci
 
 
+# Columns whose emptiness means "we can actually go get this".
+#
+# ``Google listing`` is deliberately excluded: it is an EXCEPTION FLAG, not a data
+# field. ``google_listing_from_business_status`` returns a value only for a CLOSED
+# business ("Closed" / "Temporarily closed") and returns "" for OPERATIONAL -- so
+# for a healthy, operating retailer the CORRECT value is empty. Counting it as a
+# gap made every open retailer permanently unfillable: the sweep re-selected the
+# same rows hourly, filled nothing, blew through the no-fill streak and bailed
+# before reaching rows that DID have real gaps (observed 2026-10-26:
+# filled=0 skipped=11 no_fill_streak=10, every sampled row blocked on
+# "Google listing").
+GAP_HEADERS_FILLABLE = (*GAP_HEADERS_PRIMARY, GAP_HEADER_HOURS_FIRST)
+
+# Terminal state for the fill-gap sweep: paid for N attempts, still no fill.
+# The 13-state pipeline had no state meaning "the automation tried and cannot",
+# which is why an unfillable row was retried forever.
+STATUS_FILL_MANUAL = "AI: Fill \u2014 manual"
+
+# Per-row lifetime budget of paid attempts. The consecutive-hour budget is
+# max_no_fill_streak; this is the per-row one, so a single doomed row cannot keep
+# flushing the streak (and the spend) run after run.
+FILL_ATTEMPT_LIMIT = int(os.environ.get("FILL_ATTEMPT_LIMIT", "3") or 0)
+
+_FILL_ATTEMPT_RE = re.compile(r"\[fill-attempts=(\d+)\]")
+
+
+def has_any_fillable_gap(row: list[str], header: list[str]) -> bool:
+    """True only if a column Place Details can actually populate is empty.
+
+    Selection predicate for the fill-gap sweep. Distinct from ``has_any_gap``,
+    which deliberately still reports ``Google listing`` (an exception flag) for
+    diagnostics.
+    """
+    for name in GAP_HEADERS_FILLABLE:
+        cur, ci = _row_cell(row, header, name)
+        if ci < 0:
+            continue
+        if not cur:
+            return True
+    return False
+
+
+def fill_attempts_from_notes(notes: str | None) -> int:
+    """Read the persisted per-row paid-attempt count out of Notes."""
+    m = _FILL_ATTEMPT_RE.search(notes or "")
+    return int(m.group(1)) if m else 0
+
+
+def bump_fill_attempts_in_notes(notes: str | None, count: int) -> str:
+    """Return Notes with the attempt marker set to ``count`` (idempotent).
+
+    Rewriting rather than appending keeps Notes from growing one marker per
+    hourly run, while still giving the sweep the cross-run memory it lacked.
+    """
+    marker = f"[fill-attempts={count}]"
+    cur = notes or ""
+    if _FILL_ATTEMPT_RE.search(cur):
+        return _FILL_ATTEMPT_RE.sub(marker, cur, count=1)
+    return f"{cur} {marker}".strip()
+
+
 def has_any_gap(row: list[str], header: list[str]) -> bool:
     """True if any of {Shop Type, Address, City, State, Phone, Website, Lat, Lng,
     Monday Open, Google listing} is empty."""
@@ -921,6 +982,7 @@ def main() -> None:
 
     fill_done = 0
     fill_skipped = 0
+    fill_parked = 0
     # Zero the Places spend counters so the summary reports THIS sweep only.
     try:
         from places_cache import reset_call_counters
@@ -995,7 +1057,18 @@ def main() -> None:
                 continue
             row = raw_row + [""] * (len(header) - len(raw_row))
             notes = row[idx_notes] if idx_notes < len(row) else ""
-            if not has_any_gap(row, header):
+            # Select on FILLABLE gaps only: a row whose sole gap is the
+            # "Google listing" exception flag can never be satisfied here, yet
+            # would still inflate the no-fill streak until it bailed the sweep.
+            if not has_any_fillable_gap(row, header):
+                continue
+
+            # Cross-run memory: skip rows that already burned their paid-attempt
+            # budget. Without this the sweep re-pays for the same doomed rows
+            # every hour and starves later rows that have real gaps.
+            attempts_prior = fill_attempts_from_notes(notes)
+            if FILL_ATTEMPT_LIMIT > 0 and attempts_prior >= FILL_ATTEMPT_LIMIT:
+                fill_parked += 1
                 continue
 
             pm = PLACE_ID_IN_NOTES.search(notes or "")
@@ -1088,16 +1161,42 @@ def main() -> None:
             else:
                 fill_skipped += 1
                 no_fill_streak += 1
-                # Paid for a live lookup and still could not fill: record what
+                attempts_now = attempts_prior + 1
+                # Persist the paid-attempt count so next hour's sweep does not
+                # push the same doomed row through the no-fill streak again.
+                if not args.dry_run:
+                    new_notes = bump_fill_attempts_in_notes(notes, attempts_now)
+                    if new_notes != (notes or ""):
+                        ws.update(
+                            range_name=rowcol_to_a1(ri, idx_notes + 1),
+                            values=[[new_notes]],
+                            value_input_option="USER_ENTERED",
+                        )
+                        notes = new_notes
+                        row[idx_notes] = new_notes
+                # Paid for a lookup and still could not fill: record what
                 # remained empty so the cause is named, not just counted.
                 if len(unfillable_sample) < 5:
                     gaps = gap_field_names(row, header)
                     unfillable_sample.append(
-                        f"row {ri} ({pid}): unfilled={','.join(gaps) or 'none-detected'}"
+                        f"row {ri} ({pid}): unfilled={','.join(gaps) or 'none-detected'} "
+                        f"attempts={attempts_now}"
                     )
+                if FILL_ATTEMPT_LIMIT > 0 and attempts_now >= FILL_ATTEMPT_LIMIT:
+                    fill_parked += 1
+                    print(
+                        f"  [fill] row {ri}: {attempts_now} paid attempts, no fill "
+                        f"- parking as {STATUS_FILL_MANUAL!r} and stopping retries",
+                        flush=True,
+                    )
+                    if not args.dry_run and "Status" in header:
+                        ws.update_cell(
+                            ri, header.index("Status") + 1, STATUS_FILL_MANUAL
+                        )
 
         print(
             f"Fill-gap sweep done. filled={fill_done} skipped={fill_skipped} "
+            f"parked={fill_parked} "
             f"no_fill_streak={no_fill_streak} "
             f"notes_place_id_appended={fill_resolved_notes} "
             f"cache_preflight_skipped={preflight_skipped} "
@@ -1123,7 +1222,8 @@ def main() -> None:
             )
         if unfillable_sample:
             print(
-                "  [fill] paid lookups that still left gaps "
+                "  [fill] lookups that still left gaps (may be FREE cache hits - "
+                "see places_billed above) "
                 f"({len(unfillable_sample)} sampled):",
                 flush=True,
             )
