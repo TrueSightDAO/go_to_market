@@ -240,6 +240,65 @@ def has_any_gap(row: list[str], header: list[str]) -> bool:
 SHOP_TYPE_FALLBACK = "Other"
 
 
+# Mirrors places_cache.READ_* so the comparison in the sweep cannot raise when
+# places_cache is absent from sys.path (the sweep still has to run).
+_READ_OK = "ok"
+_READ_ERROR = "error"
+
+
+def cache_read_outcome(place_id: str) -> tuple[str, str]:
+    """Classify the cache read for ``place_id``: (status, detail).
+
+    Returns ``(READ_OK|READ_MISS|READ_ERROR, detail)`` from places_cache. The
+    point is to know *before* spending a Places call whether the cache is
+    reachable at all.
+
+    Why this guard exists (2026-10-26): the cache read 403'd on all 60 rows of a
+    scheduled run. ``_fetch_cached_record`` reported that as ``(None, None)`` --
+    identical to a genuine miss -- so the sweep billed 60 live Places Details
+    lookups, filled nothing, and did the same thing again next hour: ~112 billed
+    calls/day against a cache it could never reach.
+
+    Measured with a real PAT on 2026-10-26: an authenticated read denied by the
+    API falls back to an anonymous read, and because places-cache is public that
+    anonymous read SUCCEEDS. So a genuine read failure here means the cache repo
+    itself is unreachable (or slow enough to time out) -- not a token problem.
+    Either way, paying for a live lookup will not fill anything durably.
+
+    Never raises: unknown/import failure degrades to READ_OK so a probe problem
+    can never wedge a working sweep.
+    """
+    try:
+        from places_cache import READ_OK, _fetch_cached_record_verbose
+    except Exception:  # noqa: BLE001 - probe must never wedge a working sweep
+        return _READ_OK, "probe unavailable"
+
+    try:
+        _rec, _sha, status, detail = _fetch_cached_record_verbose(place_id)
+    except Exception as exc:  # noqa: BLE001 - classify, never propagate
+        return _READ_OK, f"probe raised {type(exc).__name__}"
+    status = status or READ_OK
+    # detail only means something when the read failed; carrying it on a
+    # successful read would make log lines imply a problem that isn't there.
+    return status, (detail or "") if status != READ_OK else ""
+
+
+def should_bail_cache_unreachable(streak: int, threshold: int = 3) -> bool:
+    """True when cache-read failures are persistent enough to stop the sweep.
+
+    A single failed read can be a blip (cold CDN, one slow request), so one row
+    is skipped rather than aborting the run. But a streak means the read path is
+    down, and every further row would buy Places data that cannot be persisted
+    -- the exact repeat-payment loop that cost ~112 calls/day on 2026-10-26.
+
+    ``threshold <= 0`` disables bailing (skip-only), for operators who want the
+    sweep to keep trying without ever aborting.
+    """
+    if threshold <= 0:
+        return False
+    return streak >= threshold
+
+
 def should_bail_no_fill(no_fill_streak: int, max_no_fill_streak: int) -> bool:
     """True when a fill-gap sweep should stop after a run of unanswered lookups.
 
@@ -635,6 +694,23 @@ def main() -> None:
         "same rows when the cache write-back is failing or Places returns nothing "
         "usable. Set 0 to disable.",
     )
+    p.add_argument(
+        "--cache-preflight",
+        default="on",
+        choices=("on", "off"),
+        help="Probe the places-cache read for each row BEFORE spending a Places "
+        "Details call (default: on). If the cache is unreachable, live lookups "
+        "buy data that cannot be persisted, so the sweep bails instead of "
+        "repeat-paying. Set to 'off' to bill unconditionally.",
+    )
+    p.add_argument(
+        "--cache-preflight-bail-after",
+        type=int,
+        default=3,
+        help="Abort the fill-gap sweep after this many consecutive cache-read "
+        "failures (default 3). Each skipped row is one Places call NOT billed. "
+        "Set 0 to keep the sweep running in skip-only mode.",
+    )
     args = p.parse_args()
 
     gc = gspread_client()
@@ -850,6 +926,17 @@ def main() -> None:
                 return False
         fill_attempts = 0
         no_fill_streak = 0
+        # Cache-reachability telemetry, separate from fill outcomes: a skipped
+        # row here means NO Places call was made, so it must not be folded into
+        # fill_skipped (which historically hid this exact failure as "skipped").
+        cache_preflight = str(getattr(args, "cache_preflight", "on")).lower() != "off"
+        cache_preflight_bail_after = int(
+            getattr(args, "cache_preflight_bail_after", 3) or 0
+        )
+        preflight_skipped = 0
+        cache_unreachable_streak = 0
+        cache_unreachable = False
+        first_unreachable_detail = ""
         # 0 (or missing) disables the breaker -- must NOT be coerced to 1, or the
         # documented "--max-no-fill-streak 0" would bail before the first row.
         max_no_fill_streak = int(getattr(args, "max_no_fill_streak", 10) or 0)
@@ -922,6 +1009,40 @@ def main() -> None:
                 continue
 
             assert pid is not None
+
+            # Probe the cache BEFORE paying. A read failure means a live lookup
+            # cannot be persisted, which is how the same rows got re-billed
+            # every hour on 2026-10-26. A short streak is not a blip -> bail the
+            # sweep rather than bill the whole run.
+            if cache_preflight:
+                read_status, read_detail = cache_read_outcome(pid)
+                if read_status == _READ_ERROR:
+                    preflight_skipped += 1
+                    cache_unreachable_streak += 1
+                    if not first_unreachable_detail:
+                        first_unreachable_detail = read_detail or "unknown"
+                    print(
+                        f"  [fill] row {ri}: cache read FAILED "
+                        f"({read_detail or 'unknown'}) - skipping live lookup so "
+                        f"we do not pay for data we cannot persist "
+                        f"(streak {cache_unreachable_streak}"
+                        f"/{cache_preflight_bail_after})",
+                        flush=True,
+                    )
+                    if should_bail_cache_unreachable(
+                        cache_unreachable_streak, cache_preflight_bail_after
+                    ):
+                        cache_unreachable = True
+                        print(
+                            "  [fill] cache unreachable - BAILING the sweep "
+                            "without further Places spend. "
+                            f"first error: {first_unreachable_detail}",
+                            flush=True,
+                        )
+                        break
+                    continue
+                cache_unreachable_streak = 0
+
             fill_attempts += 1
             place_res = place_details_full(mkey, pid)
             time.sleep(0.15)
@@ -944,9 +1065,20 @@ def main() -> None:
         print(
             f"Fill-gap sweep done. filled={fill_done} skipped={fill_skipped} "
             f"no_fill_streak={no_fill_streak} "
-            f"notes_place_id_appended={fill_resolved_notes} dry_run={args.dry_run}",
+            f"notes_place_id_appended={fill_resolved_notes} "
+            f"cache_preflight_skipped={preflight_skipped} "
+            f"cache_unreachable={cache_unreachable} dry_run={args.dry_run}",
             flush=True,
         )
+        if cache_unreachable:
+            print(
+                f"CACHE UNREACHABLE: skipped {preflight_skipped} rows without "
+                f"spending a Places call. This is NOT a Places-side problem -- the "
+                f"cache READ path is failing. Investigate places-cache access "
+                f"before the next scheduled run. "
+                f"first error: {first_unreachable_detail}",
+                flush=True,
+            )
 
     print("Done.", flush=True)
 
