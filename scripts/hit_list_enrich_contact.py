@@ -926,8 +926,10 @@ def main() -> None:
         from places_cache import reset_call_counters
 
         reset_call_counters()
-    except Exception:  # noqa: BLE001 - accounting must never abort a run
-        pass
+    except Exception as exc:  # noqa: BLE001 - accounting must never abort a run
+        # Never abort a sweep over accounting, but never fail silently either:
+        # a missing spend line must be attributable.
+        sys.stderr.write(f"places spend accounting unavailable: {exc}\n")
     unfillable_sample: list[str] = []
     fill_resolved_notes = 0
     fill_cap = 0 if args.no_fill_gaps else max(0, args.fill_gaps_limit)
