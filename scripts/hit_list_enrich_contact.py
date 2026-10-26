@@ -1108,7 +1108,10 @@ def main() -> None:
             from places_cache import get_call_counters
 
             _counters = get_call_counters()
-        except Exception:  # noqa: BLE001 - accounting must never abort a run
+        except Exception as exc:  # noqa: BLE001 - accounting must never abort a run
+            # Never abort the sweep, but never vanish silently either: if this
+            # fires, the run has no spend line and that must be attributable.
+            sys.stderr.write(f"places spend counters unavailable: {exc}\n")
             _counters = {}
         if _counters:
             print(
