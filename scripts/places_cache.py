@@ -156,17 +156,37 @@ def _fetch_cached_record(place_id: str) -> tuple[dict | None, str | None]:
     """
     path = _cache_path(place_id)
     api_url = f"{CONTENTS_API}/{path}?ref={CACHE_REPO_BRANCH}"
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
     token = _write_token()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
 
-    try:
-        r = requests.get(api_url, headers=headers, timeout=15)
-    except requests.RequestException:
+    def _get(auth_token: str | None) -> requests.Response | None:
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        if auth_token:
+            headers["Authorization"] = f"Bearer {auth_token}"
+        try:
+            return requests.get(api_url, headers=headers, timeout=15)
+        except requests.RequestException:
+            return None
+
+    r = _get(token)
+    # Any auth-level failure must NOT turn every cache hit into a billed live
+    # Places lookup: 403 = token valid but denied (fine-grained PAT without
+    # access to the cache repo, or un-SSO-authorized); 401 = token revoked /
+    # expired. places-cache is a PUBLIC repo, so an anonymous read succeeds
+    # regardless of token health -- and reads cost no Places quota.
+    # Observed 2026-10-26: 60/60 authenticated reads 403'd -> 60 live calls/run,
+    # filled=0, ~112 billed calls/day.
+    if token and (r is None or r.status_code in (401, 403)):
+        sys.stderr.write(
+            f"places_cache: authenticated read failed "
+            f"({getattr(r, 'status_code', 'exc')}) for {place_id}; "
+            f"retrying anonymously (check PLACES_CACHE_PAT scope/SSO)\n"
+        )
+        r = _get(None)
+
+    if r is None:
         return None, None
     if r.status_code == 404:
         return None, None
