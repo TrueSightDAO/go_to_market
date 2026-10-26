@@ -183,7 +183,9 @@ def test_all_reads_failing_costs_at_most_two_places_calls():
     """
     billed, skipped, bailed = _simulate_run([hl._READ_ERROR] * 20)
     assert bailed is True
-    assert billed == 0, f"guard must not bill any row whose cache read failed, got {billed}"
+    assert billed == 0, (
+        f"guard must not bill any row whose cache read failed, got {billed}"
+    )
     assert skipped == 3
 
 
