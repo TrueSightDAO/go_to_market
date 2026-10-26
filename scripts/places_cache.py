@@ -209,6 +209,57 @@ def _fetch_cached_record(place_id: str) -> tuple[dict | None, str | None]:
     return rec, sha
 
 
+def _cache_file_sha(path: str, token: str | None = None) -> str | None:
+    """Return the blob sha of ``path`` in the cache repo, or None if absent.
+
+    Deliberately separate from ``_fetch_cached_record`` (and the coverage
+    equivalent) because those conflate "no such file" with "read failed" into the
+    same ``(None, None)``. Writers must not inherit that ambiguity: they need to
+    know whether a file EXISTS, not whether a record parses.
+
+    404 means the path genuinely isn't there -> None is correct and the caller
+    should create. Any other failure (401/403/exc) also yields None, but the
+    writer then attempts a create; if the file did exist, GitHub answers 422 and
+    the writer reports it loudly rather than silently discarding a paid result.
+    """
+    api_url = f"{CONTENTS_API}/{path}?ref={CACHE_REPO_BRANCH}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        r = requests.get(api_url, headers=headers, timeout=15)
+    except requests.RequestException:
+        return None
+    if r.status_code == 200:
+        try:
+            return r.json().get("sha")
+        except ValueError:
+            return None
+    return None
+
+
+def _resolve_prior_sha(path: str, prior_sha: str | None, token: str | None) -> str | None:
+    """Return the sha GitHub requires to UPDATE ``path``.
+
+    Root cause this exists to kill (verified locally 2026-10-26): the Contents
+    API REQUIRES ``sha`` to update an existing file, but the request builders
+    treated it as optional. So whenever the sha didn't arrive from the read --
+    e.g. the read itself failed -- the PUT went out sha-less and GitHub rejected
+    it with ``422 {"message":"Invalid request.\n\n\"sha\" wasn't supplied."}``.
+    The result had ALREADY been paid for (one live Places call) and was then
+    thrown away, so the next run re-paid for the same rows forever.
+
+    Resolving the sha here makes the writer correct on its own, independent of
+    whatever the caller's read path managed to return.
+    """
+    if prior_sha:
+        return prior_sha
+    return _cache_file_sha(path, token)
+
+
 def _write_cached_record(place_id: str, record: dict, prior_sha: str | None) -> bool:
     """PUT the record to the cache repo via Contents API. True on success."""
     token = _write_token()
@@ -218,6 +269,10 @@ def _write_cached_record(place_id: str, record: dict, prior_sha: str | None) -> 
         )
         return False
     path = _cache_path(place_id)
+    # Resolve the sha ourselves instead of trusting the caller: updating an
+    # existing file without it is a guaranteed 422, and the Places call that
+    # produced `record` has already been billed.
+    prior_sha = _resolve_prior_sha(path, prior_sha, token)
     body = {
         "message": f"cache: {place_id}",
         "content": base64.b64encode(
@@ -240,9 +295,11 @@ def _write_cached_record(place_id: str, record: dict, prior_sha: str | None) -> 
     if r.status_code in (200, 201):
         return True
     # 409 = sha mismatch (someone else wrote in the meantime); refetch + retry once.
-    if r.status_code == 409 and prior_sha:
-        _, fresh_sha = _fetch_cached_record(place_id)
-        if fresh_sha and fresh_sha != prior_sha:
+    # Guard on the *requested* sha, which may have come from _resolve_prior_sha
+    # rather than the caller.
+    if r.status_code == 409:
+        fresh_sha = _cache_file_sha(path, token)
+        if fresh_sha and fresh_sha != body.get("sha"):
             body["sha"] = fresh_sha
             try:
                 r2 = requests.put(f"{CONTENTS_API}/{path}", headers=headers, json=body, timeout=30)
@@ -250,9 +307,17 @@ def _write_cached_record(place_id: str, record: dict, prior_sha: str | None) -> 
                     return True
             except requests.RequestException:
                 pass
-    sys.stderr.write(
-        f"places_cache: write rejected for {place_id} ({r.status_code}): {r.text[:200]}\n"
-    )
+    if r.status_code == 422:
+        # Not an auth problem: 422 arrives only after the token was accepted.
+        sys.stderr.write(
+            f"places_cache: write rejected for {place_id} (422) -- could not "
+            f"resolve a sha for {path}; the record was NOT persisted and its "
+            f"Places call has already been billed. body={r.text[:160]}\n"
+        )
+    else:
+        sys.stderr.write(
+            f"places_cache: write rejected for {place_id} ({r.status_code}): {r.text[:200]}\n"
+        )
     return False
 
 
@@ -492,6 +557,9 @@ def _write_coverage_record(combo_path: str, record: dict, prior_sha: str | None)
     token = _write_token()
     if not token:
         return False
+    # Same fix as _write_cached_record: the Contents API requires `sha` to
+    # update an existing file, so resolve it rather than trusting the caller.
+    prior_sha = _resolve_prior_sha(combo_path, prior_sha, token)
     body = {
         "message": f"coverage: {combo_path.split('/')[-1]}",
         "content": base64.b64encode(
@@ -510,7 +578,14 @@ def _write_coverage_record(combo_path: str, record: dict, prior_sha: str | None)
         r = requests.put(f"{CONTENTS_API}/{combo_path}", headers=headers, json=body, timeout=30)
     except requests.RequestException:
         return False
-    return r.status_code in (200, 201)
+    if r.status_code in (200, 201):
+        return True
+    if r.status_code == 422:
+        sys.stderr.write(
+            f"places_cache: coverage write rejected (422) for {combo_path} -- "
+            f"sha unresolved; record NOT persisted. body={r.text[:160]}\n"
+        )
+    return False
 
 
 def _live_nearby_search(
