@@ -240,6 +240,24 @@ def has_any_gap(row: list[str], header: list[str]) -> bool:
 SHOP_TYPE_FALLBACK = "Other"
 
 
+def should_bail_no_fill(no_fill_streak: int, max_no_fill_streak: int) -> bool:
+    """True when a fill-gap sweep should stop after a run of unanswered lookups.
+
+    The sweep charges one Places Details call per row *before* it knows whether the
+    result can fill anything. Historically ``is_rate_limited`` was the only bail
+    condition, so a broken cache write-back (or any persistent empty result) made
+    every scheduled run re-pay for the same rows indefinitely: 60 attempts,
+    ``filled=0``, nothing learned, ~112 billed calls/day.
+
+    Deliberately cause-agnostic -- a missing PAT, a revoked key, NOT_FOUND and
+    genuinely empty Places data are indistinguishable from here, and all of them
+    should stop the bleed. ``max_no_fill_streak <= 0`` disables the breaker.
+    """
+    if max_no_fill_streak <= 0:
+        return False
+    return no_fill_streak >= max_no_fill_streak
+
+
 def shop_type_from_places_types(types: list[str] | None) -> str:
     """Map a Places ``types`` list to the canonical 12-value Hit List Shop Type taxonomy
     used by ``dapp/stores_nearby.html`` (Add Store dropdown + filter) and
@@ -608,6 +626,15 @@ def main() -> None:
         default=50000.0,
         help="Find Place locationbias radius in meters when --resolve-missing-place-id is set.",
     )
+    p.add_argument(
+        "--max-no-fill-streak",
+        type=int,
+        default=10,
+        help="Bail the fill-gap sweep after this many consecutive rows whose Places "
+        "lookup produces no writable update (default 10). Prevents repeat-paying the "
+        "same rows when the cache write-back is failing or Places returns nothing "
+        "usable. Set 0 to disable.",
+    )
     args = p.parse_args()
 
     gc = gspread_client()
@@ -822,8 +849,20 @@ def main() -> None:
             def is_rate_limited() -> bool:
                 return False
         fill_attempts = 0
+        no_fill_streak = 0
+        # 0 (or missing) disables the breaker -- must NOT be coerced to 1, or the
+        # documented "--max-no-fill-streak 0" would bail before the first row.
+        max_no_fill_streak = int(getattr(args, "max_no_fill_streak", 10) or 0)
         for ri, raw_row in enumerate(rows[1:], start=2):
             if fill_done >= fill_cap:
+                break
+            if should_bail_no_fill(no_fill_streak, max_no_fill_streak):
+                print(
+                    f"  [fill] {no_fill_streak} consecutive no-fill updates "
+                    f"(cap {max_no_fill_streak}) - bailing to avoid repeat-paying; "
+                    f"check places-cache write-back (PLACES_CACHE_PAT) and Places status",
+                    flush=True,
+                )
                 break
             if fill_attempts >= fill_attempt_cap:
                 print(
@@ -896,12 +935,15 @@ def main() -> None:
             )
             if updated:
                 fill_done += 1
+                no_fill_streak = 0
                 time.sleep(0.5)
             else:
                 fill_skipped += 1
+                no_fill_streak += 1
 
         print(
             f"Fill-gap sweep done. filled={fill_done} skipped={fill_skipped} "
+            f"no_fill_streak={no_fill_streak} "
             f"notes_place_id_appended={fill_resolved_notes} dry_run={args.dry_run}",
             flush=True,
         )
