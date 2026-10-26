@@ -237,6 +237,23 @@ def has_any_gap(row: list[str], header: list[str]) -> bool:
     return False
 
 
+def gap_field_names(row: list[str], header: list[str]) -> list[str]:
+    """Names of the gap columns that are empty for this row.
+
+    ``has_any_gap`` answers yes/no; a bare ``no_fill_streak`` count cannot say
+    *what* stayed empty, which is why a month of ``filled=0`` runs never named
+    the actual defect. Returns [] when the row has no gaps.
+    """
+    out: list[str] = []
+    for name in (*GAP_HEADERS_PRIMARY, GAP_HEADER_HOURS_FIRST, GAP_HEADER_LISTING):
+        cur, ci = _row_cell(row, header, name)
+        if ci < 0:
+            continue
+        if not cur:
+            out.append(name)
+    return out
+
+
 SHOP_TYPE_FALLBACK = "Other"
 
 
@@ -904,6 +921,16 @@ def main() -> None:
 
     fill_done = 0
     fill_skipped = 0
+    # Zero the Places spend counters so the summary reports THIS sweep only.
+    try:
+        from places_cache import reset_call_counters
+
+        reset_call_counters()
+    except Exception as exc:  # noqa: BLE001 - accounting must never abort a run
+        # Never abort a sweep over accounting, but never fail silently either:
+        # a missing spend line must be attributable.
+        sys.stderr.write(f"places spend accounting unavailable: {exc}\n")
+    unfillable_sample: list[str] = []
     fill_resolved_notes = 0
     fill_cap = 0 if args.no_fill_gaps else max(0, args.fill_gaps_limit)
     # Independent attempt cap so a queue of N gappy rows whose Place Details
@@ -1061,6 +1088,13 @@ def main() -> None:
             else:
                 fill_skipped += 1
                 no_fill_streak += 1
+                # Paid for a live lookup and still could not fill: record what
+                # remained empty so the cause is named, not just counted.
+                if len(unfillable_sample) < 5:
+                    gaps = gap_field_names(row, header)
+                    unfillable_sample.append(
+                        f"row {ri} ({pid}): unfilled={','.join(gaps) or 'none-detected'}"
+                    )
 
         print(
             f"Fill-gap sweep done. filled={fill_done} skipped={fill_skipped} "
@@ -1070,6 +1104,31 @@ def main() -> None:
             f"cache_unreachable={cache_unreachable} dry_run={args.dry_run}",
             flush=True,
         )
+        try:
+            from places_cache import get_call_counters
+
+            _counters = get_call_counters()
+        except Exception as exc:  # noqa: BLE001 - accounting must never abort a run
+            # Never abort the sweep, but never vanish silently either: if this
+            # fires, the run has no spend line and that must be attributable.
+            sys.stderr.write(f"places spend counters unavailable: {exc}\n")
+            _counters = {}
+        if _counters:
+            print(
+                f"Places spend: places_billed={_counters['places_billed']} "
+                f"cache_hits={_counters['cache_hits']} "
+                f"cache_negative_hits={_counters['cache_negative_hits']}"
+                f"  (billed = real money; cache_hits = free)",
+                flush=True,
+            )
+        if unfillable_sample:
+            print(
+                "  [fill] paid lookups that still left gaps "
+                f"({len(unfillable_sample)} sampled):",
+                flush=True,
+            )
+            for _line in unfillable_sample:
+                print(f"    {_line}", flush=True)
         if cache_unreachable:
             print(
                 f"CACHE UNREACHABLE: skipped {preflight_skipped} rows without "
