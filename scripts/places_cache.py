@@ -422,6 +422,11 @@ def _live_place_details(api_key: str, place_id: str, fields: tuple[str, ...]) ->
         "fields": ",".join(fields),
         "key": api_key,
     }
+    # Past the rate-limit guard -> this request will actually hit Google and
+    # be billed. Counted here (not at the call site) so a circuit-broken
+    # short-circuit is never miscounted as spend.
+    global _LIVE_CALL_COUNT
+    _LIVE_CALL_COUNT += 1
     try:
         r = requests.get(PLACES_DETAILS_URL, params=params, timeout=30)
     except requests.RequestException as e:
@@ -458,6 +463,39 @@ def _live_place_details(api_key: str, place_id: str, fields: tuple[str, ...]) ->
     return {}, ""
 
 
+# ---- Billed-vs-free accounting -------------------------------------------
+# The 2026-10-26 incident could not be diagnosed from the workflow log because
+# a cache HIT and a cache MISS followed by a live call were indistinguishable
+# in output: both produced no error, no cache commit, and no log line. The
+# counters below make the hit/miss boundary observable so a run's summary can
+# state how many Places calls were actually billed.
+#
+# Module-level (not returned through cached_place_details) because the call
+# chain is hit_list_enrich_contact -> dl.place_details ->
+# places_cache.cached_place_details_full, and a return-value change would have
+# to be threaded through every intermediate layer.
+_LIVE_CALL_COUNT = 0
+_CACHE_HIT_COUNT = 0
+_NEGATIVE_HIT_COUNT = 0
+
+
+def reset_call_counters() -> None:
+    """Zero the billed/free counters. Call at the start of a run."""
+    global _LIVE_CALL_COUNT, _CACHE_HIT_COUNT, _NEGATIVE_HIT_COUNT
+    _LIVE_CALL_COUNT = 0
+    _CACHE_HIT_COUNT = 0
+    _NEGATIVE_HIT_COUNT = 0
+
+
+def get_call_counters() -> dict[str, int]:
+    """Snapshot of Places spend since the last :func:`reset_call_counters`."""
+    return {
+        "places_billed": _LIVE_CALL_COUNT,
+        "cache_hits": _CACHE_HIT_COUNT,
+        "cache_negative_hits": _NEGATIVE_HIT_COUNT,
+    }
+
+
 def _record_satisfies(record: dict, needed: tuple[str, ...]) -> bool:
     have = set(record.get("fields_requested") or [])
     return have.issuperset(set(needed))
@@ -491,8 +529,12 @@ def cached_place_details(
         cached_status = cached_rec.get("google_status", "OK")
         # Definitive-negative cache hit → don't bother the API again.
         if cached_status in _NEGATIVE_STATUSES:
+            global _NEGATIVE_HIT_COUNT
+            _NEGATIVE_HIT_COUNT += 1
             return {}
         if cached_status == "OK" and _record_satisfies(cached_rec, fields):
+            global _CACHE_HIT_COUNT
+            _CACHE_HIT_COUNT += 1
             return cached_rec.get("result") or {}
 
     # On a partial-coverage hit, fetch the union so we don't lose existing fields.
