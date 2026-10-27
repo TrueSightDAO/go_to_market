@@ -151,6 +151,13 @@ SHOP_TYPES: list[tuple[str, str]] = [
     ("Natural Goods", "Eco or natural lifestyle products (broader than only food)."),
     ("Conscious Cafe", "Café with intentional sourcing or wellness positioning."),
     ("Boutique Chocolate", "Fine or craft chocolate retail (strong fit for sampling)."),
+    (
+        "Winery",
+        (
+            "Winery / tasting room / vineyard. Primary target for the Napa + Sonoma "
+            "chocolate pairing channel; also covers tasting rooms that retail packaged food."
+        ),
+    ),
     ("Antique Store", "Vintage / antiques; use only if they also move consumable retail."),
     ("Gift Shop", "General gifts; note if they stock specialty food."),
     ("Candy Store", "Confection-focused retail."),

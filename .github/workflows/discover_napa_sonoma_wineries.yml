@@ -1,0 +1,84 @@
+# Discover Napa Valley + Sonoma Valley wineries via Google Places Nearby -> Hit List (Research).
+#
+# Same secrets pattern as field_agent_location_places_pull.yml.
+# Secrets: GOOGLE_CREDENTIALS_JSON, GOOGLE_MAPS_API_KEY (or GOOGLE_PLACES_API_KEY),
+#          PLACES_CACHE_PAT (persistent Place Details cache; without it every run pays full price).
+#
+# Dry-run first:  workflow_dispatch with dry_run=true -> prints the plan, writes nothing.
+
+name: Discover Napa + Sonoma wineries
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_new:
+        description: Max new Hit List rows to append this run
+        required: true
+        default: "150"
+      dry_run:
+        description: Set to "true" to print plan only (no sheet writes)
+        required: false
+        default: "true"
+      keyword:
+        description: Places Nearby keyword
+        required: false
+        default: "winery"
+      refresh_coverage:
+        description: Set to "true" to bypass the Nearby coverage cache
+        required: false
+        default: "false"
+
+concurrency:
+  group: discover-napa-sonoma-wineries
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Write service account JSON
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: printf '%s' "$GOOGLE_CREDENTIALS_JSON" > google_credentials.json
+
+      - name: Run Napa + Sonoma winery discovery
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          PLACES_CACHE_PAT: ${{ secrets.PLACES_CACHE_PAT }}
+          MAX_NEW: ${{ github.event.inputs.max_new }}
+          DRY: ${{ github.event.inputs.dry_run }}
+          KEYWORD: ${{ github.event.inputs.keyword }}
+          REFRESH: ${{ github.event.inputs.refresh_coverage }}
+        run: |
+          set -e
+          MAX_NEW="${MAX_NEW:-150}"
+          KEYWORD="${KEYWORD:-winery}"
+          EXTRA=""
+          if [ "${DRY}" = "true" ]; then EXTRA="--dry-run"; fi
+          if [ "${REFRESH}" = "true" ]; then EXTRA="$EXTRA --refresh-coverage"; fi
+          # --allow-type is REQUIRED: winery Places are routinely also tagged
+          # wine_bar, which the apothecary-shaped EXCLUDE_TYPES would drop.
+          python3 scripts/discover_apothecaries_la_hit_list.py \
+            --region napa_sonoma \
+            --keyword "$KEYWORD" \
+            --allow-type winery \
+            --allow-type vineyard \
+            --shop-type "Winery" \
+            --max-new "$MAX_NEW" \
+            $EXTRA

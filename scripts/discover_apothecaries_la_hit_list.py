@@ -364,6 +364,29 @@ REGIONS: dict[str, RegionConfig] = {
         max_lng=-121.82,
         fallback_city="San Francisco",
     ),
+    # Napa Valley + Sonoma Valley. ~30 km overlapping disks so no valley pocket is missed;
+    # bbox is deliberately tight so Bay Area / Sacramento hits get dropped by skip_box.
+    "napa_sonoma": RegionConfig(
+        key="napa_sonoma",
+        notes_label="Napa Valley + Sonoma Valley",
+        centers=(
+            (38.2169, -122.3090, 30000, "American Canyon / Carneros"),
+            (38.2975, -122.2869, 30000, "Napa city"),
+            (38.4032, -122.3639, 30000, "Yountville / Oakville"),
+            (38.5025, -122.4695, 30000, "St. Helena / Rutherford"),
+            (38.5820, -122.5790, 30000, "Calistoga / Knights Valley"),
+            (38.6421, -122.7754, 30000, "Alexander Valley / Cloverdale"),
+            (38.2919, -122.4580, 30000, "Sonoma town"),
+            (38.4021, -122.5398, 30000, "Kenwood / Glen Ellen"),
+            (38.5121, -122.9217, 30000, "Healdsburg / Dry Creek"),
+            (38.3466, -122.7061, 30000, "Santa Rosa / Bennett Valley"),
+        ),
+        min_lat=38.05,
+        max_lat=38.90,
+        min_lng=-123.15,
+        max_lng=-122.10,
+        fallback_city="Napa",
+    ),
 }
 
 
@@ -601,8 +624,18 @@ def _norm_haystack(name: str, vicinity: str = "") -> str:
     return f"{name} {vicinity}".lower()
 
 
-def should_exclude(name: str, types: list[str], vicinity: str = "") -> tuple[bool, str]:
+def should_exclude(
+    name: str,
+    types: list[str],
+    vicinity: str = "",
+    allow_types: frozenset[str] | None = None,
+) -> tuple[bool, str]:
     tset = {x.lower() for x in (types or [])}
+    # Positive allowlist beats the apothecary-shaped exclude list. A Place whose types
+    # include ``winery``/``vineyard`` is a target even when Google ALSO tags it
+    # ``wine_bar`` / ``liquor_store`` -- which is the norm for Napa/Sonoma tasting rooms.
+    if allow_types and (allow_types & tset):
+        return False, ""
     if EXCLUDE_TYPES & tset:
         return True, "google_type_excluded"
 
@@ -979,6 +1012,18 @@ def main() -> None:
         help='Shop Type cell for new rows (default "Metaphysical/Spiritual").',
     )
     p.add_argument(
+        "--allow-type",
+        action="append",
+        default=[],
+        metavar="GOOGLE_TYPE",
+        help=(
+            "Positive Google Place type that bypasses the exclude list (repeatable). "
+            "Use for categories whose Places types collide with the excluded ones, e.g. "
+            '--allow-type winery --allow-type vineyard (winery Places are often also tagged '
+            "wine_bar, which the apothecary filter would otherwise drop)."
+        ),
+    )
+    p.add_argument(
         "--sleep-details",
         type=float,
         default=0.08,
@@ -988,6 +1033,9 @@ def main() -> None:
     region = region_from_arg(args.region)
 
     key = maps_api_key()
+    allow_types = frozenset(x.strip().lower() for x in args.allow_type if x.strip()) or None
+    if allow_types:
+        print(f"Positive type allowlist: {sorted(allow_types)}", flush=True)
     seen_place_ids: set[str] = set()
     raw_results: list[dict[str, Any]] = []
 
@@ -1088,7 +1136,7 @@ def main() -> None:
 
         types = list(res.get("types") or [])
         vic = (res.get("vicinity") or "").strip()
-        bad, why = should_exclude(name, types, vic)
+        bad, why = should_exclude(name, types, vic, allow_types=allow_types)
         if bad:
             stats["skip_filter"] += 1
             continue
