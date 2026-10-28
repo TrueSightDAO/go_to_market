@@ -110,11 +110,11 @@ def test_retail_body_untouched_by_winery_change() -> None:
 
 def test_winery_body_pitches_bars_with_real_terms() -> None:
     """The bar pivot: prices and opening quantity must be in the copy, and the
-    email must not promise packaging photos that do not exist for the bar SKU."""
+    email must not promise a front/back photo pair - only one bar photo exists."""
     body = m._warmup_body_winery("Test Winery")
     low = body.lower()
     assert "$10 retail" in low and "$6 wholesale" in low
-    assert "12-bar flight" in low and "$72" in low
+    assert "12 bars" in low and "$72" in low
     assert "81%" in low and "50 g" in low
     # no unfulfillable attachment promise
     assert "two photos" not in low
@@ -135,6 +135,35 @@ def test_grok_attachment_contract_is_segment_aware() -> None:
     winery = m.grok_warmup_system_prompt("winery").lower()
     retail = m.grok_warmup_system_prompt("retail_merch").lower()
     assert "three attachments" not in winery
-    assert "one attachment" in winery
+    assert "two attachments" in winery
+    assert "one photo of the bar packaging" in winery
+    assert "two photos" not in winery
     # the non-winery segments keep their original contract
     assert "three attachments" in retail
+
+
+def test_winery_copy_respects_current_stock_policy() -> None:
+    """Gary's stock direction (2026-10-28) must hold in shipped copy.
+
+    Pitch Oscar's Farm only. Vivi's is described as coming online later this
+    year, never as buyable. Fazenda Sao Jorge is going out of stock and Fazenda
+    Santa Ana is not being stocked this year, so neither may be named - pitching
+    them would invite orders we cannot fill.
+    """
+    body = m._warmup_body_winery("Test Winery")
+    low = body.lower()
+
+    assert "oscar" in low
+    # Vivi's is future inventory, so it must be framed as not-yet-available
+    assert "vivi" in low
+    assert "comes online later this year" in low or "coming online" in low
+
+    # discontinued / unstockable estates must not appear at all
+    assert "jorge" not in low, "Sao Jorge is going out of stock - must not be pitched"
+    assert "santa ana" not in low, (
+        "Santa Ana is not stocked this year - must not appear"
+    )
+
+    # and no implication of a multi-estate flight
+    assert "four estates" not in low
+    assert "each of our" not in low

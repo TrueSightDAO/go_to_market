@@ -54,9 +54,22 @@ WHOLESALE_PER_BAR_USD = 6.00
 RRP_PER_BAR_USD = 10.00
 COGS_PER_BAR_USD = 2.71
 BAR_WEIGHT_G = 50
-ORIGINS_PER_FLIGHT = 4
+# Only estates we can actually ship are listed. Stock truth at time of writing
+# (store inventory): Oscar's 40, Vivi's 40, Sao Jorge 4 (nearly out), Santa Ana 0
+# (not being stocked this year). Gary's instruction: pitch Oscar's only, mention
+# Vivi's as coming online, do NOT pitch Sao Jorge or Santa Ana.
+#   - Sao Jorge: about to go out of stock, so pitching it invites an order we
+#     cannot fill.
+#   - Santa Ana: not stocked this year, so it must not appear at all.
+ORIGINS_PER_FLIGHT = 1
 FLIGHT_BARS = 12
 FREE_SHIPPING_BARS = 24
+
+# Real product photography, pulled from the live storefront asset for the bar SKU.
+# Only one bar image exists (the same file backs all four bar SKUs), so this is a
+# single photo -- there is no separate front/back pair for bars.
+BAR_PHOTO_PATH = os.path.join(SCRIPT_DIR, "agroverse_81_bar_packaging.jpeg")
+BAR_PHOTO_WIDTH_IN = 3.1
 
 _HEADER_BG = colors.HexColor("#2d5a27")
 _ROW_BG = colors.HexColor("#f5f5f5")
@@ -77,30 +90,6 @@ ORIGINS = [
             "Deep, dark European chocolate profile with exceptionally buttery, "
             "velvety mouthfeel. Intense chocolate notes with subtle undertones of "
             "earth and wood. Smooth, low-acidity finish."
-        ),
-        "note": None,
-    },
-    {
-        "name": "Fazenda Santa Ana",
-        "location": "Bahia, Brazil",
-        "taste": None,
-        "note": (
-            "A second Bahia estate with its own micro-climate and a distinctly "
-            "different cup profile from Oscar's. Tasting notes on request."
-        ),
-    },
-    {
-        "name": "Fazenda Sao Jorge",
-        "location": "Bahia, Brazil",
-        "taste": None,
-        "note": "Historic Bahia estate. Tasting notes on request.",
-    },
-    {
-        "name": "Vivi's Jesus Do Deus Farm",
-        "location": "Itacare, Bahia",
-        "taste": (
-            "Top-grade organic cacao grown in cabruca agroforestry -- a former "
-            "cattle ranch transformed into regenerative cacao forest."
         ),
         "note": None,
     },
@@ -192,7 +181,7 @@ def build_story(styles):
             _money(RRP_PER_BAR_USD) + " / bar",
         ],
         [
-            f"Tasting flight — {FLIGHT_BARS} bars, {ORIGINS_PER_FLIGHT} origins",
+            f"Opening case — {FLIGHT_BARS} bars, {ORIGINS_PER_FLIGHT} estate",
             _money(WHOLESALE_PER_BAR_USD * FLIGHT_BARS),
             _money(RRP_PER_BAR_USD * FLIGHT_BARS),
         ],
@@ -213,18 +202,45 @@ def build_story(styles):
     )
     story.append(Spacer(1, 0.35 * inch))
 
-    story.append(Paragraph("Why a Tasting Flight", styles["Heading2"]))
+    story.append(Paragraph("Why Single Estate", styles["Heading2"]))
     story.append(
         Paragraph(
-            "We grow on separate estates and we do not blend them. Each bar is a "
-            "single origin, so the same 81% recipe reads completely differently "
-            "depending on the soil it came from. A flight lets your customer taste "
-            "that difference side by side &mdash; which is the same reason your "
-            "tasting room exists.",
+            "We grow on separate estates and we do not blend them &mdash; every bar "
+            "is a single origin, made from one farm's fruit. That is the whole "
+            "point: the same 81% recipe reads completely differently depending on "
+            "the soil it came from, and a single-estate bar is a claim about a "
+            "place rather than a house style. It is the same reason your tasting "
+            "room exists.",
             ParagraphStyle(name="Intro", parent=styles["Normal"], fontSize=10),
         )
     )
-    story.append(Spacer(1, 0.2 * inch))
+    story.append(Spacer(1, 0.15 * inch))
+    if os.path.isfile(BAR_PHOTO_PATH):
+        from PIL import Image as PILImage
+
+        with PILImage.open(BAR_PHOTO_PATH) as pil_img:
+            _w, _h = pil_img.size
+        _photo_w = BAR_PHOTO_WIDTH_IN * inch
+        story.append(
+            Image(
+                BAR_PHOTO_PATH,
+                width=_photo_w,
+                height=_h * (_photo_w / _w),
+            )
+        )
+        story.append(
+            Paragraph(
+                f"{BAR_WEIGHT_G} g bar, wrapped.",
+                ParagraphStyle(
+                    name="Caption",
+                    parent=styles["Normal"],
+                    fontSize=8,
+                    textColor=_MUTED,
+                    alignment=TA_CENTER,
+                ),
+            )
+        )
+    story.append(Spacer(1, 0.3 * inch))
 
     story.append(Paragraph("The Origins", styles["Heading2"]))
     for origin in ORIGINS:
@@ -249,6 +265,20 @@ def build_story(styles):
         )
         story.append(Spacer(1, 0.12 * inch))
 
+    story.append(
+        Paragraph(
+            "<b>Coming online:</b> Vivi's Jesus Do Deus Farm, Itacar&eacute; "
+            "&mdash; a former cattle ranch turned regenerative cacao forest. "
+            "Ask us for availability.",
+            ParagraphStyle(
+                name="ComingOnline",
+                parent=styles["Normal"],
+                fontSize=9,
+                textColor=_MUTED,
+                leftIndent=12,
+            ),
+        )
+    )
     story.append(Spacer(1, 0.25 * inch))
 
     story.append(Paragraph("Ordering &amp; Shipping", styles["Heading2"]))
@@ -256,7 +286,7 @@ def build_story(styles):
         ["Order size", "Terms"],
         [
             f"{FLIGHT_BARS} bars (opening order)",
-            f"{_money(WHOLESALE_PER_BAR_USD * FLIGHT_BARS)} — the tasting flight, or any mix you prefer",
+            f"{_money(WHOLESALE_PER_BAR_USD * FLIGHT_BARS)} — one estate, or ask us for a mixed case",
         ],
         [
             f"{FREE_SHIPPING_BARS}+ bars",
@@ -309,6 +339,30 @@ def build_story(styles):
         )
     )
     return story
+
+
+def _rendered_pdf_text() -> str:
+    """Extract the visible text of the generated PDF (test-only helper).
+
+    Renders the same story main() builds into a throwaway buffer so tests can
+    assert on what a reader actually sees, independent of the committed PDF.
+    """
+    import io
+
+    from pypdf import PdfReader
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=letter,
+        rightMargin=0.75 * inch,
+        leftMargin=0.75 * inch,
+        topMargin=0.5 * inch,
+        bottomMargin=0.75 * inch,
+    )
+    doc.build(build_story(getSampleStyleSheet()))
+    buf.seek(0)
+    return "\n".join((p.extract_text() or "") for p in PdfReader(buf).pages)
 
 
 def main():
