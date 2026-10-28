@@ -2,6 +2,7 @@
 
 import importlib.util
 import os
+import re
 
 _SPEC = importlib.util.spec_from_file_location(
     "bar_price_list",
@@ -36,12 +37,33 @@ def test_gross_margin_at_wholesale_is_viable():
     assert gross / bar.WHOLESALE_PER_BAR_USD >= 0.50
 
 
-def test_flight_is_four_origins_and_twelve_bars():
+def test_opening_order_is_twelve_bars_of_the_one_stocked_estate():
+    """Only Oscar's Farm is stocked as a bar right now (40 units).
+
+    Stock direction of 2026-10-28: Vivi's is coming online later this year,
+    Fazenda Sao Jorge is going out of stock, and Fazenda Santa Ana is not being
+    stocked this year. The opening order is therefore 12 bars of a single estate
+    - a four-origin flight would advertise bars we cannot ship.
+    """
     assert bar.FLIGHT_BARS == 12
-    assert bar.ORIGINS_PER_FLIGHT == 4
-    assert len(bar.ORIGINS) == bar.ORIGINS_PER_FLIGHT
-    # 12 bars split evenly across 4 origins -> a 3-of-each flight.
-    assert bar.FLIGHT_BARS % bar.ORIGINS_PER_FLIGHT == 0
+    assert bar.ORIGINS_PER_FLIGHT == 1
+    assert len(bar.ORIGINS) == 1, "only one buyable bar origin may be listed"
+    assert "oscar" in bar.ORIGINS[0]["name"].lower()
+
+    # The unstockable estates must not reach the SHIPPED PDF. Source comments name
+    # them on purpose (recording why they were dropped), so assert on the rendered
+    # document's visible text rather than the source.
+    # Normalise whitespace: pypdf returns the PDF's line wraps, so a phrase
+    # like "ask us for availability" comes back as "ask us for\\navailability".
+    text = re.sub(r"\s+", " ", bar._rendered_pdf_text().lower())
+    # Sao Jorge and Santa Ana are unstockable and unmentionable.
+    for gone in ("sao jorge", "s\u00e3o jorge", "santa ana"):
+        assert gone not in text, f"{gone!r} must not appear in the shipped bar PDF"
+    # Vivi's may appear ONLY as a coming-online note, never as a buyable estate.
+    if "vivi" in text:
+        assert "coming online" in text, "Vivi's may only be named as coming online"
+        assert "ask us for availability" in text
+    assert "oscar" in text
 
 
 def test_flight_fits_the_usps_two_pound_bracket():

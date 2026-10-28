@@ -75,6 +75,9 @@ _DEFAULT_PACKAGING_BACK = _REPO / "retail_price_list" / "agroverse_packaging_bac
 _DEFAULT_PDF_BAR = (
     _REPO / "retail_price_list" / "agroverse_81_bar_wholesale_price_list_2026.pdf"
 )
+# All four 81% bar SKUs share one packaging image on agroverse.shop, so a bar
+# pitch carries a single photo - no front/back pair like the 200 g cacao bag.
+_DEFAULT_BAR_PACKAGING = _REPO / "retail_price_list" / "agroverse_81_bar_packaging.jpeg"
 
 
 def wholesale_pdf_for_segment(segment: str) -> Path:
@@ -1272,8 +1275,8 @@ def grok_warmup_system_prompt(segment: str = "") -> str:
         "cacao supplier**, or needs an “alongside what you stock” angle. Do not invite them to compare against "
         "an existing cacao line you do not know they have.\n"
         + (
-            "- State clearly that the email has **one attachment**: the **81% bar wholesale price "
-            "list PDF**. Do NOT claim or imply packaging photos are attached \u2014 bar packaging "
+            "- State clearly that the email has **two attachments**: the **81% bar wholesale price "
+            "list PDF** plus **one photo of the bar packaging** for shelf-fit reference. Do not paste "
             "photography does not exist yet and none will be attached. Do not paste "
             if segment == "winery"
             else "- State clearly that the email has **three attachments**: a **wholesale price list PDF** plus "
@@ -1540,11 +1543,11 @@ def _warmup_body_retail_merch(shop: str) -> str:
 # Winery pitches the 81% BAR line, so it cannot reuse the shared close: that
 # close promises "two photos of the packaging", and no bar packaging photography
 # exists yet (retail_price_list/ only holds the 200 g cacao bag shots). This
-# close promises exactly the one attachment the winery email actually carries.
+# close promises exactly the two attachments the winery email actually carries.
 _WARMUP_WINERY_CLOSE = (
     "We're **flexible on structure** \u2014 **either** **consignment-friendly** retail **or** "
     "**wholesale / bulk** works on our side; I've attached our **81% bar wholesale price list PDF** "
-    "so you can see the estates, the pricing tiers and the opening quantities.\n\n"
+    "plus **one photo of the bar packaging**, so you can see the pricing tiers, the opening quantities and how the bar presents on a shelf.\n\n"
     "For partner-shop shelf photos and the current U.S. stockist list, see "
     "https://agroverse.shop/wholesale \u2014 that's the visual companion to the PDF.\n\n"
     "No need to meet in person on my side; happy to answer by email or on a quick call if that's "
@@ -1563,10 +1566,13 @@ def _warmup_body_winery(shop: str) -> str:
     # ceremonial cacao bag. Deliberately avoids ceremonial / ritual / wellness
     # language, and avoids "shelf variety" retail framing.
     #
-    # Only Oscar's and Vivi's carry documented tasting/provenance notes in
-    # templates/farm_taste_profiles.md. Santa Ana is described only vaguely and
-    # Fazenda São Jorge has no entry at all, so neither is characterised here — do
-    # not invent terroir copy for them; fix the template first.
+    # Stock policy (Gary, 2026-10-28): pitch Oscar's Farm only. Vivi's comes
+    # online later this year and is mentioned as upcoming, never as buyable.
+    # Fazenda São Jorge is going out of stock and Fazenda Santa Ana is not being
+    # stocked this year, so neither may be named or implied in a flight offer.
+    # SÃO JORGE ALSO HAS NO ENTRY IN templates/farm_taste_profiles.md, so any
+    # terroir copy for it would be invented. Do not reintroduce either estate
+    # without new stock direction.
     #
     # Also deliberately does NOT repeat the shared close's "each bag carries a QR
     # code" / tree-per-bag claim: that is true of the 200 g cacao bag, and a
@@ -1577,20 +1583,18 @@ def _warmup_body_winery(shop: str) -> str:
         f"I'm Gary with Agroverse. We make single-estate dark chocolate from regenerative "
         f"cacao estates in the Brazilian Amazon — and I think it belongs beside your wine "
         f"rather than on a discount tag.\n\n"
-        f"Our 81% bars are 50 g, organic, and each one is a single named estate. Oscar's Farm "
-        f"in Bahia, grown in cabruca agroforestry, gives a deep, dark European chocolate "
-        f"profile with an exceptionally buttery, velvety mouthfeel and a smooth, low-acidity "
-        f"finish. Vivi's Jesus Do Deus Farm in Itacaré is a former cattle ranch turned "
-        f"regenerative cacao forest — top-grade organic fruit off land that was pasture a "
-        f"decade ago.\n\n"
+        f"Our 81% bars are 50 g, organic, and each one is a single named estate. The one "
+        f"we would start you on is Oscar's Farm in Bahia — grown in cabruca agroforestry, "
+        f"it gives a deep, dark European chocolate profile with an exceptionally buttery, "
+        f"velvety mouthfeel and a smooth, low-acidity finish.\n\n"
         f"That is the story a tasting room already tells: soil, place and craft. A "
-        f"single-estate 81% flight reads as agriculture with a place name, not as shelf "
+        f"single-estate 81% bar reads as agriculture with a place name, not as shelf "
         f"filler — and at 81% it stands up to a structured red instead of fighting it.\n\n"
-        f"Commercially it is simple: **$10 retail, $6 wholesale**. Our opening offer is a "
-        f"**12-bar flight** — three bars from each of our four estates — at **$72**, which "
-        f"ships as a single flat-rate box.\n\n"
+        f"Commercially it is simple: **$10 retail, $6 wholesale**, and you can open with as "
+        f"few as **12 bars** — a single flat-rate box — at **$72**. Vivi's Jesus Do Deus "
+        f"Farm comes online later this year, so there is room to grow the range with us.\n\n"
         f"I'm writing to {shop} because terroir-led retail is what you already do well, and "
-        f"a cacao flight extends that same conversation without teaching your staff a new "
+        f"a single-estate bar extends that same conversation without teaching your staff a new "
         f"category.\n\n"
         f"{_WARMUP_WINERY_CLOSE}"
     )
@@ -1947,11 +1951,10 @@ def main() -> None:
             else wholesale_pdf_for_segment(segment)
         )
 
-        # Packaging photos only exist for the 200g cacao bag. The winery body
-        # deliberately does not promise them, so don't attach bag photos to a
-        # bar pitch.
+        # Wineries get the single 81% bar packaging photo. They must never get
+        # the 200 g bag photos, and cacao segments must not get the bar photo.
         image_paths = (
-            []
+            ([_DEFAULT_BAR_PACKAGING] if _DEFAULT_BAR_PACKAGING.exists() else [])
             if segment == "winery"
             else [
                 ip
