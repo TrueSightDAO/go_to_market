@@ -99,6 +99,11 @@ PER_MESSAGE_BODY_CAP = smf.PER_MESSAGE_BODY_CAP
 SEGMENT_CIRCLES_HOST = "circles_host"
 SEGMENT_CEREMONIAL_SPIRITUAL = "ceremonial_spiritual"
 SEGMENT_RETAIL_MERCH = "retail_merch"
+SEGMENT_WINERY = "winery"
+
+#: Venue types that sell on *terroir*: single-estate provenance is their native
+#: sales vocabulary, so the generic "shelf variety" retail framing undersells it.
+_WINERY_SHOP_TYPES = {"winery", "vineyard", "tasting room"}
 
 _CEREMONIAL_SHOP_TYPES = {
     "metaphysical/spiritual", "spiritual/zen center", "yoga studio",
@@ -117,6 +122,8 @@ def classify_warmup_segment(shop_type: str, hosts_circles: str) -> str:
     st = (shop_type or "").strip().lower()
     if st in _CEREMONIAL_SHOP_TYPES:
         return SEGMENT_CEREMONIAL_SPIRITUAL
+    if st in _WINERY_SHOP_TYPES:
+        return SEGMENT_WINERY
     return SEGMENT_RETAIL_MERCH
 
 
@@ -1191,6 +1198,13 @@ _SEGMENT_GROK_FRAMING = {
         "retail-merchandising angle: shelf variety, margin-friendly consignment or wholesale, "
         "tree-traceability as a customer-facing story their shop can tell."
     ),
+    SEGMENT_WINERY: (
+        "segment: winery — a winery / vineyard tasting room. Lead with single-estate "
+        "provenance and terroir: two named Brazilian estates whose soil gives genuinely "
+        "different flavour profiles. Do NOT use ceremonial, ritual, spiritual, or wellness "
+        "framing — the tasting-room frame is agriculture, place, and craft. Do not reduce "
+        "it to a generic 'shelf variety' pitch."
+    ),
 }
 
 
@@ -1395,10 +1409,38 @@ def _warmup_body_retail_merch(shop: str) -> str:
     )
 
 
+def _warmup_body_winery(shop: str) -> str:
+    # A tasting room sells on provenance, so lead with single-estate terroir instead of
+    # the generic "shelf variety" retail framing. Deliberately avoids ceremonial /
+    # ritual language: the winery frame is agriculture and place, not wellness. Reuses
+    # the shared close but swaps its cacao tagline so the sign-off matches the pitch.
+    close = _WARMUP_SHARED_CLOSE.replace(
+        "Agroverse | ceremonial cacao for retail",
+        "Agroverse | single-estate Brazilian cacao",
+    )
+    return (
+        f"Hi —\n\n"
+        f"I'm Gary with Agroverse. We work directly with regenerative cacao estates in the "
+        f"Brazilian Amazon — Oscar's Farm in Bahia, grown in cabruca agroforestry and "
+        f"landing with a deep, buttery, low-acidity profile, and Paulo's Farm in the heart "
+        f"of the Pará Amazon, which runs smoky and earthy into delicate floral notes. Two "
+        f"estates, two soils, two distinctly different profiles — precisely the kind of "
+        f"difference a tasting room is set up to explain to a guest.\n\n"
+        f"Every bag carries a QR code tracing it back to the specific farm and the trees "
+        f"planted alongside it: https://www.instagram.com/p/DJqW8TRtJK3/ is a 30-second "
+        f"look at the restoration in progress.\n\n"
+        f"I'm writing to {shop} because terroir-led retail is what you already do well, "
+        f"and a single-estate cacao flight extends that same terroir story — it reads as "
+        f"agriculture with a place name, not as shelf filler.\n\n"
+        f"{close}"
+    )
+
+
 _WARMUP_BODY_BY_SEGMENT = {
     SEGMENT_CIRCLES_HOST: _warmup_body_circles_host,
     SEGMENT_CEREMONIAL_SPIRITUAL: _warmup_body_ceremonial_spiritual,
     SEGMENT_RETAIL_MERCH: _warmup_body_retail_merch,
+    SEGMENT_WINERY: _warmup_body_winery,
 }
 
 
