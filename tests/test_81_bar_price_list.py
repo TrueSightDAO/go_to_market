@@ -77,3 +77,18 @@ def test_no_fabricated_taste_profiles():
     # Every origin must carry either a real taste profile or an honest note.
     for origin in bar.ORIGINS:
         assert origin.get("taste") or origin.get("note"), origin["name"]
+
+
+def test_positioning_is_try_it_reorder_deeper() -> None:
+    """The opening order is a trial size, not a volume ladder.
+
+    Gary's positioning (2026-10-28): "try it, reorder deeper". The commercial
+    claim that makes that honest is that the per-bar price does NOT fall with
+    volume -- so pin both halves: the reorder language must be present, and no
+    volume-tier or mixed-case offer may be advertised.
+    """
+    text = re.sub(r"\s+", " ", bar._rendered_pdf_text().lower())
+    assert "reorder deeper" in text
+    assert "no volume tiers" in text
+    # A mixed case is unsellable while only one estate is in stock.
+    assert "mixed case" not in text

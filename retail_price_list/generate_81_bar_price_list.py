@@ -286,7 +286,11 @@ def build_story(styles):
         ["Order size", "Terms"],
         [
             f"{FLIGHT_BARS} bars (opening order)",
-            f"{_money(WHOLESALE_PER_BAR_USD * FLIGHT_BARS)} — one estate, or ask us for a mixed case",
+            f"{_money(WHOLESALE_PER_BAR_USD * FLIGHT_BARS)} — the low-risk way to find out how it moves",
+        ],
+        [
+            "Reorder",
+            "Same per-bar price, no volume tiers — reorder deeper as it sells",
         ],
         [
             f"{FREE_SHIPPING_BARS}+ bars",
@@ -300,6 +304,17 @@ def build_story(styles):
     order_table = Table(order_rows, colWidths=[2.2 * inch, 3.8 * inch])
     order_table.setStyle(_table_style())
     story.append(order_table)
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(
+        Paragraph(
+            "Start with one case rather than over-committing: the per-bar price does not "
+            "change with volume, so there is no reason to buy deep before you know how it "
+            "sells. Reorder when it moves.",
+            ParagraphStyle(
+                name="Reorder", parent=styles["Normal"], fontSize=9, textColor=_MUTED
+            ),
+        )
+    )
     story.append(Spacer(1, 0.12 * inch))
     story.append(
         Paragraph(
