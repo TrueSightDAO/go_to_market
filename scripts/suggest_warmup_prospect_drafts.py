@@ -60,12 +60,29 @@ import suggest_manager_followup_drafts as smf
 from email_agent_tracking import plain_text_to_html_for_email_agent
 from gmail_plain_body import extract_plain_body_from_payload
 from hit_list_dapp_remarks_sheet import append_dapp_remark_and_apply
+
 _WARMUP_REF = _REPO / "templates" / "warmup_outreach_reference.md"
 _FARM_TASTE_REF = _REPO / "templates" / "farm_taste_profiles.md"
 _FIELD_INSIGHTS_REF = _REPO / "templates" / "field_insights_outreach.md"
 _DEFAULT_PDF = _REPO / "retail_price_list" / "agroverse_wholesale_price_list_2026.pdf"
-_DEFAULT_PACKAGING_FRONT = _REPO / "retail_price_list" / "agroverse_packaging_front.jpeg"
+_DEFAULT_PACKAGING_FRONT = (
+    _REPO / "retail_price_list" / "agroverse_packaging_front.jpeg"
+)
 _DEFAULT_PACKAGING_BACK = _REPO / "retail_price_list" / "agroverse_packaging_back.jpeg"
+# Wineries are pitched the 81% single-estate BAR line, not the 200g ceremonial
+# cacao bag, so the wholesale PDF must follow the segment. Everything else keeps
+# the cacao price list.
+_DEFAULT_PDF_BAR = (
+    _REPO / "retail_price_list" / "agroverse_81_bar_wholesale_price_list_2026.pdf"
+)
+
+
+def wholesale_pdf_for_segment(segment: str) -> Path:
+    """Bar price list for the winery segment, ceremonial cacao PDF otherwise."""
+    if segment == "winery":
+        return _DEFAULT_PDF_BAR
+    return _DEFAULT_PDF
+
 
 SPREADSHEET_ID = smf.SPREADSHEET_ID
 HIT_LIST_WS = smf.HIT_LIST_WS
@@ -106,7 +123,9 @@ SEGMENT_WINERY = "winery"
 _WINERY_SHOP_TYPES = {"winery", "vineyard", "tasting room"}
 
 _CEREMONIAL_SHOP_TYPES = {
-    "metaphysical/spiritual", "spiritual/zen center", "yoga studio",
+    "metaphysical/spiritual",
+    "spiritual/zen center",
+    "yoga studio",
 }
 
 
@@ -162,14 +181,20 @@ def load_warmup_targets(ws: gspread.Worksheet) -> list[dict]:
                 "to_email": em,
                 "notes": smf.cell(row, notes_i) if notes_i is not None else "",
                 "city_state": locale,
-                "shop_type": smf.cell(row, shop_type_i) if shop_type_i is not None else "",
-                "hosts_circles": smf.cell(row, hosts_circles_i) if hosts_circles_i is not None else "",
+                "shop_type": smf.cell(row, shop_type_i)
+                if shop_type_i is not None
+                else "",
+                "hosts_circles": smf.cell(row, hosts_circles_i)
+                if hosts_circles_i is not None
+                else "",
             }
         )
     return out
 
 
-def pick_warmup_segment_fields(targets: list[dict], partner_email: str) -> tuple[str, str]:
+def pick_warmup_segment_fields(
+    targets: list[dict], partner_email: str
+) -> tuple[str, str]:
     """(shop_type, hosts_circles) for the same primary-store row `smf.pick_primary_store`
     would pick (lowest hit_list_row) — kept separate since the shared `pick_primary_store`
     return arity is used by suggest_manager_followup_drafts.py too and doesn't carry these
@@ -178,7 +203,9 @@ def pick_warmup_segment_fields(targets: list[dict], partner_email: str) -> tuple
     if not matches:
         return "", ""
     first = min(matches, key=lambda x: x["hit_list_row"])
-    return (first.get("shop_type") or "").strip(), (first.get("hosts_circles") or "").strip()
+    return (first.get("shop_type") or "").strip(), (
+        first.get("hosts_circles") or ""
+    ).strip()
 
 
 def _email_from_from_header(from_hdr: str) -> str:
@@ -217,7 +244,12 @@ def inbound_reply_details(
         req = (
             service.users()
             .messages()
-            .list(userId="me", q=q, maxResults=min(15, max_scan - scanned), pageToken=page_token)
+            .list(
+                userId="me",
+                q=q,
+                maxResults=min(15, max_scan - scanned),
+                pageToken=page_token,
+            )
         )
         resp = req.execute()
         for m in resp.get("messages") or []:
@@ -225,7 +257,12 @@ def inbound_reply_details(
             if not mid:
                 continue
             try:
-                full = service.users().messages().get(userId="me", id=mid, format="full").execute()
+                full = (
+                    service.users()
+                    .messages()
+                    .get(userId="me", id=mid, format="full")
+                    .execute()
+                )
             except HttpError:
                 continue
             ms = _message_internal_ms(full)
@@ -272,9 +309,7 @@ _AUTO_REPLY_PATTERNS: list[re.Pattern] = [
     re.compile(r"\bout of town\b", re.IGNORECASE),
     re.compile(r"\bon (vacation|leave|holiday)\b", re.IGNORECASE),
     re.compile(r"\b(away from|not in) the office\b", re.IGNORECASE),
-    re.compile(
-        r"\bwill (return|be back) (on|after|in|by)\b", re.IGNORECASE
-    ),
+    re.compile(r"\bwill (return|be back) (on|after|in|by)\b", re.IGNORECASE),
     # Auto-responders
     re.compile(
         r"\b(thank you for (contacting|reaching out|your (email|message|inquiry))"
@@ -294,7 +329,10 @@ _AUTO_REPLY_PATTERNS: list[re.Pattern] = [
         re.IGNORECASE,
     ),
     # Gmail vacation responder header pattern in body
-    re.compile(r"\b(auto[- ]?(reply|response|responder|generated)|vacation (responder|reply))\b", re.IGNORECASE),
+    re.compile(
+        r"\b(auto[- ]?(reply|response|responder|generated)|vacation (responder|reply))\b",
+        re.IGNORECASE,
+    ),
     # Very short no-effort reply (< 30 chars stripped, no question marks)
 ]
 _AUTO_REPLY_MIN_WORDS = 4  # fewer words than this → almost certainly auto/non-reply
@@ -356,7 +394,9 @@ def find_warmup_thread_and_messages(
     if not want:
         return None, [], None
     q = f"to:{want} OR from:{want}"
-    resp = service.users().messages().list(userId="me", q=q, maxResults=max_list).execute()
+    resp = (
+        service.users().messages().list(userId="me", q=q, maxResults=max_list).execute()
+    )
     msgs = resp.get("messages") or []
     if not msgs:
         return None, [], None
@@ -373,9 +413,9 @@ def find_warmup_thread_and_messages(
 
     best_tid = max(by_thread.keys(), key=lambda t: len(by_thread[t]))
 
-    thread = service.users().threads().get(
-        userId="me", id=best_tid, format="full"
-    ).execute()
+    thread = (
+        service.users().threads().get(userId="me", id=best_tid, format="full").execute()
+    )
     thread_msgs = thread.get("messages") or []
 
     latest_inbound: dict | None = None
@@ -451,9 +491,7 @@ def grok_reply_system_prompt() -> str:
         "  Agroverse | ceremonial cacao for retail\n"
         "  garyjob@agroverse.shop\n"
         "- Subject: prepend 'Re:' if the original subject is known; otherwise a natural reply subject. "
-        "Keep it scannable and under ~90 characters.\n"
-        + farm_block
-        + insights_block
+        "Keep it scannable and under ~90 characters.\n" + farm_block + insights_block
     )
 
 
@@ -541,7 +579,12 @@ def discard_old_drafts_on_thread(service, thread_id: str) -> int:
     deleted = 0
     page_token = None
     while True:
-        resp = service.users().drafts().list(userId="me", maxResults=100, pageToken=page_token).execute()
+        resp = (
+            service.users()
+            .drafts()
+            .list(userId="me", maxResults=100, pageToken=page_token)
+            .execute()
+        )
         for d in resp.get("drafts") or []:
             d_msg = d.get("message") or {}
             if d_msg.get("threadId") == thread_id:
@@ -600,12 +643,18 @@ def _set_auto_reply_streak_in_notes(
     if notes_i is None:
         return
     notes_col = notes_i + 1
-    existing = smf.cell(hit_ws.row_values(row), notes_i) if row <= len(hit_ws.get_all_values()) else ""
+    existing = (
+        smf.cell(hit_ws.row_values(row), notes_i)
+        if row <= len(hit_ws.get_all_values())
+        else ""
+    )
     if not existing:
         existing = ""
     # Replace existing streak marker or append
     if re.search(r"auto_reply_streak=\d+", existing):
-        new_notes = re.sub(r"auto_reply_streak=\d+", f"auto_reply_streak={streak}", existing)
+        new_notes = re.sub(
+            r"auto_reply_streak=\d+", f"auto_reply_streak={streak}", existing
+        )
     else:
         suffix = f"auto_reply_streak={streak}"
         new_notes = f"{existing}; {suffix}" if existing else suffix
@@ -659,9 +708,13 @@ def promote_warmup_replies(
         except Exception as e:
             print(f"  WARNING: could not resolve {REPLIED_GMAIL_LABEL!r} label: {e}")
         try:
-            auto_reply_label_id = smf.ensure_user_label_id(gsvc, AUTO_REPLY_LOGGED_GMAIL_LABEL)
+            auto_reply_label_id = smf.ensure_user_label_id(
+                gsvc, AUTO_REPLY_LOGGED_GMAIL_LABEL
+            )
         except Exception as e:
-            print(f"  WARNING: could not resolve {AUTO_REPLY_LOGGED_GMAIL_LABEL!r} label: {e}")
+            print(
+                f"  WARNING: could not resolve {AUTO_REPLY_LOGGED_GMAIL_LABEL!r} label: {e}"
+            )
 
     for r, row in enumerate(values[1:], start=2):
         if smf.cell(row, status_i) != HIT_STATUS_WARMUP:
@@ -684,19 +737,26 @@ def promote_warmup_replies(
                 already_logged = False
                 if inbound_msg_id and auto_reply_label_id:
                     try:
-                        msg_full = gsvc.users().messages().get(
-                            userId="me", id=inbound_msg_id, format="full"
-                        ).execute()
+                        msg_full = (
+                            gsvc.users()
+                            .messages()
+                            .get(userId="me", id=inbound_msg_id, format="full")
+                            .execute()
+                        )
                         msg_label_ids = msg_full.get("labelIds") or []
                         if auto_reply_label_id in msg_label_ids:
                             already_logged = True
                     except Exception as e:
                         if verbose:
-                            print(f"  WARNING: could not check labels for msg {inbound_msg_id}: {e}")
+                            print(
+                                f"  WARNING: could not check labels for msg {inbound_msg_id}: {e}"
+                            )
 
                 if already_logged:
                     if verbose:
-                        print(f"  auto-reply row {r} {em}: already logged (label present), skipping")
+                        print(
+                            f"  auto-reply row {r} {em}: already logged (label present), skipping"
+                        )
                     continue
 
                 if verbose:
@@ -719,11 +779,13 @@ def promote_warmup_replies(
                                 f"Reply body:\n{reply['body']}"
                             ),
                             submitted_by="warmup_auto_reply_detected",
-                            submitted_at=reply['date'],
+                            submitted_at=reply["date"],
                             submission_id=str(uuid.uuid4()),
                         )
                     except Exception as e:
-                        print(f"  WARNING: auto-reply DApp Remarks append failed for row {r}: {e}")
+                        print(
+                            f"  WARNING: auto-reply DApp Remarks append failed for row {r}: {e}"
+                        )
 
                 # Apply the AI/Auto-reply Logged label to the message (idempotency marker)
                 if not dry_run and auto_reply_label_id and inbound_msg_id:
@@ -734,13 +796,19 @@ def promote_warmup_replies(
                             body={"addLabelIds": [auto_reply_label_id]},
                         ).execute()
                         if verbose:
-                            print(f"  label   row {r} msg {inbound_msg_id}: +{AUTO_REPLY_LOGGED_GMAIL_LABEL!r}")
+                            print(
+                                f"  label   row {r} msg {inbound_msg_id}: +{AUTO_REPLY_LOGGED_GMAIL_LABEL!r}"
+                            )
                     except Exception as e:
-                        print(f"  WARNING: auto-reply label apply failed for row {r} msg {inbound_msg_id}: {e}")
+                        print(
+                            f"  WARNING: auto-reply label apply failed for row {r} msg {inbound_msg_id}: {e}"
+                        )
 
                 # Track auto-reply streak and park if threshold reached
                 if not dry_run:
-                    existing_notes = smf.cell(row, notes_i) if notes_i is not None else ""
+                    existing_notes = (
+                        smf.cell(row, notes_i) if notes_i is not None else ""
+                    )
                     current_streak = _parse_auto_reply_streak(existing_notes)
                     new_streak = current_streak + 1
                     _set_auto_reply_streak_in_notes(hit_ws, r, notes_i, new_streak)
@@ -749,7 +817,9 @@ def promote_warmup_replies(
 
                     if new_streak >= auto_reply_park_threshold:
                         # Park the row: flip Status to On Hold
-                        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                        now_iso = datetime.now(timezone.utc).strftime(
+                            "%Y-%m-%dT%H:%M:%SZ"
+                        )
                         park_note = (
                             f"parked: auto-responder only, no human reply after "
                             f"{new_streak} touches ({now_iso})"
@@ -757,17 +827,29 @@ def promote_warmup_replies(
                         hit_ws.update_cell(r, status_col, "On Hold")
                         if notes_i is not None:
                             notes_col = notes_i + 1
-                            updated_notes = smf.cell(hit_ws.row_values(r), notes_i) if r <= len(hit_ws.get_all_values()) else ""
+                            updated_notes = (
+                                smf.cell(hit_ws.row_values(r), notes_i)
+                                if r <= len(hit_ws.get_all_values())
+                                else ""
+                            )
                             if not updated_notes:
                                 updated_notes = existing_notes
                             park_suffix = f"parked: auto-responder only, no human reply after {new_streak} touches ({now_iso})"
-                            new_notes_val = f"{updated_notes}; {park_suffix}" if updated_notes else park_suffix
+                            new_notes_val = (
+                                f"{updated_notes}; {park_suffix}"
+                                if updated_notes
+                                else park_suffix
+                            )
                             hit_ws.update_cell(r, notes_col, new_notes_val)
-                        print(f"  PARKED  row {r} {em}: auto_reply_streak={new_streak} >= threshold={auto_reply_park_threshold} → On Hold")
+                        print(
+                            f"  PARKED  row {r} {em}: auto_reply_streak={new_streak} >= threshold={auto_reply_park_threshold} → On Hold"
+                        )
                 continue  # skip promotion for auto-replies
 
             if verbose:
-                print(f"  promote row {r} {em}: inbound after last send → {HIT_STATUS_REPLIED!r}")
+                print(
+                    f"  promote row {r} {em}: inbound after last send → {HIT_STATUS_REPLIED!r}"
+                )
             if not dry_run:
                 # Append DApp Remarks with reply content before flipping status
                 if remarks_ws is not None:
@@ -787,7 +869,7 @@ def promote_warmup_replies(
                             ai_status=HIT_STATUS_REPLIED,
                             remarks=remarks_text,
                             submitted_by="warmup_reply_promotion",
-                            submitted_at=reply['date'],
+                            submitted_at=reply["date"],
                             submission_id=str(uuid.uuid4()),
                         )
                     except Exception as e:
@@ -805,14 +887,20 @@ def promote_warmup_replies(
                             body={"addLabelIds": [replied_label_id]},
                         ).execute()
                         if verbose:
-                            print(f"  label   row {r} msg {inbound_msg_id}: +{REPLIED_GMAIL_LABEL!r}")
+                            print(
+                                f"  label   row {r} msg {inbound_msg_id}: +{REPLIED_GMAIL_LABEL!r}"
+                            )
                     except Exception as e:
-                        print(f"  WARNING: label apply failed for row {r} msg {inbound_msg_id}: {e}")
+                        print(
+                            f"  WARNING: label apply failed for row {r} msg {inbound_msg_id}: {e}"
+                        )
             n += 1
     return n
 
 
-def _email_has_reply_draft_in_suggestions(sugg_ws: gspread.Worksheet, email: str) -> bool:
+def _email_has_reply_draft_in_suggestions(
+    sugg_ws: gspread.Worksheet, email: str
+) -> bool:
     """Return True if Email Agent Drafts already has a kind=warmup_reply row for this email."""
     if sugg_ws is None:
         return False
@@ -867,7 +955,9 @@ def create_reply_drafts_for_replied_prospects(
         return 0
 
     me = smf.gmail_profile_email(gsvc)
-    tracking_base = (os.environ.get("EMAIL_AGENT_TRACKING_BASE_URL") or "https://edgar.truesight.me").strip()
+    tracking_base = (
+        os.environ.get("EMAIL_AGENT_TRACKING_BASE_URL") or "https://edgar.truesight.me"
+    ).strip()
 
     label_id: str | None = None
     if not dry_run and not skip_label:
@@ -897,7 +987,9 @@ def create_reply_drafts_for_replied_prospects(
         # Skip if suggestions already has a reply draft for this email.
         if _email_has_reply_draft_in_suggestions(sugg_ws, em):
             if verbose:
-                print(f"  reply-draft-skip row {r} {em}: already has reply draft in {SUGGESTIONS_WS!r}")
+                print(
+                    f"  reply-draft-skip row {r} {em}: already has reply draft in {SUGGESTIONS_WS!r}"
+                )
             continue
 
         thread_id, thread_msgs, latest_inbound = find_warmup_thread_and_messages(
@@ -912,7 +1004,12 @@ def create_reply_drafts_for_replied_prospects(
         has_draft = False
         page_token = None
         while True:
-            resp = gsvc.users().drafts().list(userId="me", maxResults=100, pageToken=page_token).execute()
+            resp = (
+                gsvc.users()
+                .drafts()
+                .list(userId="me", maxResults=100, pageToken=page_token)
+                .execute()
+            )
             for d in resp.get("drafts") or []:
                 d_msg = d.get("message") or {}
                 if d_msg.get("threadId") == thread_id:
@@ -925,7 +1022,9 @@ def create_reply_drafts_for_replied_prospects(
                 break
         if has_draft:
             if verbose:
-                print(f"  reply-draft-skip row {r} {em}: draft already exists on thread {thread_id}")
+                print(
+                    f"  reply-draft-skip row {r} {em}: draft already exists on thread {thread_id}"
+                )
             continue
 
         # Build conversation history from thread messages.
@@ -960,8 +1059,15 @@ def create_reply_drafts_for_replied_prospects(
             except Exception as e:
                 sys.stderr.write(f"Grok reply failed for {em}: {e}\n")
                 # Fallback: use a simple reply template.
-                latest_subj = _header_from_payload(latest_inbound, "Subject") or "Re: Agroverse cacao"
-                subj = latest_subj if latest_subj.lower().startswith("re:") else f"Re: {latest_subj}"
+                latest_subj = (
+                    _header_from_payload(latest_inbound, "Subject")
+                    or "Re: Agroverse cacao"
+                )
+                subj = (
+                    latest_subj
+                    if latest_subj.lower().startswith("re:")
+                    else f"Re: {latest_subj}"
+                )
                 body = (
                     f"Hi —\n\n"
                     f"Thanks for getting back to me. Happy to answer your questions — "
@@ -978,8 +1084,14 @@ def create_reply_drafts_for_replied_prospects(
                 )
                 source = "template_fallback"
         else:
-            latest_subj = _header_from_payload(latest_inbound, "Subject") or "Re: Agroverse cacao"
-            subj = latest_subj if latest_subj.lower().startswith("re:") else f"Re: {latest_subj}"
+            latest_subj = (
+                _header_from_payload(latest_inbound, "Subject") or "Re: Agroverse cacao"
+            )
+            subj = (
+                latest_subj
+                if latest_subj.lower().startswith("re:")
+                else f"Re: {latest_subj}"
+            )
             body = (
                 f"Hi —\n\n"
                 f"Thanks for getting back to me. Happy to answer your questions — "
@@ -1035,9 +1147,12 @@ def create_reply_drafts_for_replied_prospects(
         # Discard any old drafts on the thread (should be none after our check, but be safe).
         discard_old_drafts_on_thread(gsvc, thread_id)
 
-        draft = gsvc.users().drafts().create(
-            userId="me", body={"message": {"raw": raw, "threadId": thread_id}}
-        ).execute()
+        draft = (
+            gsvc.users()
+            .drafts()
+            .create(userId="me", body={"message": {"raw": raw, "threadId": thread_id}})
+            .execute()
+        )
         draft_id = draft.get("id", "") or ""
         msg = draft.get("message") or {}
         msg_id = msg.get("id", "") or ""
@@ -1048,7 +1163,9 @@ def create_reply_drafts_for_replied_prospects(
                     userId="me", id=msg_id, body={"addLabelIds": [label_id]}
                 ).execute()
             except Exception as e:
-                sys.stderr.write(f"Warning: label on reply draft message {msg_id}: {e}\n")
+                sys.stderr.write(
+                    f"Warning: label on reply draft message {msg_id}: {e}\n"
+                )
 
         preview = body.replace("\n", " ")[:BODY_PREVIEW_MAX]
         notes = (
@@ -1109,7 +1226,7 @@ def _load_file_text(path: Path) -> str:
         return ""
 
 
-def grok_warmup_system_prompt() -> str:
+def grok_warmup_system_prompt(segment: str = "") -> str:
     ref = load_warmup_reference_text()
     farm = load_farm_taste_reference_text()
     insights = load_field_insights_reference_text()
@@ -1154,9 +1271,15 @@ def grok_warmup_system_prompt() -> str:
         "- **Do not** assume, imply, or acknowledge that the shop **already carries cacao**, has their **own "
         "cacao supplier**, or needs an “alongside what you stock” angle. Do not invite them to compare against "
         "an existing cacao line you do not know they have.\n"
-        "- State clearly that the email has **three attachments**: a **wholesale price list PDF** plus "
-        "**two photos of the packaging** (front and back of the bar) for shelf-fit reference. Do not paste "
-        "prices in the body unless already in context notes.\n"
+        + (
+            "- State clearly that the email has **one attachment**: the **81% bar wholesale price "
+            "list PDF**. Do NOT claim or imply packaging photos are attached \u2014 bar packaging "
+            "photography does not exist yet and none will be attached. Do not paste "
+            if segment == "winery"
+            else "- State clearly that the email has **three attachments**: a **wholesale price list PDF** plus "
+            "**two photos of the packaging** (front and back of the bag) for shelf-fit reference. Do not paste "
+        )
+        + "prices in the body unless already in context notes.\n"
         "- **Visual reference link:** include exactly one short mention of **https://agroverse.shop/wholesale** as a "
         "*visual* companion to the attachments — partner-shop shelf gallery and current U.S. stockist list. "
         "Frame the page and the attachments as **complementary**, not redundant: the page is for shelf-proof and "
@@ -1233,7 +1356,13 @@ def grok_generate_warmup(
         f"- city/state (if known): {locality or '(not provided)'}\n"
         f"- hit_list_row(s): {hit_list_row}\n"
         f"- recipient_email: {to_email}\n"
-        f"- hit_list_status: {HIT_STATUS_WARMUP} (first-touch intro; PDF wholesale list + two packaging photos will be attached)\n"
+        f"- hit_list_status: {HIT_STATUS_WARMUP} (first-touch intro; "
+        + (
+            "81% bar wholesale PDF will be attached; no packaging photos)"
+            if segment == "winery"
+            else "PDF wholesale list + two packaging photos will be attached)"
+        )
+        + "\n"
         f"- {_SEGMENT_GROK_FRAMING.get(segment, _SEGMENT_GROK_FRAMING[SEGMENT_RETAIL_MERCH])}\n"
     )
     if segment == SEGMENT_CIRCLES_HOST and (hosts_circles_activities or "").strip():
@@ -1245,10 +1374,7 @@ def grok_generate_warmup(
         )
     user += "\n"
     if dapp_block:
-        user += (
-            "DApp / field remarks (same shop or store key):\n\n"
-            f"{dapp_block}\n\n"
-        )
+        user += f"DApp / field remarks (same shop or store key):\n\n{dapp_block}\n\n"
     user += (
         "Optional Gmail thread snippets or related mail (may be empty for unknown addresses):\n\n"
         f"{conversation_history or '(none)'}\n"
@@ -1257,7 +1383,7 @@ def grok_generate_warmup(
         "model": model,
         "temperature": 0.42,
         "messages": [
-            {"role": "system", "content": grok_warmup_system_prompt()},
+            {"role": "system", "content": grok_warmup_system_prompt(segment)},
             {"role": "user", "content": user},
         ],
     }
@@ -1323,7 +1449,9 @@ def build_message_raw_with_attachments(
     else:
         msg.set_content(body, charset="utf-8")
 
-    msg.add_attachment(pdf_data, maintype="application", subtype="pdf", filename=pdf_path.name)
+    msg.add_attachment(
+        pdf_data, maintype="application", subtype="pdf", filename=pdf_path.name
+    )
     for data, subtype, filename in image_blobs:
         msg.add_attachment(data, maintype="image", subtype=subtype, filename=filename)
 
@@ -1409,30 +1537,62 @@ def _warmup_body_retail_merch(shop: str) -> str:
     )
 
 
+# Winery pitches the 81% BAR line, so it cannot reuse the shared close: that
+# close promises "two photos of the packaging", and no bar packaging photography
+# exists yet (retail_price_list/ only holds the 200 g cacao bag shots). This
+# close promises exactly the one attachment the winery email actually carries.
+_WARMUP_WINERY_CLOSE = (
+    "We're **flexible on structure** \u2014 **either** **consignment-friendly** retail **or** "
+    "**wholesale / bulk** works on our side; I've attached our **81% bar wholesale price list PDF** "
+    "so you can see the estates, the pricing tiers and the opening quantities.\n\n"
+    "For partner-shop shelf photos and the current U.S. stockist list, see "
+    "https://agroverse.shop/wholesale \u2014 that's the visual companion to the PDF.\n\n"
+    "No need to meet in person on my side; happy to answer by email or on a quick call if that's "
+    "easier. If you tell me which path you'd rather explore first (consignment vs bulk), I can "
+    "point you to the lightest next step.\n\n"
+    "Thanks,\n"
+    "Gary\n"
+    "Agroverse | single-estate Brazilian chocolate\n"
+    "garyjob@agroverse.shop\n"
+)
+
+
 def _warmup_body_winery(shop: str) -> str:
-    # A tasting room sells on provenance, so lead with single-estate terroir instead of
-    # the generic "shelf variety" retail framing. Deliberately avoids ceremonial /
-    # ritual language: the winery frame is agriculture and place, not wellness. Reuses
-    # the shared close but swaps its cacao tagline so the sign-off matches the pitch.
-    close = _WARMUP_SHARED_CLOSE.replace(
-        "Agroverse | ceremonial cacao for retail",
-        "Agroverse | single-estate Brazilian cacao",
-    )
+    # A tasting room sells on provenance, so lead with single-estate terroir and
+    # pitch the 81% BAR line (50 g, $10 RRP / $6 wholesale) rather than the 200 g
+    # ceremonial cacao bag. Deliberately avoids ceremonial / ritual / wellness
+    # language, and avoids "shelf variety" retail framing.
+    #
+    # Only Oscar's and Vivi's carry documented tasting/provenance notes in
+    # templates/farm_taste_profiles.md. Santa Ana is described only vaguely and
+    # Fazenda São Jorge has no entry at all, so neither is characterised here — do
+    # not invent terroir copy for them; fix the template first.
+    #
+    # Also deliberately does NOT repeat the shared close's "each bag carries a QR
+    # code" / tree-per-bag claim: that is true of the 200 g cacao bag, and a
+    # per-bar traceability claim has not been confirmed. Restore it here once the
+    # bar's traceability is verified.
     return (
         f"Hi —\n\n"
-        f"I'm Gary with Agroverse. We work directly with regenerative cacao estates in the "
-        f"Brazilian Amazon — Oscar's Farm in Bahia, grown in cabruca agroforestry and "
-        f"landing with a deep, buttery, low-acidity profile, and Paulo's Farm in the heart "
-        f"of the Pará Amazon, which runs smoky and earthy into delicate floral notes. Two "
-        f"estates, two soils, two distinctly different profiles — precisely the kind of "
-        f"difference a tasting room is set up to explain to a guest.\n\n"
-        f"Every bag carries a QR code tracing it back to the specific farm and the trees "
-        f"planted alongside it: https://www.instagram.com/p/DJqW8TRtJK3/ is a 30-second "
-        f"look at the restoration in progress.\n\n"
-        f"I'm writing to {shop} because terroir-led retail is what you already do well, "
-        f"and a single-estate cacao flight extends that same terroir story — it reads as "
-        f"agriculture with a place name, not as shelf filler.\n\n"
-        f"{close}"
+        f"I'm Gary with Agroverse. We make single-estate dark chocolate from regenerative "
+        f"cacao estates in the Brazilian Amazon — and I think it belongs beside your wine "
+        f"rather than on a discount tag.\n\n"
+        f"Our 81% bars are 50 g, organic, and each one is a single named estate. Oscar's Farm "
+        f"in Bahia, grown in cabruca agroforestry, gives a deep, dark European chocolate "
+        f"profile with an exceptionally buttery, velvety mouthfeel and a smooth, low-acidity "
+        f"finish. Vivi's Jesus Do Deus Farm in Itacaré is a former cattle ranch turned "
+        f"regenerative cacao forest — top-grade organic fruit off land that was pasture a "
+        f"decade ago.\n\n"
+        f"That is the story a tasting room already tells: soil, place and craft. A "
+        f"single-estate 81% flight reads as agriculture with a place name, not as shelf "
+        f"filler — and at 81% it stands up to a structured red instead of fighting it.\n\n"
+        f"Commercially it is simple: **$10 retail, $6 wholesale**. Our opening offer is a "
+        f"**12-bar flight** — three bars from each of our four estates — at **$72**, which "
+        f"ships as a single flat-rate box.\n\n"
+        f"I'm writing to {shop} because terroir-led retail is what you already do well, and "
+        f"a cacao flight extends that same conversation without teaching your staff a new "
+        f"category.\n\n"
+        f"{_WARMUP_WINERY_CLOSE}"
     )
 
 
@@ -1451,9 +1611,13 @@ def warmup_body_template(shop_name: str, segment: str = SEGMENT_RETAIL_MERCH) ->
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Warm up prospect: Gmail drafts + wholesale PDF + optional Grok.")
+    p = argparse.ArgumentParser(
+        description="Warm up prospect: Gmail drafts + wholesale PDF + optional Grok."
+    )
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--max-drafts", type=int, default=0, help="Cap new drafts; 0 = unlimited.")
+    p.add_argument(
+        "--max-drafts", type=int, default=0, help="Cap new drafts; 0 = unlimited."
+    )
     p.add_argument("--min-days-since-sent", type=float, default=DEFAULT_MIN_DAYS)
     p.add_argument("--skip-label", action="store_true")
     p.add_argument("--expected-mailbox", default=smf.EXPECTED_MAILBOX)
@@ -1478,7 +1642,11 @@ def main() -> None:
         default=_DEFAULT_PACKAGING_BACK,
         help="On-shelf packaging photo (back of bag) to attach. Pass empty string to skip.",
     )
-    p.add_argument("--reply-promotion-only", action="store_true", help="Only promote Warm up → Prospect replied.")
+    p.add_argument(
+        "--reply-promotion-only",
+        action="store_true",
+        help="Only promote Warm up → Prospect replied.",
+    )
     p.add_argument("--skip-reply-promotion", action="store_true")
     p.add_argument(
         "--create-reply-drafts",
@@ -1558,7 +1726,9 @@ def main() -> None:
             auto_reply_park_threshold=args.auto_reply_park_threshold,
         )
         if promoted:
-            print(f"Promoted {promoted} row(s) {HIT_STATUS_WARMUP!r} → {HIT_STATUS_REPLIED!r}.")
+            print(
+                f"Promoted {promoted} row(s) {HIT_STATUS_WARMUP!r} → {HIT_STATUS_REPLIED!r}."
+            )
         if args.reply_promotion_only:
             print(f"WARMUP_REPLY_PROMOTION count={promoted} dry_run={args.dry_run}")
             return
@@ -1578,7 +1748,9 @@ def main() -> None:
             max_drafts=args.reply_drafts_max,
         )
         if reply_drafts_created:
-            print(f"Created {reply_drafts_created} reply draft(s) for replied prospects.")
+            print(
+                f"Created {reply_drafts_created} reply draft(s) for replied prospects."
+            )
         print(
             f"WARMUP_REPLY_DRAFT_RESULT count={reply_drafts_created} "
             f"mode={'dry_run' if args.dry_run else 'live'} promoted={promoted}"
@@ -1587,8 +1759,10 @@ def main() -> None:
 
     log_tab_present = log_ws is not None
     last_sent = smf.last_sent_utctime_per_to_email(log_ws)
-    pending_to, n_reconciled, freshly_discarded = smf.pending_review_emails_after_gmail_reconcile(
-        gsvc, sugg_ws, dry_run=args.dry_run, verbose=args.verbose
+    pending_to, n_reconciled, freshly_discarded = (
+        smf.pending_review_emails_after_gmail_reconcile(
+            gsvc, sugg_ws, dry_run=args.dry_run, verbose=args.verbose
+        )
     )
     if n_reconciled:
         print(
@@ -1631,7 +1805,9 @@ def main() -> None:
                 ):
                     skipped_cadence += 1
                     if args.verbose:
-                        print(f"  skip {em}: last send {d:.1f}d ago (need {args.min_days_since_sent})")
+                        print(
+                            f"  skip {em}: last send {d:.1f}d ago (need {args.min_days_since_sent})"
+                        )
                     continue
                 if args.verbose:
                     print(
@@ -1681,7 +1857,9 @@ def main() -> None:
     for to_addr in candidates:
         if args.max_drafts > 0 and n_made >= args.max_drafts:
             break
-        sk, shop, rows_str, hit_notes, city_st = smf.pick_primary_store(targets, to_addr)
+        sk, shop, rows_str, hit_notes, city_st = smf.pick_primary_store(
+            targets, to_addr
+        )
         shop_type, hosts_circles = pick_warmup_segment_fields(targets, to_addr)
         segment = classify_warmup_segment(shop_type, hosts_circles)
         if remarks_ws is not None:
@@ -1705,7 +1883,9 @@ def main() -> None:
                 max_messages=min(30, smf.DEFAULT_GROK_MAX_MESSAGES),
                 max_total_chars=min(80_000, smf.DEFAULT_GROK_MAX_CONTEXT_CHARS),
             )
-            sheet_ctx = smf.followup_sheet_logged_bodies_for_prompt(log_ws, to_addr, max_blocks=1)
+            sheet_ctx = smf.followup_sheet_logged_bodies_for_prompt(
+                log_ws, to_addr, max_blocks=1
+            )
             if sheet_ctx:
                 hist = (
                     "Outbound copies (Email Agent Follow Up):\n\n"
@@ -1739,7 +1919,10 @@ def main() -> None:
             body = warmup_body_template(shop, segment)
 
         sug_id = str(uuid.uuid4())
-        tracking_base = (os.environ.get("EMAIL_AGENT_TRACKING_BASE_URL") or "https://edgar.truesight.me").strip()
+        tracking_base = (
+            os.environ.get("EMAIL_AGENT_TRACKING_BASE_URL")
+            or "https://edgar.truesight.me"
+        ).strip()
         html_body = None
         if args.track_opens or args.track_clicks:
             if not tracking_base:
@@ -1756,14 +1939,35 @@ def main() -> None:
                 track_clicks=args.track_clicks,
             )
 
-        image_paths = [
-            ip for ip in (args.packaging_front, args.packaging_back)
-            if ip and str(ip).strip()
-        ]
+        # Segment-aware price list: wineries get the 81% bar sheet, not cacao.
+        # If the caller passed an explicit --pdf-path that is never overridden.
+        pdf_for_recipient = (
+            args.pdf_path
+            if args.pdf_path != _DEFAULT_PDF
+            else wholesale_pdf_for_segment(segment)
+        )
+
+        # Packaging photos only exist for the 200g cacao bag. The winery body
+        # deliberately does not promise them, so don't attach bag photos to a
+        # bar pitch.
+        image_paths = (
+            []
+            if segment == "winery"
+            else [
+                ip
+                for ip in (args.packaging_front, args.packaging_back)
+                if ip and str(ip).strip()
+            ]
+        )
         try:
             raw = build_message_raw_with_attachments(
-                me, to_addr, subj, body, args.pdf_path,
-                html_body=html_body, image_paths=image_paths,
+                me,
+                to_addr,
+                subj,
+                body,
+                pdf_for_recipient,
+                html_body=html_body,
+                image_paths=image_paths,
             )
         except FileNotFoundError as e:
             sys.stderr.write(f"{e}\n")
@@ -1778,7 +1982,9 @@ def main() -> None:
             n_made += 1
             continue
 
-        draft = gsvc.users().drafts().create(userId="me", body={"message": raw}).execute()
+        draft = (
+            gsvc.users().drafts().create(userId="me", body={"message": raw}).execute()
+        )
         draft_id = draft.get("id", "") or ""
         msg = draft.get("message") or {}
         msg_id = msg.get("id", "") or ""
@@ -1797,7 +2003,7 @@ def main() -> None:
 
         preview = body.replace("\n", " ")[:BODY_PREVIEW_MAX]
         attachment_names = ",".join(
-            [args.pdf_path.name] + [p.name for p in image_paths]
+            [pdf_for_recipient.name] + [p.name for p in image_paths]
         )
         notes = (
             f"kind=warmup_intro; attachments={attachment_names}; source={source}; segment={segment}; "
@@ -1843,7 +2049,9 @@ def main() -> None:
             max_drafts=args.reply_drafts_max,
         )
         if reply_drafts_created:
-            print(f"Created {reply_drafts_created} reply draft(s) for replied prospects.")
+            print(
+                f"Created {reply_drafts_created} reply draft(s) for replied prospects."
+            )
 
     if args.dry_run:
         print(
