@@ -167,3 +167,18 @@ def test_winery_copy_respects_current_stock_policy() -> None:
     # and no implication of a multi-estate flight
     assert "four estates" not in low
     assert "each of our" not in low
+
+
+def test_winery_body_offers_trial_then_reorder() -> None:
+    """ "Try it, reorder deeper" positioning, with no unverifiable shipping claim."""
+    body = _load().warmup_body_template(
+        "Rutherford Hill Winery", _load().SEGMENT_WINERY
+    )
+    low = body.lower()
+    assert "reorder deeper" in low
+    assert "12 bars" in low
+    assert "$72" in low
+    # We cannot assert a USPS flat-rate tariff we have not verified.
+    assert "flat-rate" not in low
+    # And no mixed case while one estate is stocked.
+    assert "mixed case" not in low
