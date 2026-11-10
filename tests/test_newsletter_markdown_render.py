@@ -255,3 +255,54 @@ def test_plain_part_list_handling_diverges_from_html_by_design():
         "beta",
         "gamma",
     ]
+
+
+class TestHeaderAndInlineImages:
+    """Email images: full-bleed header + inline product rows (convention §3/§8).
+
+    Neither MAP nor EMAIL_STYLE_CONVENTION.md specifies sizing for email
+    derivatives, so these lock in the choices made here: 600 CSS px header,
+    alt text always required, and remote URLs only (never embedded bytes).
+    """
+
+    def test_header_renders_full_bleed_under_saffron_rule(self):
+        from send_newsletter import build_email_html, build_header_html
+
+        h = build_email_html(
+            "<p>x</p>",
+            header_html=build_header_html("https://e/x.jpg", "Cargo on the boat"),
+        )
+        assert h.count("<img") == 1
+        # 600 CSS px, fluid, no border artefacts
+        assert 'width="600"' in h
+        assert "max-width:600px" in h
+        assert "display:block" in h
+        # saffron rule must precede the image, i.e. header sits below it
+        assert h.index("C98A2D") < h.index("<img")
+
+    def test_header_absent_leaves_shell_unchanged(self):
+        """Existing sends must stay byte-identical: no header => no <img>."""
+        from send_newsletter import build_email_html
+
+        assert build_email_html("<p>x</p>").count("<img") == 0
+
+    def test_header_alt_is_escaped_not_injected(self):
+        from send_newsletter import build_header_html
+
+        h = build_header_html("https://e/x.jpg", '"><script>alert(1)</script>')
+        assert "<script>" not in h
+        assert "&lt;script&gt;" in h or "&quot;" in h
+
+    def test_inline_images_repeat_flag_builds_rows(self):
+        from send_newsletter import build_inline_images_html
+
+        h = build_inline_images_html(["https://e/a.jpg", "https://e/b.jpg"])
+        assert h.count("<img") == 2
+        # product images are capped narrower than the header
+        assert 'width="280"' in h
+
+    def test_inline_images_none_is_empty(self):
+        from send_newsletter import build_inline_images_html
+
+        assert build_inline_images_html(None) == ""
+        assert build_inline_images_html([]) == ""

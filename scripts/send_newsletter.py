@@ -85,6 +85,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from html import escape as html_escape
 from pathlib import Path
 
 import gspread
@@ -562,7 +563,52 @@ PREHEADER_MAX = 90
 # Saffron is a THIN RULE, not a filled band: a full-width saffron block reads as
 # a promotional banner and floods an inbox that is already busy. That is the
 # deliberate divergence from PDF_STYLE_CONVENTION.md section 2.
-_EMAIL_WRAPPER = """<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body bgcolor="#FFFFFF" style="margin:0;padding:0;background-color:#FFFFFF;">{preheader}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#FFFFFF" style="background-color:#FFFFFF;"><tr><td align="center" style="padding:0;"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;"><tr><td style="border-top:3px solid #C98A2D;font-size:0;line-height:0;">&nbsp;</td></tr><tr><td style="padding:24px 0;font-family:{font};font-size:16px;color:#222222;line-height:1.6;">{content}{footer}</td></tr></table></td></tr></table></body></html>"""
+_EMAIL_WRAPPER = """<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body bgcolor="#FFFFFF" style="margin:0;padding:0;background-color:#FFFFFF;">{preheader}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#FFFFFF" style="background-color:#FFFFFF;"><tr><td align="center" style="padding:0;"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;"><tr><td style="border-top:3px solid #C98A2D;font-size:0;line-height:0;">&nbsp;</td></tr>{header}<tr><td style="padding:24px 0;font-family:{font};font-size:16px;color:#222222;line-height:1.6;">{content}{footer}</td></tr></table></td></tr></table></body></html>"""
+
+
+def build_header_html(url: str | None, alt: str = "") -> str:
+    """Full-bleed 600px header image for the shell's header slot.
+
+    width/height come from width=600 at 2:3-safe height:auto so mobile clients
+    scale rather than letterbox. border:0 kills legacy blue link borders.
+    """
+    if not url:
+        return ""
+    u = url.strip()
+    if not u.startswith(("https://", "http://")):
+        raise ValueError(f"--header-image must be an absolute URL, got {u!r}")
+    a = html_escape(alt.strip() or "")
+    return (
+        f'<img src="{html_escape(u)}" alt="{a}" width="600" '
+        'style="display:block;width:100%;max-width:600px;height:auto;'
+        'border:0;outline:none;text-decoration:none;" />'
+    )
+
+
+def build_inline_images_html(items: list[str]) -> str:
+    """Render repeated --inline-image URL::ALT pairs as a stacked image block."""
+    if not items:
+        return ""
+    rows = []
+    for item in items:
+        url, _, alt = item.partition("::")
+        u = url.strip()
+        if not u.startswith(("https://", "http://")):
+            raise ValueError(f"--inline-image must be an absolute URL, got {u!r}")
+        a = html_escape(alt.strip())
+        caption = (
+            f'<div style="font-size:13px;color:#888888;margin-top:6px;">{a}</div>'
+            if a
+            else ""
+        )
+        rows.append(
+            '<div style="margin:18px 0;">'
+            f'<img src="{html_escape(u)}" alt="{a}" width="280" '
+            'style="display:block;width:100%;max-width:280px;height:auto;'
+            'border:0;outline:none;text-decoration:none;" />'
+            f"{caption}</div>"
+        )
+    return "".join(rows)
 
 
 def build_email_html(
@@ -570,6 +616,7 @@ def build_email_html(
     *,
     preheader: str | None = None,
     footer_html: str = "",
+    header_html: str = "",
 ) -> str:
     """Wrap rendered body HTML in the house-style shell (sections 3 and 8)."""
     pre = ""
@@ -597,8 +644,18 @@ def build_email_html(
             f"{footer_html}</div>"
         )
 
+    header = ""
+    if header_html:
+        # Full-bleed: the header sits in its own row with zero padding so it
+        # spans the full 600px, sitting directly under the saffron rule.
+        header = f'<tr><td style="padding:0;font-size:0;line-height:0;">{header_html}</td></tr>'
+
     return _EMAIL_WRAPPER.format(
-        preheader=pre, font=FONT_STACK, content=content_html, footer=footer
+        preheader=pre,
+        header=header,
+        font=FONT_STACK,
+        content=content_html,
+        footer=footer,
     )
 
 
@@ -633,6 +690,22 @@ def main() -> None:
     p.add_argument(
         "--preheader",
         help="Hidden preview line (max 90 chars, convention section 3)",
+    )
+    p.add_argument(
+        "--header-image",
+        help="Public https URL for a full-bleed 600px header image",
+    )
+    p.add_argument(
+        "--header-alt",
+        default="",
+        help="Alt text for the header image (decorative if omitted)",
+    )
+    p.add_argument(
+        "--inline-image",
+        action="append",
+        default=[],
+        metavar="URL::ALT",
+        help="In-body 280px product image as URL::ALT (repeatable)",
     )
     p.add_argument("--body-md", required=True, type=Path)
     p.add_argument("--campaign", required=True)
@@ -720,6 +793,9 @@ def main() -> None:
     # tracking URL can embed that recipient's message_uuid; skip the shared
     # base_html path in that case.
     base_html = None if args.track_clicks else markdown_to_html(body_md)
+    # Built once: identical for every recipient, and it must not be
+    # rebuilt (or re-validated) inside the send loop.
+    inline_html = build_inline_images_html(args.inline_image)
 
     gcreds = load_gmail_user_credentials(_GMAIL_TOKEN, GMAIL_SCOPES)
     gsvc = build("gmail", "v1", credentials=gcreds, cache_discovery=False)
@@ -855,8 +931,15 @@ def main() -> None:
             if args.track_opens
             else ""
         )
+        if inline_html:
+            # Product images render between the copy and the footer rule so they
+            # read as supporting evidence, not as a footer afterthought.
+            html_body = html_body + inline_html
         html_body = build_email_html(
-            html_body, preheader=args.preheader, footer_html=footer_html
+            html_body,
+            preheader=args.preheader,
+            footer_html=footer_html,
+            header_html=build_header_html(args.header_image, args.header_alt),
         )
         raw = build_mime_message(me, recipient, subject, rcpt_plain, html_body)
 
