@@ -88,10 +88,15 @@ from email.message import EmailMessage
 from pathlib import Path
 
 import gspread
+from gmail_user_credentials import load_gmail_user_credentials
 from google.oauth2.service_account import Credentials as SACredentials
 from googleapiclient.discovery import build
-
-from gmail_user_credentials import load_gmail_user_credentials
+from newsletter_personalize import (
+    FIRST_NAME_PLACEHOLDER,
+    GREETING_PLACEHOLDER,
+    first_name_from_value,
+    personalize_text,
+)
 
 _REPO = Path(__file__).resolve().parent.parent
 _SA_CREDS = _REPO / "google_credentials.json"
@@ -103,6 +108,9 @@ MAIN_LEDGER_ID = "1GE7PUq-UT6x2rBN-Q2ksogbWpgyuh2SaxJyG_uEK6PU"
 # Gdrive::NewsletterEmails::SPREADSHEET_ID).
 NEWSLETTER_LOG_SPREADSHEET_ID = "1ed3q3SJ8ztGwfWit6Wxz_S72Cn5jKQFkNrHpeOVXP8s"
 SUBSCRIBERS_WS = "Agroverse News Letter Subscribers"
+# Accepted name columns on the subscribers tab (priority order). Absent ->
+# neutral greeting; a name is never inferred from an email address.
+NAME_COLUMN_CANDIDATES = ("Name", "First Name", "Full Name", "Preferred Name")
 EMAILS_WS = "Agroverse News Letter Emails"
 
 # Top-level audience label applied to every newsletter send alongside the
@@ -244,6 +252,49 @@ def load_recipients_from_sheet(sh: gspread.Spreadsheet) -> list[str]:
                 continue
         seen.add(em)
         out.append(em)
+    return out
+
+
+def load_subscriber_names(sh: gspread.Spreadsheet) -> dict[str, str]:
+    """Map normalized email -> greeting-safe first name.
+
+    Returns {} when the tab has no name column, so a missing name degrades to
+    a neutral greeting. Column A is currently `#REF!`-broken on this tab, so
+    everything is looked up by header name, never by position.
+    """
+    try:
+        ws = sh.worksheet(SUBSCRIBERS_WS)
+        vals = ws.get_all_values()
+    except Exception:
+        return {}
+    if len(vals) < 2:
+        return {}
+    hdr = {h.strip(): i for i, h in enumerate(vals[0]) if h.strip()}
+    name_i = None
+    name_col = ""
+    for cand in NAME_COLUMN_CANDIDATES:
+        if cand in hdr:
+            name_i, name_col = hdr[cand], cand
+            break
+    if name_i is None:
+        print(
+            f"Personalization: no name column on {SUBSCRIBERS_WS!r} "
+            f"(tried {list(NAME_COLUMN_CANDIDATES)}); using neutral greeting."
+        )
+        return {}
+    email_i = hdr.get("Email")
+    if email_i is None:
+        return {}
+    out: dict[str, str] = {}
+    for row in vals[1:]:
+        if max(email_i, name_i) >= len(row):
+            continue
+        em = normalize_email(row[email_i])
+        fn = first_name_from_value(row[name_i])
+        if em and fn:
+            out[em] = fn
+    named = len(out)
+    print(f"Personalization: {named} name(s) from {SUBSCRIBERS_WS!r} col {name_col!r}.")
     return out
 
 
@@ -641,22 +692,45 @@ def main() -> None:
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     n_done = 0
 
+    # Personalization source. Only read when sending from the subscriber sheet.
+    subscriber_names = (
+        load_subscriber_names(ledger_sh) if args.recipients_from_sheet else {}
+    )
+    needs_personalize = (
+        GREETING_PLACEHOLDER in body_md or FIRST_NAME_PLACEHOLDER in body_md
+    )
+    if needs_personalize:
+        named = sum(1 for r in recipients if subscriber_names.get(r))
+        print(
+            f"Personalization: {named}/{len(recipients)} recipient(s) have a "
+            f"name; the rest get a neutral greeting."
+        )
+    personalized_hits = 0
+
     for recipient in recipients:
         mid_uuid = str(uuid.uuid4())
+        # Substitution must happen INSIDE the loop: plain_body/base_html are
+        # rendered once above, so reusing them would send one shared greeting
+        # to every recipient.
+        rcpt_first_name = subscriber_names.get(recipient, "")
+        rcpt_md = personalize_text(body_md, rcpt_first_name)
+        rcpt_plain = personalize_text(plain_body, rcpt_first_name)
+        if rcpt_first_name:
+            personalized_hits += 1
         if args.track_clicks:
             html_body = markdown_to_html(
-                body_md,
+                rcpt_md,
                 link_transform=lambda u: build_tracked_link(
                     u, mid_uuid, recipient, args.edgar_base_url
                 ),
             )
         else:
-            html_body = base_html
+            html_body = markdown_to_html(rcpt_md) if needs_personalize else base_html
         if args.track_opens:
             html_body = html_body + build_tracking_pixel_html(
                 mid_uuid, recipient, args.edgar_base_url
             )
-        raw = build_mime_message(me, recipient, subject, plain_body, html_body)
+        raw = build_mime_message(me, recipient, subject, rcpt_plain, html_body)
 
         if args.mode == "draft":
             resp = gsvc.users().drafts().create(userId="me", body={"message": raw}).execute()
