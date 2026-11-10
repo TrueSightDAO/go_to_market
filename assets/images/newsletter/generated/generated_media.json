@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-11-10T07:45:00Z",
+  "note": "Lane A derivatives only. NO inference was used for this batch - every asset is an ffmpeg camera transform of a real, sha256'd photograph. Manifest of record for derived/distribution media per agentic_ai_context/sops/GENERATED_MEDIA_SOP.md section 8. This is NOT an archive manifest: per MEDIA_ARCHIVE_PIPELINE.md, distribution != archive, and nothing here may be written back into raw/<farm>/ or uploaded to the YouTube farm channel.",
+  "policy": {
+    "sop": "agentic_ai_context/sops/GENERATED_MEDIA_SOP.md",
+    "parent_runbook": "agentic_ai_context/MEDIA_ARCHIVE_PIPELINE.md",
+    "lane_a_rule": "derived_from.length >= 1",
+    "lane_b_rule": "derived_from == [] AND disclosure_required == true",
+    "motion_extended_rule": "motion == 'extended' => motion_seconds <= 4 AND not citable as a recorded event",
+    "consent_rule": "people_present == true AND lane == 'A' => consent_ref is not null before generation"
+  },
+  "assets": [
+    {
+      "asset_id": "gen-2026-11-10-001",
+      "lane": "A",
+      "derived_from": ["9f2700aaf0886c988644efc41668d0a7a472554af00f24814b690649b1c02c22"],
+      "source_type": "product_photo",
+      "source_path": "assets/images/newsletter/bar-81-dark-chocolate.jpg",
+      "source_dimensions": "800x451",
+      "model": "ffmpeg-zoompan",
+      "inference_used": false,
+      "edit": "ken_burns_push_in",
+      "outputs": [
+        {
+          "file": "generated/bar-81-motion-20261119-landscape.mp4",
+          "sha256": "5457bc94f35f7760948a76422ba5177b90cce613065a225eeb6e4280ccd442fa",
+          "resolution": "1600x902",
+          "aspect": "1.77:1",
+          "bytes": 1048997
+        },
+        {
+          "file": "generated/bar-81-motion-20261119-9x16.mp4",
+          "sha256": "b7f9cff03955e458c41527906f0b02fe2fd3c90ceea1866cd1cbdd03e880ab07",
+          "resolution": "1080x1920",
+          "aspect": "9:16",
+          "bytes": 844971,
+          "note": "Real photo inset over a blurred self-backdrop, not a crop. A true 9:16 crop of a 451px-tall source would need a 4.3x upscale."
+        }
+      ],
+      "params": {
+        "duration_s": 6,
+        "fps": 30,
+        "frames": 180,
+        "zoom_range": "1.00-1.18",
+        "supersample": "3200x1804 -> 1600x902"
+      },
+      "motion": "none",
+      "motion_seconds": 0,
+      "motion_note": "Camera transform only. No frame content synthesized, so 7.3 (reversal caveat) is not engaged and no 'recorded at' claim is at stake.",
+      "people_present": false,
+      "people_status": "none",
+      "people_status_by": "sophia",
+      "people_status_at": "2026-11-10T07:40:00Z",
+      "consent_ref": null,
+      "disclosure_required": false,
+      "asset_class": "photo",
+      "destination": ["instagram_carousel"],
+      "placement": {
+        "calendar_sheet_id": "1ghZXeMqFq97Vl6yLKrtDmMQdQkd-4EN5yQs34NA_sBQ",
+        "calendar_tab": "Instagram Content Schedule",
+        "primary_key": "4ed72c3d",
+        "post_day": "20261119",
+        "day_of_week": "Thursday",
+        "post_type": "Carousel",
+        "theme": "Recipes & Rituals",
+        "week": "Week 63",
+        "campaign_focus": "Sustainable Cacao & Community",
+        "role": "opening slide (motion)",
+        "status": "draft_not_published"
+      },
+      "label_drift_qc": {
+        "method": "tesseract --psm 11 on source vs extracted frames f0/f179",
+        "result": "PASS",
+        "source_ocr": "unreadable at 800x451 native resolution",
+        "generated_f179_ocr": "81% Brazil Single Estate Chocolate | Saving our Amazon Rainforest, One Cacao at a time. | Manufactured by ... | Product of Brazil",
+        "drift_detected": false,
+        "pre_existing_warn": "Label reads '81% Brazil Single Estate' and never names the farm. WARN carried forward unchanged; fix is a caption naming the estate, not an edit to the bar."
+      },
+      "gate_result": "PASS_WITH_WARN",
+      "cost_usd": 0.0,
+      "created_at": "2026-11-10T07:40:00Z"
+    }
+  ]
+}
