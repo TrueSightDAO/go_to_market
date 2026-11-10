@@ -310,6 +310,21 @@ _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 # (the link regex doesn't lookbehind for the leading `!`).
 _MD_IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
+# Inline palette lifted from conventions/EMAIL_STYLE_CONVENTION.md §1, which
+# inherits it from PDF_STYLE_CONVENTION.md. Never re-invent these hexes here —
+# one palette across PDF and email is the whole point of the convention.
+_MD_CODE_RE = re.compile(r"`([^`]+)`")
+_HTML_BODY_COLOR = "#222222"
+_HTML_CACAO = "#3D2B1F"
+_HTML_RULE = "#DDDDDD"
+_CODE_STYLE = (
+    "font-family:Consolas,Menlo,Monaco,monospace;font-size:90%;"
+    f"background:{_HTML_RULE};color:{_HTML_CACAO};"
+    "padding:1px 4px;border-radius:3px"
+)
+_UL_STYLE = f"margin:0 0 16px 0;padding-left:20px;color:{_HTML_BODY_COLOR}"
+_LI_STYLE = "margin:6px 0"
+
 
 def _img_html_substitution(match: re.Match) -> str:
     # 280px default + 4px margin. Two iterations behind us: 480px (cluttered),
@@ -362,35 +377,66 @@ def markdown_to_html(md: str, link_transform=None) -> str:
     # Simple, explicit HTML rendering — avoids pulling in a markdown dep.
     # `link_transform(url) -> url` rewrites the href of each markdown link;
     # None leaves links untouched.
+    #
+    # Supported syntax is deliberately small: images, links, `code spans`,
+    # **bold**, *italic*, and `- ` bullet lists. Anything else (headings,
+    # blockquotes, rules) is emitted as literal text rather than silently
+    # dropped — see tests/test_newsletter_markdown_render.py.
     lines = md.splitlines()
     html_lines: list[str] = []
     in_para: list[str] = []
+    list_items: list[str] = []
 
     def rewrite(url: str) -> str:
         return link_transform(url) if link_transform else url
 
-    def flush_para():
+    def flush_para() -> None:
         if in_para:
             text = " ".join(in_para).strip()
             if text:
                 html_lines.append(f"<p>{text}</p>")
             in_para.clear()
 
+    def flush_list() -> None:
+        if list_items:
+            items = "".join(f'<li style="{_LI_STYLE}">{it}</li>' for it in list_items)
+            html_lines.append(f'<ul style="{_UL_STYLE}">{items}</ul>')
+            list_items.clear()
+
+    def inline(text: str) -> str:
+        # Code spans first: without this, a backtick in copy leaks through as a
+        # literal character forever (the old renderer had no code handling at
+        # all). Known limit: a code span whose *contents* contain ** or a single
+        # * is still subject to the emphasis rules below.
+        out = _MD_CODE_RE.sub(
+            lambda m: f'<code style="{_CODE_STYLE}">{m.group(1)}</code>', text
+        )
+        # Images before links — `![alt](src)` → <img>. Without this ordering the
+        # link regex treats it as `[alt](src)` and emits an <a> instead.
+        out = _MD_IMG_RE.sub(_img_html_substitution, out)
+        out = _MD_LINK_RE.sub(
+            lambda m: f'<a href="{rewrite(m.group(2))}">{m.group(1)}</a>', out
+        )
+        out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out)
+        out = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", out)
+        return out
+
     for raw in lines:
         line = raw.rstrip()
         if not line.strip():
             flush_para()
+            flush_list()
             continue
-        # Images first — `![alt](src)` → <img>. Without this step the link
-        # regex below treats it as `[alt](src)` and emits an <a> instead.
-        converted = _MD_IMG_RE.sub(_img_html_substitution, line)
-        converted = _MD_LINK_RE.sub(
-            lambda m: f'<a href="{rewrite(m.group(2))}">{m.group(1)}</a>', converted
-        )
-        converted = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", converted)
-        converted = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", converted)
-        in_para.append(converted)
+        stripped = line.lstrip()
+        if stripped.startswith("- "):
+            # A bullet line interrupts a paragraph and joins the open list.
+            flush_para()
+            list_items.append(inline(stripped[2:]))
+            continue
+        flush_list()
+        in_para.append(inline(line))
     flush_para()
+    flush_list()
     return "\n".join(html_lines) + "\n"
 
 
