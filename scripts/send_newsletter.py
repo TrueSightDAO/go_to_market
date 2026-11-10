@@ -171,7 +171,9 @@ def normalize_email(raw: str) -> str | None:
 
 
 def get_sheets_client():
-    creds = SACredentials.from_service_account_file(str(_SA_CREDS), scopes=SHEETS_SCOPES)
+    creds = SACredentials.from_service_account_file(
+        str(_SA_CREDS), scopes=SHEETS_SCOPES
+    )
     return gspread.authorize(creds)
 
 
@@ -185,14 +187,21 @@ def ensure_emails_worksheet(sh: gspread.Spreadsheet) -> gspread.Worksheet:
     if not vals:
         ws.append_row(EMAIL_LOG_HEADERS, value_input_option="USER_ENTERED")
         ws.format(f"A1:{last_col_letter}1", {"textFormat": {"bold": True}})
-        ws.spreadsheet.batch_update({
-            "requests": [{
-                "updateSheetProperties": {
-                    "properties": {"sheetId": ws.id, "gridProperties": {"frozenRowCount": 1}},
-                    "fields": "gridProperties.frozenRowCount",
-                }
-            }]
-        })
+        ws.spreadsheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "updateSheetProperties": {
+                            "properties": {
+                                "sheetId": ws.id,
+                                "gridProperties": {"frozenRowCount": 1},
+                            },
+                            "fields": "gridProperties.frozenRowCount",
+                        }
+                    }
+                ]
+            }
+        )
     else:
         existing = [h.strip() for h in vals[0]]
         # If the header row is a prefix of the expected headers (older version
@@ -204,10 +213,8 @@ def ensure_emails_worksheet(sh: gspread.Spreadsheet) -> gspread.Worksheet:
         ):
             start = _col_letter(len(existing) + 1)
             end = last_col_letter
-            missing = EMAIL_LOG_HEADERS[len(existing):]
-            ws.update(
-                f"{start}1:{end}1", [missing], value_input_option="USER_ENTERED"
-            )
+            missing = EMAIL_LOG_HEADERS[len(existing) :]
+            ws.update(f"{start}1:{end}1", [missing], value_input_option="USER_ENTERED")
             ws.format(f"{start}1:{end}1", {"textFormat": {"bold": True}})
         elif existing != EMAIL_LOG_HEADERS:
             # Don't auto-overwrite — surface mismatch so the operator notices.
@@ -384,7 +391,7 @@ def _img_html_substitution(match: re.Match) -> str:
     # surrounding paragraphs; the paragraph margins themselves provide all
     # the breathing room. max-width:100% scales down on narrow viewports;
     # margin:0 auto centers horizontally.
-    alt = match.group(1).replace('"', '&quot;')
+    alt = match.group(1).replace('"', "&quot;")
     src = match.group(2)
     return (
         f'<img src="{src}" alt="{alt}" width="280" '
@@ -406,6 +413,12 @@ def markdown_to_plain(md: str) -> str:
         lambda m: f"[image: {m.group(1)}]" if m.group(1) else "[image]", out
     )
     out = _MD_LINK_RE.sub(lambda m: f"{m.group(1)} ({m.group(2)})", out)
+    # Code spans: keep the text, drop the markers. This runs on RAW markdown
+    # (plain_body = markdown_to_plain(body_md)), so a missing rule here leaked
+    # literal backticks into the text/plain MIME part even after the HTML
+    # renderer was fixed.
+    out = re.sub(r"`([^`]+)`", r"\1", out)
+    out = re.sub(r"</?code[^>]*>", "", out, flags=re.IGNORECASE)
     out = re.sub(r"\*\*(.+?)\*\*", r"\1", out)
     out = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\1", out)
     out = re.sub(
@@ -505,7 +518,9 @@ def load_body_and_subject(body_md_path: Path) -> tuple[str | None, str]:
     return subject, body.strip() + "\n"
 
 
-def build_tracking_pixel_html(message_uuid: str, recipient: str, edgar_base: str) -> str:
+def build_tracking_pixel_html(
+    message_uuid: str, recipient: str, edgar_base: str
+) -> str:
     # recipient is b64-urlsafe encoded to avoid querystring quoting issues.
     r = base64.urlsafe_b64encode(recipient.encode("utf-8")).decode("ascii").rstrip("=")
     url = f"{edgar_base.rstrip('/')}/newsletter/open.gif?mid={message_uuid}&r={r}"
@@ -515,7 +530,7 @@ def build_tracking_pixel_html(message_uuid: str, recipient: str, edgar_base: str
         'font-size:12px;color:#666;margin-bottom:6px;">Agroverse</div>'
         f'<img src="{url}" alt="Agroverse logo" width="160" '
         'style="display:block;border:0;width:160px;height:auto;" />'
-        '</div>'
+        "</div>"
     )
 
 
@@ -532,9 +547,58 @@ def build_tracked_link(
         return original_url
     r = _b64url(recipient)
     to = _b64url(original_url)
-    return (
-        f"{edgar_base.rstrip('/')}/newsletter/click"
-        f"?mid={message_uuid}&r={r}&to={to}"
+    return f"{edgar_base.rstrip('/')}/newsletter/click?mid={message_uuid}&r={r}&to={to}"
+
+
+# --- Email house style: wrapper -------------------------------------------
+# Values come from conventions/EMAIL_STYLE_CONVENTION.md (agentic_ai_context):
+# section 1 palette, section 2 divergences, section 3 structure, section 8 checklist.
+# Inline styles only: Gmail/Outlook.com/Yahoo strip <head> CSS, so a stylesheet
+# would silently do nothing. Structure is a real <table> because table layout
+# survives Outlook while CSS layout does not.
+FONT_STACK = "'Helvetica Neue',Helvetica,Arial,sans-serif"
+PREHEADER_MAX = 90
+
+# Saffron is a THIN RULE, not a filled band: a full-width saffron block reads as
+# a promotional banner and floods an inbox that is already busy. That is the
+# deliberate divergence from PDF_STYLE_CONVENTION.md section 2.
+_EMAIL_WRAPPER = """<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body bgcolor="#FFFFFF" style="margin:0;padding:0;background-color:#FFFFFF;">{preheader}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#FFFFFF" style="background-color:#FFFFFF;"><tr><td align="center" style="padding:0;"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;"><tr><td style="border-top:3px solid #C98A2D;font-size:0;line-height:0;">&nbsp;</td></tr><tr><td style="padding:24px 0;font-family:{font};font-size:16px;color:#222222;line-height:1.6;">{content}{footer}</td></tr></table></td></tr></table></body></html>"""
+
+
+def build_email_html(
+    content_html: str,
+    *,
+    preheader: str | None = None,
+    footer_html: str = "",
+) -> str:
+    """Wrap rendered body HTML in the house-style shell (sections 3 and 8)."""
+    pre = ""
+    if preheader:
+        text = preheader.strip()
+        if len(text) > PREHEADER_MAX:
+            sys.stderr.write(
+                f"Warning: preheader is {len(text)} chars, truncating to "
+                f"{PREHEADER_MAX} (convention section 3).\n"
+            )
+            text = text[:PREHEADER_MAX].rstrip()
+        if text:
+            # display:none + max-height:0 hides it in the body while inbox
+            # clients still lift it into the preview pane.
+            pre = (
+                '<div style="display:none;max-height:0;overflow:hidden;opacity:0;">'
+                f"{text}</div>"
+            )
+
+    footer = ""
+    if footer_html:
+        footer = (
+            '<div style="border-top:1px solid #DDDDDD;margin-top:24px;'
+            'padding-top:14px;font-size:13px;color:#888888;">'
+            f"{footer_html}</div>"
+        )
+
+    return _EMAIL_WRAPPER.format(
+        preheader=pre, font=FONT_STACK, content=content_html, footer=footer
     )
 
 
@@ -563,11 +627,19 @@ def apply_label(service, message_id: str, label_id: str) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description="Newsletter sender / drafter.")
     p.add_argument("--mode", choices=["draft", "send"], default="draft")
-    p.add_argument("--subject", help="Override subject (else parsed from --body-md frontmatter)")
+    p.add_argument(
+        "--subject", help="Override subject (else parsed from --body-md frontmatter)"
+    )
+    p.add_argument(
+        "--preheader",
+        help="Hidden preview line (max 90 chars, convention section 3)",
+    )
     p.add_argument("--body-md", required=True, type=Path)
     p.add_argument("--campaign", required=True)
     p.add_argument("--label")
-    p.add_argument("--to", action="append", default=[], help="Explicit recipient (repeatable)")
+    p.add_argument(
+        "--to", action="append", default=[], help="Explicit recipient (repeatable)"
+    )
     p.add_argument(
         "--recipients-from-sheet",
         action="store_true",
@@ -603,9 +675,9 @@ def main() -> None:
             "contains TEXT (case-insensitive substring match) AND whose status "
             "is in --exclude-buyers-status. Use this to avoid pitching a SKU "
             "to someone who already bought it. Example for the two-Bahia-bars "
-            "campaign: --exclude-buyers-of-substring \"Oscar Fazenda, Brazil "
-            "2024\" --exclude-buyers-of-substring \"Santa Anna Fazenda, Brazil "
-            "2023\"."
+            'campaign: --exclude-buyers-of-substring "Oscar Fazenda, Brazil '
+            '2024" --exclude-buyers-of-substring "Santa Anna Fazenda, Brazil '
+            '2023".'
         ),
     )
     p.add_argument(
@@ -653,7 +725,9 @@ def main() -> None:
     gsvc = build("gmail", "v1", credentials=gcreds, cache_discovery=False)
     me = gmail_profile_email(gsvc)
     if me != args.expected_mailbox.strip().lower():
-        sys.stderr.write(f"Gmail profile is {me!r}, expected {args.expected_mailbox!r}\n")
+        sys.stderr.write(
+            f"Gmail profile is {me!r}, expected {args.expected_mailbox!r}\n"
+        )
         sys.exit(1)
 
     sa = get_sheets_client()
@@ -682,7 +756,9 @@ def main() -> None:
     matched_qr_rows = 0
     if args.exclude_buyers_of_substring:
         buyer_emails, matched_qr_rows = load_qr_buyer_emails(
-            ledger_sh, args.exclude_buyers_of_substring, buyer_statuses,
+            ledger_sh,
+            args.exclude_buyers_of_substring,
+            buyer_statuses,
         )
         before = len(recipients)
         recipients = [r for r in recipients if r not in buyer_emails]
@@ -772,14 +848,25 @@ def main() -> None:
             )
         else:
             html_body = markdown_to_html(rcpt_md) if needs_personalize else base_html
-        if args.track_opens:
-            html_body = html_body + build_tracking_pixel_html(
-                mid_uuid, recipient, args.edgar_base_url
-            )
+        # The open-tracking pixel lives in the footer slot, not appended to body
+        # copy, so it sits INSIDE the house-style wrapper instead of outside it.
+        footer_html = (
+            build_tracking_pixel_html(mid_uuid, recipient, args.edgar_base_url)
+            if args.track_opens
+            else ""
+        )
+        html_body = build_email_html(
+            html_body, preheader=args.preheader, footer_html=footer_html
+        )
         raw = build_mime_message(me, recipient, subject, rcpt_plain, html_body)
 
         if args.mode == "draft":
-            resp = gsvc.users().drafts().create(userId="me", body={"message": raw}).execute()
+            resp = (
+                gsvc.users()
+                .drafts()
+                .create(userId="me", body={"message": raw})
+                .execute()
+            )
             gmail_msg_id = ((resp.get("message") or {}).get("id")) or ""
             status = "draft"
             print(f"Draft created: {gmail_msg_id!r} -> {recipient}")
@@ -793,30 +880,35 @@ def main() -> None:
         if label_ids_to_apply and gmail_msg_id:
             try:
                 gsvc.users().messages().modify(
-                    userId="me", id=gmail_msg_id,
+                    userId="me",
+                    id=gmail_msg_id,
                     body={"addLabelIds": label_ids_to_apply},
                 ).execute()
             except Exception as e:
-                sys.stderr.write(f"Warning: label apply failed for {gmail_msg_id}: {e}\n")
+                sys.stderr.write(
+                    f"Warning: label apply failed for {gmail_msg_id}: {e}\n"
+                )
 
-        log_rows.append([
-            mid_uuid,
-            gmail_msg_id,
-            args.campaign,
-            subject,
-            recipient,
-            now_iso,
-            status,
-            "FALSE",
-            "",
-            "",
-            "0",
-            "FALSE",
-            "",
-            "",
-            "0",
-            "",
-        ])
+        log_rows.append(
+            [
+                mid_uuid,
+                gmail_msg_id,
+                args.campaign,
+                subject,
+                recipient,
+                now_iso,
+                status,
+                "FALSE",
+                "",
+                "",
+                "0",
+                "FALSE",
+                "",
+                "",
+                "0",
+                "",
+            ]
+        )
         n_done += 1
 
     if log_rows:
