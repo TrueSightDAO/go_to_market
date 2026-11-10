@@ -125,3 +125,133 @@ def test_unsupported_markdown_passes_through_literally():
     assert "<blockquote" not in html
     assert "## Shipping" in html
     assert "&gt;" not in html and "> quoted" in html
+
+
+# ------------------------------------------------- house-style wrapper (s.3/8)
+
+
+def wrap(content="<p>copy</p>", **kw):
+    return sn.build_email_html(content, **kw)
+
+
+def test_wrapper_has_every_ship_checklist_item():
+    html = wrap(footer_html="<div>Agroverse</div>")
+    required = {
+        "doctype": "<!DOCTYPE html>",
+        "body bgcolor": 'bgcolor="#FFFFFF"',
+        "outer table 100%": 'width="100%"',
+        "600px ceiling": "max-width:600px",
+        "saffron 3px rule": "border-top:3px solid #C98A2D",
+        "font stack": "'Helvetica Neue',Helvetica,Arial,sans-serif",
+        "16px body": "font-size:16px",
+        "1.6 line-height": "line-height:1.6",
+        "body text #222": "#222222",
+        "footer rule #DDDDDD": "1px solid #DDDDDD",
+        "footer gray #888": "#888888",
+    }
+    for label, needle in required.items():
+        assert needle in html, f"missing {label}"
+
+
+def test_wrapper_uses_no_stylesheet():
+    """Clients strip <head> CSS, so any <style> block would silently do nothing."""
+    html = wrap()
+    assert "<style" not in html
+    assert "stylesheet" not in html
+
+
+def test_wrapper_tables_are_balanced():
+    html = wrap(footer_html="<div>x</div>")
+    assert html.count("<table") == html.count("</table>")
+    assert html.count("<tr>") == html.count("</tr>")
+
+
+def test_preheader_is_hidden_and_precedes_content():
+    html = wrap(preheader="Eleven days from Ilheus")
+    assert "display:none;max-height:0" in html
+    # must be the first element inside <body>, before the wrapper table
+    assert html.index("Eleven days from Ilheus") < html.index("<table")
+
+
+def test_preheader_absent_adds_nothing():
+    assert "display:none;max-height:0" not in wrap(preheader=None)
+    assert "display:none;max-height:0" not in wrap(preheader="   ")
+
+
+def test_over_long_preheader_is_truncated_to_convention_limit():
+    html = wrap(preheader="x" * 200)
+    assert "x" * sn.PREHEADER_MAX in html
+    assert "x" * (sn.PREHEADER_MAX + 1) not in html
+
+
+def test_footer_sits_inside_the_wrapper_table():
+    html = wrap(footer_html="<div>Agroverse</div>")
+    assert "<div>Agroverse</div>" in html
+    # footer must close before the closing tables, i.e. it is inside the shell
+    assert html.index("Agroverse") < html.rindex("</table>")
+
+
+def test_content_is_not_altered_by_wrapping():
+    content = "<p>a</p><ul><li>b</li></ul><code>x</code>"
+    html = wrap(content)
+    assert content in html
+
+
+def test_wrapper_preserves_the_markdown_fixes_end_to_end():
+    """The two shipped bug fixes must survive wrapping, not just unit-render."""
+    html = wrap(sn.markdown_to_html("see `CP` then\n- one\n- two"))
+    assert "`" not in html
+    assert "<code" in html
+    assert html.count("<li") == 2
+
+
+def test_wrapper_keeps_real_tracking_pixel_inside_shell():
+    footer = sn.build_tracking_pixel_html("mid-1", "a@b.test", "https://e.test")
+    html = wrap(footer_html=footer)
+    assert "open.gif" in html
+    assert html.index("open.gif") < html.rindex("</table>")
+
+
+# --------------------------------- text/plain path (plain_body = markdown_to_plain(body_md))
+
+
+def test_plain_part_strips_backticks_from_raw_markdown():
+    """plain_body is built from RAW markdown, not from HTML.
+
+    Fixing only markdown_to_html left literal backticks in the text/plain MIME
+    part — invisible in the HTML preview, visible to plain-text readers and
+    spam heuristics.
+    """
+    plain = sn.markdown_to_plain("entry type of `Mail - Commercial` here")
+    assert "`" not in plain
+    assert "Mail - Commercial" in plain
+
+
+def test_plain_part_strips_code_tags_from_html_input():
+    plain = sn.markdown_to_plain("<p>see <code>CP</code> now</p>")
+    assert "`" not in plain
+    assert "<code" not in plain
+    assert "CP" in plain
+
+
+def test_plain_part_list_handling_diverges_from_html_by_design():
+    """The raw-markdown and HTML paths legitimately disagree about bullets.
+
+    `- ` is how a bullet is *rendered* in text/plain, so the raw path keeps the
+    dash; the HTML path emits a real <ul>/<li>, so markdown_to_plain only has to
+    drop the tags. Asserted here as intended behaviour, not as a bug to fix:
+    collapsing both to bare words would make the plain part unreadable.
+    """
+    from_raw = sn.markdown_to_plain("- alpha\n- beta\n- gamma")
+    assert from_raw.count("- ") == 3
+
+    lines = [ln.strip() for ln in from_raw.splitlines() if ln.strip()]
+    assert lines == ["- alpha", "- beta", "- gamma"]
+
+    from_html = sn.markdown_to_plain(sn.markdown_to_html("- alpha\n- beta\n- gamma"))
+    assert "<li" not in from_html
+    assert [ln.strip() for ln in from_html.splitlines() if ln.strip()] == [
+        "alpha",
+        "beta",
+        "gamma",
+    ]
