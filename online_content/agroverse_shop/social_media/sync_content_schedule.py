@@ -170,6 +170,53 @@ class ContentScheduleSyncer:
             print(f"⚠️  Warning: Could not retrieve existing status values: {e}")
             return {}
     
+    # Canonical status vocabulary, mirroring Configuration!A9:A13 of the content
+    # workbook. Held in code so a sync never depends on a human having re-created
+    # the dropdown by hand.
+    STATUS_OPTIONS = ["PLANNED", "CRAFTING", "SCHEDULED", "PUBLISHED"]
+
+    def apply_status_validation(self, worksheet, row_count):
+        """Re-apply the Status dropdown to B2:B<last written row>.
+
+        worksheet.clear() removes ALL data validation from the tab, so the
+        dropdown must be re-created after every write. Earlier revisions of this
+        script claimed the opposite -- a comment said it was "completely
+        preserved" and a log line invited the reader to verify -- yet the live
+        Instagram Content Schedule tab measured 0 validated cells on 2026-11-11.
+        The dropdown had therefore been absent indefinitely.
+        """
+        try:
+            last = max(int(row_count) - 1, 1)
+            self.spreadsheet.batch_update({
+                "requests": [{
+                    "setDataValidation": {
+                        "range": {
+                            "sheetId": worksheet.id,
+                            "startRowIndex": 1,
+                            "endRowIndex": last + 1,
+                            "startColumnIndex": 1,
+                            "endColumnIndex": 2,
+                        },
+                        "rule": {
+                            "condition": {
+                                "type": "ONE_OF_LIST",
+                                "values": [
+                                    {"userEnteredValue": v}
+                                    for v in self.STATUS_OPTIONS
+                                ],
+                            },
+                            "showCustomUi": True,
+                            "strict": False,
+                        },
+                    }
+                }]
+            })
+            print(f"Re-applied Status validation to B2:B{last + 1}")
+        except Exception as e:
+            # Never fail the whole sync over a formatting rule: the row write has
+            # already succeeded by this point.
+            print(f"Warning: could not re-apply Status validation: {e}")
+
     def sync_to_sheets(self, data, df):
         """Sync data to Google Sheets while preserving existing status values"""
         try:
@@ -231,14 +278,17 @@ class ContentScheduleSyncer:
             # Update with new data (preserving data validation on Status column)
             print("📝 Writing new data...")
             
-            # Use a more targeted approach to preserve data validation
-            # First, clear the sheet completely
+            # NOTE: clear() drops every data validation rule on this tab, so the
+            # Status dropdown is re-applied immediately after the write below.
             worksheet.clear()
             
             # Update all data
             worksheet.update('A1', cleaned_data)
+
+            # Re-create the Status dropdown that clear() just removed.
+            self.apply_status_validation(worksheet, row_count=len(cleaned_data))
             
-            print("📌 Data updated - data validation rules may need to be recreated if lost")
+            print("📌 Data written (Status dropdown re-applied below)")
             
             # Format header cells (excluding Status column B to preserve data validation)
             # Format Column A (primary_key) and Column C onwards, but skip Column B (status)
@@ -256,7 +306,8 @@ class ContentScheduleSyncer:
                         'textFormat': {'bold': True, 'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}}
                     })
             
-            # Note: Status column (B) formatting and data validation are completely preserved
+            # Note: Status column (B) data validation is re-applied above, because
+            # worksheet.clear() removes it. It is NOT preserved by the write.
             
             # Note: Column widths are preserved to maintain user's formatting preferences
             
