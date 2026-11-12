@@ -54,7 +54,7 @@ TABS = {
     "truesight": {
         "tab": "TrueSight Blog Content Schedule",
         "index_url": "https://truesight.me/blog/",
-        "post_url_fmt": "https://truesight.me/{href}",
+        "post_url_fmt": "https://truesight.me/posts/{slug}.html",
     },
 }
 
@@ -122,7 +122,7 @@ def live_titles(cfg: dict) -> list[dict]:
             {
                 "date": datetime.strptime(dm.group(0), "%B %d, %Y").date(),
                 "title": re.sub(r"<[^>]+>", "", tm.group(1)).strip(),
-                "url": cfg["post_url_fmt"].format(href=hm.group(1)) if hm else "",
+                "url": f"https://truesight.me/{hm.group(1)}" if hm else "",
             }
         )
     return out
@@ -175,6 +175,13 @@ def reconcile(cfg: dict, apply: bool) -> dict:
         if not title:
             continue
         sg = slugify(title)
+        # Skip rows already correctly stamped -> a re-run is a true no-op.
+        if (
+            sg in slugs
+            and r[st].strip().upper() == "PUBLISHED"
+            and r[lu].strip()
+        ):
+            continue
         if sg in slugs:
             data.append({"range": f"'{tab}'!{col_letter(st)}{i + 2}", "values": [["PUBLISHED"]]})
             data.append(
@@ -184,6 +191,8 @@ def reconcile(cfg: dict, apply: bool) -> dict:
                 }
             )
             pub += 1
+        elif r[st].strip().upper() == "NOT PUBLISHED":
+            continue
         elif not r[st].strip():
             # Only assert NOT PUBLISHED where the sheet was blank. Never overwrite
             # a status a human set (e.g. SCHEDULED for a future post).
