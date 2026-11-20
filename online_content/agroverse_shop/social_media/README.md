@@ -152,12 +152,60 @@ Primary keys are automatically generated using: `Post Day + Post Type + Theme`
 
 **Spreadsheet ID:** `1ghZXeMqFq97Vl6yLKrtDmMQdQkd-4EN5yQs34NA_sBQ`
 
-**Key Worksheets:**
-- **Content schedule** - Main Instagram content schedule
-- **Hashtag suggestions** - Hashtag database
-- **Feedback on Content** - Community feedback submissions
+**Key Worksheets (as of 2026-11-20 — tab names are exact, verified against the live sheet, not assumed):**
+- **Instagram Content Schedule** — Agroverse, USA/Europe, English. **This file (README.md)
+  documents this tab's schema and scripts only.**
+- **F5 Content Schedule** — F5, China, Chinese. Separate tab, created 2026-11-20 — see
+  *F5 content (separate brand, separate tab)* below. **Do not mix F5 rows into the Instagram
+  tab, or vice versa** — they are different brands, markets, and languages (see
+  `agentic_ai_context/MEDIA_ARCHIVE_PIPELINE.md` § *Market split — Agroverse vs F5*).
+- **Agroverse Blog Content Schedule**, **TrueSight Blog Content Schedule** — brand-prefixed
+  the same way; follow that existing convention when scoping any future tab to a brand.
+- **Linkedin Content Schedule**, **Email Newsletter** — other Agroverse-brand platforms.
+- **Hashtag suggestions** — hashtag database (Agroverse/English; no Chinese equivalent exists
+  yet — see gap note below).
+- **Feedback on Content** — community feedback submissions.
+- **Configuration**, **Sample target profiles**, **Published Content Index** — supporting tabs,
+  not platform schedules.
 
 **Service Account:** Configured in `google_credentials.json`
+
+### F5 content (separate brand, separate tab)
+
+**Why a separate tab, not a `Platform` or `Brand` column on the existing Instagram tab:** the
+sheet's own established convention is one tab per platform/brand pairing (see the blog tabs
+above, already split by brand). A shared tab with a brand column would be the one inconsistent
+exception in an otherwise uniform sheet, and every script/SOP that reads "Instagram Content
+Schedule" by name and assumes English/Agroverse content would need a filter it doesn't have
+today. A separate tab needs zero changes to existing scripts.
+
+**`F5 Content Schedule` header** (created 2026-11-20, same core shape as the Instagram tab plus
+one addition):
+
+```
+primary_key | status | Platform | Week | Date Range | Theme Focus | Post Day | Day of Week |
+Post Type | Theme | Description | Caption (Chinese) | Hashtags (Chinese) | CTA | Tool Suggestions
+```
+
+- **`Platform`** (new column, not on the Instagram tab) — `XiaoHongShu` or `BiliBili`. F5
+  publishes to both from one tab, unlike Agroverse's one-tab-per-platform pattern, because this
+  is a new, lower-volume content line — split into two tabs later if volume justifies it.
+- **`Caption (Chinese)` / `Hashtags (Chinese)`** — content fields are Chinese-language text;
+  column *headers* stay in English/ASCII for tooling/LLM readability, matching how every other
+  tab in this sheet is structured (field names in English, content in the tab's target
+  language).
+- **Primary key** — same scheme as Instagram (`Post Day + Post Type + Theme`), but keys are
+  **per-tab**, not global — an Agroverse and an F5 post landing on the same date with a
+  coincidentally similar theme will not collide, because they live in different tabs with
+  independent key spaces.
+- **No sync script exists yet** for this tab — `sync_content_schedule.py` only targets
+  Instagram. Until an `sync_f5_content_schedule.py` equivalent exists, write rows directly via
+  the Sheets API (`gspread`), matching the header exactly, and preserve `status` values by hand
+  the same way the sync script does automatically for Instagram (see *Status Preservation
+  System* above — the same discipline applies, just without the script yet).
+- **Known gap:** no Chinese hashtag database exists yet (the `Hashtag suggestions` tab is
+  English-only). Until one exists, hashtags for F5 posts should be sourced per-post against
+  current XiaoHongShu/BiliBili convention, not assumed from the English list.
 
 ## 🔧 Key Scripts
 
