@@ -1,130 +1,115 @@
-name: Sync Content to Google Sheets
+# ⛔ DESTRUCTIVE — CSV → Google Sheets repopulation for the content workbook
+#
+# See KAN-120 and agentic_ai_context/CONTENT_MARKETING_SCHEDULE.md §1a.
+#
+# WHAT THIS USED TO DO (and why it is disabled):
+#   On any push touching the CSVs, this workflow ran sync_content_schedule.py and
+#   sync_hashtags.py, which call worksheet.clear() and rewrite the tab from the CSV.
+#
+#   - sync_content_schedule.py preserved ONLY column B (status), matched by primary_key
+#   - sync_hashtags.py preserved NOTHING (full wipe of 476 rows)
+#
+# MEASURED 2026-11-27, immediately before disabling:
+#   - 44 sheet rows existed that were absent from the CSV -> would have been DELETED,
+#     and all 44 of them carried a status
+#   - 45 of 245 rows had a stored primary_key that no longer equalled
+#     md5(Post Day + Post Type) -> status lookup fails -> status silently blanked
+#
+# THE SHEET IS NOW THE SOURCE OF TRUTH. Edit it directly. Do not reintroduce a
+# push-triggered sync. If a machine-readable view is ever needed it must be a
+# ONE-WAY Sheet -> JSON publisher, never a write-back.
+
+name: "[DISABLED] Sync Content to Google Sheets (destructive - KAN-120)"
 
 on:
-  push:
-    branches: [ main, master ]
-    paths:
-      - 'agroverse_schedule_till_easter.csv'
-      - 'instagram_hashtags.csv'
-      - 'sync_content_schedule.py'
-      - 'sync_hashtags.py'
-  pull_request:
-    branches: [ main, master ]
-    paths:
-      - 'agroverse_schedule_till_easter.csv'
-      - 'instagram_hashtags.csv'
-      - 'sync_content_schedule.py'
-      - 'sync_hashtags.py'
-  workflow_dispatch:  # Allow manual triggering
+  # All push / pull_request triggers removed by KAN-120. CSV edits no longer sync anything.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (show what WOULD change, write nothing)"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      confirm:
+        description: "Type EXACTLY 'I-WIPE-THE-SHEET' to permit a real write"
+        required: true
+        default: ""
+        type: string
+      target:
+        description: "Which sync to run"
+        required: true
+        default: "none"
+        type: choice
+        options:
+          - "none"
+          - "content-schedule"
+          - "hashtags"
 
 jobs:
-  sync-content-schedule:
-    name: Sync Content Schedule
+  guard:
+    name: Guard - refuse unless explicitly confirmed
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.modified, 'agroverse_schedule_till_easter.csv') || contains(github.event.head_commit.modified, 'sync_content_schedule.py')
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-          
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Create Google credentials file
-      run: |
-        echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > google_credentials.json
-        
-    - name: Run Content Schedule Sync
-      run: |
-        python sync_content_schedule.py
-        
-    - name: Upload sync logs
-      uses: actions/upload-artifact@v3
-      if: always()
-      with:
-        name: content-schedule-sync-logs
-        path: |
-          *.log
-        retention-days: 7
+      - name: Refuse unsafe invocation
+        run: |
+          echo "dry_run = '${{ inputs.dry_run }}'"
+          echo "target  = '${{ inputs.target }}'"
+          if [ "${{ inputs.target }}" = "none" ]; then
+            echo "::error::target=none - nothing to do. The sheet is the source of truth; edit it directly."
+            exit 1
+          fi
+          if [ "${{ inputs.dry_run }}" != "true" ] && [ "${{ inputs.confirm }}" != "I-WIPE-THE-SHEET" ]; then
+            echo "::error::Real write requested without the confirmation string. Refusing."
+            echo "::error::This job DESTROYS hand-edited sheet data. See KAN-120."
+            exit 1
+          fi
+          echo "Guard passed."
+
+  sync-content-schedule:
+    name: Content Schedule Sync
+    runs-on: ubuntu-latest
+    needs: [guard]
+    if: inputs.target == 'content-schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Write credentials
+        if: inputs.dry_run != 'true'
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > google_credentials.json
+      - name: Run Content Schedule Sync
+        run: |
+          echo "::warning::KAN-120 - this overwrites the 'Instagram Content Schedule' tab from CSV."
+          echo "::warning::It preserves only column B, and deletes rows absent from the CSV."
+          python sync_content_schedule.py
 
   sync-hashtags:
-    name: Sync Hashtags
+    name: Hashtags Sync
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.modified, 'instagram_hashtags.csv') || contains(github.event.head_commit.modified, 'sync_hashtags.py')
-    
+    needs: [guard]
+    if: inputs.target == 'hashtags'
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-          
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Create Google credentials file
-      run: |
-        echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > google_credentials.json
-        
-    - name: Run Hashtags Sync
-      run: |
-        python sync_hashtags.py
-        
-    - name: Upload sync logs
-      uses: actions/upload-artifact@v3
-      if: always()
-      with:
-        name: hashtags-sync-logs
-        path: |
-          *.log
-        retention-days: 7
-
-  notify-completion:
-    name: Notify Sync Completion
-    runs-on: ubuntu-latest
-    needs: [sync-content-schedule, sync-hashtags]
-    if: always()
-    
-    steps:
-    - name: Check job results
-      run: |
-        echo "Content Schedule Sync: ${{ needs.sync-content-schedule.result }}"
-        echo "Hashtags Sync: ${{ needs.sync-hashtags.result }}"
-        
-        if [ "${{ needs.sync-content-schedule.result }}" = "success" ] || [ "${{ needs.sync-hashtags.result }}" = "success" ]; then
-          echo "✅ At least one sync completed successfully"
-          exit 0
-        elif [ "${{ needs.sync-content-schedule.result }}" = "skipped" ] && [ "${{ needs.sync-hashtags.result }}" = "skipped" ]; then
-          echo "ℹ️  All syncs were skipped (no relevant files changed)"
-          exit 0
-        else
-          echo "❌ All syncs failed"
-          exit 1
-        fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Write credentials
+        if: inputs.dry_run != 'true'
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > google_credentials.json
+      - name: Run Hashtags Sync
+        run: |
+          echo "::warning::KAN-120 - this CLEARS the entire 'Hashtag suggestions' tab and rewrites it from CSV."
+          echo "::warning::It preserves nothing. 476 rows are at risk."
+          python sync_hashtags.py
