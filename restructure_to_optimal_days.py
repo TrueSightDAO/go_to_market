@@ -247,7 +247,7 @@ def restructure_schedule():
     
     print(f'\n📝 Next steps:')
     print(f'   1. Review {OUTPUT_FILE} for accuracy')
-    print(f'   2. Run: python sync_content_schedule.py')
+    print(f'   2. CSV only - the Sheet is the source of truth (KAN-120); edit it directly')
     print(f'   3. Backup available at: {BACKUP_FILE}')
     
     return True

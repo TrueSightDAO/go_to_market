@@ -324,7 +324,8 @@ class FeedbackProcessor:
             print("🎉 Feedback processing completed successfully!")
             print(f"📊 Processed {len(insights)} feedback insights")
             print("🔄 Next steps:")
-            print("  1. Run: python sync_content_schedule.py (to sync content updates)")
+            # KAN-120: sync_content_schedule.py was DELETED (destructive CSV->Sheets
+            # repopulation retired). The Google Sheet is the source of truth - edit it directly.
             print("  2. Run: python sync_feedback.py upload (to update feedback status)")
         else:
             print("=" * 60)
