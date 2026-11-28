@@ -91,6 +91,40 @@ def _gas_cell_str(val: object) -> str:
     return str(val).strip()
 
 
+def _price_usd_str(val: object) -> str:
+    """Coerce a **Price (USD)** cell into the bare numeric string the dapp needs.
+
+    ``_gas_cell_str`` mirrors GAS faithfully, which means it also faithfully passes
+    through a *currency-formatted* cell. If someone types ``$30.00`` into the sheet,
+    Sheets stores the string ``"$30.00"`` rather than the number 30, so
+    ``UNFORMATTED_VALUE`` returns that string and ``skus.json`` ships
+    ``"priceUsd": "$30.00"``. The dapp drops ``priceUsd`` straight into
+    ``<input type="number">``, which renders **blank** for a non-numeric value -- so
+    that product silently loses its price input.
+
+    Strip the currency formatting and emit only a bare number. Anything still
+    unparseable becomes ``""`` (absent), which the dapp already renders as "no price
+    defined"; visibly missing beats silently malformed. A warning names the offending
+    value so the sheet-side typo is findable. See OPEN_FOLLOWUPS.md / KAN-113.
+    """
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        # Numeric cell: keep _gas_cell_str's existing 0 -> '' behaviour.
+        return _gas_cell_str(val)
+    text = str(val if val is not None else "").strip()
+    if not text:
+        return ""
+    cleaned = text.replace("$", "").replace(",", "").replace("\u00a0", "").strip()
+    try:
+        number = float(cleaned)
+    except ValueError:
+        print(
+            f"  [warn] priceUsd cell {text!r} is not numeric - publishing as empty "
+            f"so the dapp shows 'no price' rather than a blank input"
+        )
+        return ""
+    return _gas_cell_str(int(number) if number == int(number) else number)
+
+
 def _gas_parse_float(val: object) -> float | int | None:
     """Mirror GAS `parseFloat(cell)` on an UNFORMATTED cell: numeric or None. Whole
     numbers are emitted as int, matching JS JSON serialization (so 8, not 8.0)."""
@@ -390,7 +424,7 @@ def read_sku_metadata(sh: gspread.Spreadsheet) -> dict[str, dict[str, str]]:
         out[pid] = {
             "productId": pid,
             "productName": row[name_idx].strip() if len(row) > name_idx and row[name_idx] else "",
-            "priceUsd": row[price_idx].strip() if len(row) > price_idx and row[price_idx] else "",
+            "priceUsd": _price_usd_str(row[price_idx]) if len(row) > price_idx else "",
             "category": row[category_idx].strip() if len(row) > category_idx and row[category_idx] else "",
             "shipment": row[shipment_idx].strip() if len(row) > shipment_idx and row[shipment_idx] else "",
             "farm": row[farm_idx].strip() if len(row) > farm_idx and row[farm_idx] else "",
@@ -526,7 +560,7 @@ def read_sku_catalog(sh: gspread.Spreadsheet) -> list[dict[str, object]]:
                 {
                     "productId": product_id,
                     "productName": _gas_cell_str(cell(1)),
-                    "priceUsd": _gas_cell_str(cell(2)),
+                    "priceUsd": _price_usd_str(cell(2)),
                     "weightOz": _gas_parse_float(cell(3)),
                     "category": _gas_cell_str(cell(4)),
                     "shipment": _gas_cell_str(cell(5)),
