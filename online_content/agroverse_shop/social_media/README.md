@@ -7,8 +7,6 @@ Complete guide for managing Instagram content scheduling, hashtag strategy, and 
 ```
 online_content/agroverse_shop/social_media/
 ├── README.md                          # This file (consolidated documentation)
-├── sync_content_schedule.py           # ⛔ DEPRECATED (KAN-120) — destructive; do not run
-├── sync_hashtags.py                   # ⛔ DEPRECATED (KAN-120) — destructive; do not run
 ├── schedule_post.py                   # Schedule individual posts
 ├── process_feedback.py                # Process community feedback with AI
 ├── sync_feedback.py                   # Sync feedback to/from Google Sheets
@@ -218,7 +216,8 @@ Post Type | Theme | Description | Caption (Chinese) | Hashtags (Chinese) | CTA |
   an Agroverse and an F5 post on the same day never collide with each other. **This does not
   protect against two F5 posts on the same day with the same Post Type** — the formula has no
   `Theme` component, so check the tab by hand before inserting (same caveat as Instagram's).
-- **No sync script exists yet** for this tab — `sync_content_schedule.py` only targets
+- **No sync script exists, and none is wanted** (KAN-120 retired write-back syncs). The old
+  `sync_content_schedule.py` targeted
   Instagram. Until an `sync_f5_content_schedule.py` equivalent exists, write rows directly via
   the Sheets API (`gspread`), matching the header exactly, and preserve `status` values by hand
   the same way the sync script does automatically for Instagram (see *Status Preservation
@@ -229,7 +228,7 @@ Post Type | Theme | Description | Caption (Chinese) | Hashtags (Chinese) | CTA |
 
 ## 🔧 Key Scripts
 
-### ⛔ `sync_content_schedule.py` — DEPRECATED, DO NOT RUN (KAN-120)
+### ✅ DELETED under KAN-120 — `sync_content_schedule.py`
 
 > **Retired 2026-11-28.** The Google Sheet is now the **source of truth** — edit it directly.
 > See `agentic_ai_context/CONTENT_MARKETING_SCHEDULE.md` §1a and [KAN-120](https://truesightdao.atlassian.net/browse/KAN-120).
@@ -250,7 +249,7 @@ This script is **destructive**. It calls `worksheet.clear()` — wiping the enti
 - **44** sheet rows existed that were missing from the CSV → all 44 would have been deleted, and **all 44 carried a status**
 - **45 of 245** rows had a `primary_key` no longer equal to `md5(Post Day + Post Type)` → status lookup fails → status silently blanked
 
-### ⛔ `sync_hashtags.py` — DEPRECATED, DO NOT RUN (KAN-120)
+### ✅ DELETED under KAN-120 — `sync_hashtags.py`
 
 Worse than the above: it calls `worksheet.clear()` on `Hashtag suggestions` and preserves
 **nothing**. A full wipe of all 476 rows on any push that touched `instagram_hashtags.csv`.
@@ -365,7 +364,7 @@ python3 process_feedback.py
 
 ### Step 4: Sync Updates
 ```bash
-python3 sync_content_schedule.py    # Sync content improvements
+# (no CSV->Sheets sync — scripts deleted under KAN-120; edit the Sheet directly)
 python3 sync_feedback.py upload     # Update feedback status
 ```
 

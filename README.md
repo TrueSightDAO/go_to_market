@@ -35,8 +35,8 @@ market_research/
     ├── agroverse_shop/
     │   ├── social_media/              # Instagram content management
     │   │   ├── README.md              # Complete social media guide
-    │   │   ├── sync_content_schedule.py
-    │   │   ├── sync_hashtags.py
+    │   │   ├── README.md              # social media guide (sync scripts deleted, KAN-120)
+    │   │   ├── schedule_post.py
     │   │   └── [See online_content/agroverse_shop/social_media/README.md]
     │   │
     │   └── blog_post/                 # Blog content management
@@ -186,9 +186,8 @@ cd online_content/truesight_dao/blog_post
 cd physical_stores
 python3 pull_hit_list.py
 
-# ⛔ DO NOT RUN (KAN-120) — sync_content_schedule.py is DEPRECATED
-# It wipes the "Instagram Content Schedule" tab and rewrites it from CSV,
-# preserving only column B. The Google Sheet is now the source of truth:
+# ✅ KAN-120 (closed): the destructive sync scripts were DELETED, not just disabled.
+# The Google Sheet is the source of truth for "Instagram Content Schedule":
 # edit it directly. See agentic_ai_context/CONTENT_MARKETING_SCHEDULE.md §1a.
 ```
 
@@ -200,9 +199,9 @@ python3 process_dapp_remarks.py
 
 ### Sync Content Schedules
 ```bash
-# Instagram — ⛔ DEPRECATED (KAN-120): do NOT run sync_content_schedule.py.
+# Instagram — ✅ KAN-120 (closed): sync_content_schedule.py has been DELETED.
 # Edit the "Instagram Content Schedule" Google Sheet directly instead.
-# The sheet is the source of truth; running the old sync DELETES rows.
+# The sheet is the source of truth; there is no CSV->Sheets sync any more.
 
 # Blog
 cd online_content/agroverse_shop/blog_post
