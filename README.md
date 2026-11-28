@@ -186,9 +186,10 @@ cd online_content/truesight_dao/blog_post
 cd physical_stores
 python3 pull_hit_list.py
 
-# Social media (if needed)
-cd online_content/agroverse_shop/social_media
-python3 sync_content_schedule.py  # This syncs TO sheets, not FROM
+# ⛔ DO NOT RUN (KAN-120) — sync_content_schedule.py is DEPRECATED
+# It wipes the "Instagram Content Schedule" tab and rewrites it from CSV,
+# preserving only column B. The Google Sheet is now the source of truth:
+# edit it directly. See agentic_ai_context/CONTENT_MARKETING_SCHEDULE.md §1a.
 ```
 
 ### Process DApp Remarks
@@ -199,9 +200,9 @@ python3 process_dapp_remarks.py
 
 ### Sync Content Schedules
 ```bash
-# Instagram
-cd online_content/agroverse_shop/social_media
-python3 sync_content_schedule.py
+# Instagram — ⛔ DEPRECATED (KAN-120): do NOT run sync_content_schedule.py.
+# Edit the "Instagram Content Schedule" Google Sheet directly instead.
+# The sheet is the source of truth; running the old sync DELETES rows.
 
 # Blog
 cd online_content/agroverse_shop/blog_post
