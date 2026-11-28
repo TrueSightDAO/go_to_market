@@ -7,8 +7,8 @@ Complete guide for managing Instagram content scheduling, hashtag strategy, and 
 ```
 online_content/agroverse_shop/social_media/
 ├── README.md                          # This file (consolidated documentation)
-├── sync_content_schedule.py           # Sync Instagram schedule to Google Sheets
-├── sync_hashtags.py                   # Sync hashtags to Google Sheets
+├── sync_content_schedule.py           # ⛔ DEPRECATED (KAN-120) — destructive; do not run
+├── sync_hashtags.py                   # ⛔ DEPRECATED (KAN-120) — destructive; do not run
 ├── schedule_post.py                   # Schedule individual posts
 ├── process_feedback.py                # Process community feedback with AI
 ├── sync_feedback.py                   # Sync feedback to/from Google Sheets
@@ -229,24 +229,33 @@ Post Type | Theme | Description | Caption (Chinese) | Hashtags (Chinese) | CTA |
 
 ## 🔧 Key Scripts
 
-### `sync_content_schedule.py`
-Sync Instagram content schedule from CSV to Google Sheets:
-```bash
-python3 sync_content_schedule.py
-```
+### ⛔ `sync_content_schedule.py` — DEPRECATED, DO NOT RUN (KAN-120)
 
-**What it does:**
-- Reads `agroverse_schedule_till_easter_cleaned.csv`
-- Generates primary keys for new rows (if missing)
-- Retrieves existing status values from Google Sheets
-- Preserves manual status updates
-- Uploads to "Content schedule" worksheet
+> **Retired 2026-11-28.** The Google Sheet is now the **source of truth** — edit it directly.
+> See `agentic_ai_context/CONTENT_MARKETING_SCHEDULE.md` §1a and [KAN-120](https://truesightdao.atlassian.net/browse/KAN-120).
 
-### `sync_hashtags.py`
-Sync hashtag database to Google Sheets:
-```bash
-python3 sync_hashtags.py
-```
+This script is **destructive**. It calls `worksheet.clear()` — wiping the entire
+`Instagram Content Schedule` tab — then rewrites every row from
+`agroverse_schedule_till_easter_cleaned.csv`.
+
+**The old description of this script was wrong in three ways:**
+
+| It claimed | What it actually does |
+|---|---|
+| "Generates primary keys for new rows (if missing)" | Regenerates **every** key as `md5(Post Day + Post Type)` on every run. Editing either field changes a row's identity. |
+| "Retrieves existing status values… preserves manual status updates" | Preserves `status` **only**, and only for rows that survive. Rows absent from the CSV are **deleted**, status and all. |
+| "Uploads to 'Content schedule' worksheet" | It's `Instagram Content Schedule`, and it **clears it first**. |
+
+**Measured damage on 2026-11-27** (the reason this was disabled):
+- **44** sheet rows existed that were missing from the CSV → all 44 would have been deleted, and **all 44 carried a status**
+- **45 of 245** rows had a `primary_key` no longer equal to `md5(Post Day + Post Type)` → status lookup fails → status silently blanked
+
+### ⛔ `sync_hashtags.py` — DEPRECATED, DO NOT RUN (KAN-120)
+
+Worse than the above: it calls `worksheet.clear()` on `Hashtag suggestions` and preserves
+**nothing**. A full wipe of all 476 rows on any push that touched `instagram_hashtags.csv`.
+
+Edit the `Hashtag suggestions` tab in Google Sheets directly.
 
 ### `process_feedback.py`
 Process community feedback with AI assistance:
